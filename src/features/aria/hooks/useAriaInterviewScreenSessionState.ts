@@ -117,6 +117,7 @@ export function useAriaInterviewScreenSessionState(
         s3RepairProbeDeliveredRef: scenario.s3RepairProbeDeliveredRef,
         turnAudioIndexRef: scenario.turnAudioIndexRef,
         lastUserTurnAudioDurationMsRef: scenario.lastUserTurnAudioDurationMsRef,
+        lastUserTurnMicStopTelemetryRef: scenario.lastUserTurnMicStopTelemetryRef,
         responseTimingsRef: scenario.responseTimingsRef,
       },
       webTts,

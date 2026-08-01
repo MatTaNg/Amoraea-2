@@ -36,8 +36,8 @@ describe('personal moment emotional vocabulary removal', () => {
       disclosureCalibration: 'calibrated',
     });
 
-    expect(gate.depthSignalModifier).toBeCloseTo(0.4, 5);
-    expect(gate.modifiedWeightedScore).toBeCloseTo(6.6, 5);
+    expect(gate.depthSignalModifier).toBeCloseTo(0.3, 5);
+    expect(gate.modifiedWeightedScore).toBeCloseTo(6.5, 5);
     expect(gate.pass).toBe(true);
   });
 

@@ -16,6 +16,7 @@ import type { MessageWithScenario } from '@features/aria/interviewScenarioScorin
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
+import { shouldBypassConfusionRepeatOfferForClaude } from '@features/aria/shouldBypassLegacyMetaInjectForClaude';
 import {
   finishPreClaudeSkipInjectionTurn,
   isPreClaudeTurnSkipInjectionRouteActive,
@@ -139,6 +140,10 @@ export async function runPreClaudeConfusionOfferRepeatGate(
     metaCommentClassification?.type === 'confusion' &&
     metaCommentClassification.confusion_subtype !== 'repeat_request';
   if (!isContentConfusion) {
+    return { handled: false };
+  }
+
+  if (shouldBypassConfusionRepeatOfferForClaude(metaCommentClassification)) {
     return { handled: false };
   }
 

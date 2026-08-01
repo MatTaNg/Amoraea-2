@@ -3,6 +3,7 @@ import {
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
 } from '@features/aria/moment4ProbeLogic';
+import { moment4UserDeclinesSpecificityReask } from '@features/aria/moment4SpecificityFollowUp';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { runPreClaudeIrrelevantAnswerRetryGate } from '@features/aria/runPreClaudeIrrelevantAnswerRetryGate';
@@ -42,6 +43,27 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
       SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
     );
     expect(result).toEqual({ handled: false });
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('defers checking-in sufficiency asks to the checking-in gate (not "Can you try again?")', async () => {
+    const repairQ = SCENARIO_B_JAMES_REPAIR_CANONICAL;
+    const answer = "Wasn't that enough?";
+    const messages = [
+      { role: 'assistant' as const, content: repairQ, scenarioNumber: 2 as const },
+      { role: 'user' as const, content: answer, scenarioNumber: 2 as const },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+      lastQuestionTextRef: { current: repairQ },
+    });
+
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(deps, answer, messages, repairQ);
+
+    expect(result.handled).toBe(false);
     expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
@@ -141,7 +163,7 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
     );
   });
 
-  it('speaks inability-to-score only for "Are you an alien?" — no ack, no question repeat', async () => {
+  it('defers identity/off-topic asks to Claude when Phase 2 is enabled', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -166,22 +188,12 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
       SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      IRRELEVANT_ANSWER_RETRY_LINE,
-      expect.objectContaining({
-        skipLastQuestionRef: true,
-        allowDuplicateConsecutiveTts: true,
-      }),
-    );
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      expect.not.stringContaining(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY),
-      expect.anything(),
-    );
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
     expect(deps.lastQuestionTextRef.current).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('on repair question, still speaks inability-to-score only — no Got it, no re-ask', async () => {
+  it('defers identity ask on repair question to Claude when Phase 2 is enabled', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -207,20 +219,11 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
       SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledTimes(1);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      IRRELEVANT_ANSWER_RETRY_LINE,
-      expect.objectContaining({
-        skipLastQuestionRef: true,
-        allowDuplicateConsecutiveTts: true,
-      }),
-    );
-    const spoken = (deps.speakTextSafe as jest.Mock).mock.calls[0][0] as string;
-    expect(spoken).not.toMatch(/got it|makes sense|if you were ryan|repair this/i);
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
-  it('still handles when last assistant was the prior inability-to-score line', async () => {
+  it('defers repeated identity ask after prior inability line to Claude when Phase 2 is enabled', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -248,17 +251,11 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
       IRRELEVANT_ANSWER_RETRY_LINE,
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      IRRELEVANT_ANSWER_RETRY_LINE,
-      expect.objectContaining({
-        skipLastQuestionRef: true,
-        allowDuplicateConsecutiveTts: true,
-      }),
-    );
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
-  it('speaks again when the user repeats the same off-topic ask', async () => {
+  it('defers when the user repeats the same off-topic ask (Phase 2)', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -286,11 +283,8 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
       IRRELEVANT_ANSWER_RETRY_LINE,
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      IRRELEVANT_ANSWER_RETRY_LINE,
-      expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
-    );
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
   it('does not intercept an on-topic contempt answer', async () => {
@@ -497,6 +491,42 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
     );
   });
 
+  it('does not retry skip/advance asks on the commitment threshold (defer to skip gates)', async () => {
+    const thresholdQuestion = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+    const deps = buildDeps({
+      currentInterviewMomentRef: { current: 4 },
+      currentScenarioRef: { current: 3 },
+      lastQuestionTextRef: { current: thresholdQuestion },
+    });
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(
+      deps,
+      "What's the next one?",
+      [{ role: 'assistant', content: thresholdQuestion, scenarioNumber: 3 as const }],
+      thresholdQuestion,
+      { type: 'skip_request', confidence: 0.89 },
+    );
+    expect(result).toEqual({ handled: false });
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('does not retry specificity pushback on the commitment threshold', async () => {
+    const thresholdQuestion = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+    const deps = buildDeps({
+      currentInterviewMomentRef: { current: 4 },
+      currentScenarioRef: { current: 3 },
+      lastQuestionTextRef: { current: thresholdQuestion },
+    });
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(
+      deps,
+      'I just gave you one.',
+      [{ role: 'assistant', content: thresholdQuestion, scenarioNumber: 3 as const }],
+      thresholdQuestion,
+    );
+    expect(result).toEqual({ handled: false });
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+    expect(moment4UserDeclinesSpecificityReask('I just gave you one.')).toBe(true);
+  });
+
   it('retries incomplete threshold answers on Moment 4 before advancing to Moment 5', async () => {
     const thresholdQuestion = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
     const incomplete = 'It depends on';
@@ -581,6 +611,36 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
 
     expect(result.handled).toBe(false);
     expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('accepts mutual-commitment stay-side threshold answers from production logs', async () => {
+    const thresholdQuestion = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+    const answers = [
+      "I think it depends. I think if you're both committed to the relationship, then you should do your best to make it work.",
+      "If you're both committed to making it work and committed to growth then I think you should do whatever it takes.",
+    ];
+    for (const answer of answers) {
+      const messages = [
+        { role: 'assistant' as const, content: thresholdQuestion, scenarioNumber: 3 as const },
+        { role: 'user' as const, content: answer, scenarioNumber: 3 as const },
+      ];
+      const deps = buildDeps({
+        messages,
+        currentMessagesRef: { current: messages },
+        currentScenarioRef: { current: 3 },
+        currentInterviewMomentRef: { current: 4 },
+        lastQuestionTextRef: { current: thresholdQuestion },
+      });
+
+      const result = await runPreClaudeIrrelevantAnswerRetryGate(
+        deps,
+        answer,
+        messages,
+        thresholdQuestion,
+      );
+
+      expect(result.handled).toBe(false);
+    }
   });
 
   it('accepts short Emma affect reads on the contempt probe without retry', async () => {
@@ -835,5 +895,71 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
 
     expect(result.handled).toBe(true);
     expect(deps.speakTextSafe).toHaveBeenCalled();
+  });
+
+  it('does not retry interview-process question requests like "Give a question."', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2 as const,
+      },
+      { role: 'user' as const, content: 'Give a question.', scenarioNumber: 2 as const },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+      lastQuestionTextRef: { current: 'What do you think is going on here?' },
+    });
+
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(
+      deps,
+      'Give a question.',
+      messages,
+      'What do you think is going on here?',
+      null,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('does not retry cut-off process question asks like "Give a ques-"', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2 as const,
+      },
+      { role: 'user' as const, content: 'Give a ques-', scenarioNumber: 2 as const },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+      lastQuestionTextRef: { current: 'What do you think is going on here?' },
+      lastUserTurnMicStopTelemetryRef: {
+        current: {
+          audioDurationMs: 0,
+          wordCount: 3,
+          wordsPerSecond: 0,
+          ratioFlag: true,
+        },
+      },
+    });
+
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(
+      deps,
+      'Give a ques-',
+      messages,
+      'What do you think is going on here?',
+      null,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 });

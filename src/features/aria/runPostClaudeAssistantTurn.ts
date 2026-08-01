@@ -1,41 +1,34 @@
-import { applyPostClaudeScenarioAdvanceOverrides } from '@features/aria/applyPostClaudeScenarioAdvanceOverrides';
+import { applyPostClaudeScenarioAdvanceOverridesAsync } from '@features/aria/applyPostClaudeScenarioAdvanceOverrides';
 import { createPostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type { PostClaudeAssistantTurnDeps, PostClaudeAssistantTurnParams } from '@features/aria/postClaudeAssistantTurnTypes';
 import { runPostClaudeClosingQuestionFailsafeGates } from '@features/aria/runPostClaudeClosingQuestionFailsafeGates';
 import { runPostClaudeForcedConstructProbeGates } from '@features/aria/runPostClaudeForcedConstructProbeGates';
-import { runPostClaudeInterviewCompletePreM5Gate } from '@features/aria/runPostClaudeInterviewCompletePreM5Gate';
 import { runPostClaudeInterviewCompleteTokenGate } from '@features/aria/runPostClaudeInterviewCompleteTokenGate';
 import { runPostClaudeNaturalLanguageAssistantTurn } from '@features/aria/runPostClaudeNaturalLanguageAssistantTurn';
 import { runPostClaudeParallelStreamBootstrap } from '@features/aria/runPostClaudeParallelStreamBootstrap';
 import { runPostClaudeScenarioCompleteTokenGate } from '@features/aria/runPostClaudeScenarioCompleteTokenGate';
 import { runPostClaudeStageCompleteTokenGate } from '@features/aria/runPostClaudeStageCompleteTokenGate';
 import { sanitizePostClaudeAssistantDraftText } from '@features/aria/sanitizePostClaudeAssistantDraftText';
-
+import { runPostClaudeUnifiedDraftValidation } from '@features/aria/runPostClaudeUnifiedDraftValidation';
 export async function runPostClaudeAssistantTurn(
   deps: PostClaudeAssistantTurnDeps,
   params: PostClaudeAssistantTurnParams,
 ): Promise<void> {
-  const preM5CompleteGate = await runPostClaudeInterviewCompletePreM5Gate(
-    deps,
-    params,
-    (params.data.content?.[0]?.text ?? '').trim(),
-  );
-  let text = preM5CompleteGate.text;
-  const rawApiHadInterviewComplete = preM5CompleteGate.rawApiHadInterviewComplete;
-  deps.finalizePendingMetaAckBaselineAfterAssistantTextRef.current(text);
+  const rawApiText = (params.data.content?.[0]?.text ?? '').trim();
+  deps.finalizePendingMetaAckBaselineAfterAssistantTextRef.current(rawApiText);
   /** LLM done — do not keep "Amoraea is thinking" (or isWaiting-gated UI) until TTS finishes; HTML audio can hang without `onended` on some mobile browsers. */
   deps.setIsWaiting(false);
   const streamBootstrap = runPostClaudeParallelStreamBootstrap(deps, params);
   const parallelStreamingPlaybackUsed = streamBootstrap.parallelStreamingPlaybackUsed;
   const streamFullTrimmed = streamBootstrap.streamFullTrimmed;
   const speakAssistantTurn = createPostClaudeSpeakAssistantTurn(deps, parallelStreamingPlaybackUsed);
-  const scenarioAdvance = applyPostClaudeScenarioAdvanceOverrides(
-    text,
+  const scenarioAdvance = await applyPostClaudeScenarioAdvanceOverridesAsync(
+    rawApiText,
     params,
     deps,
     params.messagesToUse,
   );
-  text = scenarioAdvance.text;
+  let text = scenarioAdvance.text;
   let strippedText = scenarioAdvance.strippedText;
   const priorAssistantContentS3 = scenarioAdvance.priorAssistantContentS3;
   const draftSanitized = sanitizePostClaudeAssistantDraftText(
@@ -46,8 +39,8 @@ export async function runPostClaudeAssistantTurn(
     parallelStreamingPlaybackUsed,
   );
   strippedText = draftSanitized.strippedText;
-  const postSanitizeAdvance = applyPostClaudeScenarioAdvanceOverrides(
-    strippedText.trim() || text,
+  const postSanitizeAdvance = await applyPostClaudeScenarioAdvanceOverridesAsync(
+    strippedText,
     params,
     deps,
     params.messagesToUse,
@@ -66,6 +59,17 @@ export async function runPostClaudeAssistantTurn(
   const assistantIssuedScenarioBFullProbe = draftSanitized.assistantIssuedScenarioBFullProbe;
   let assistantTurnIsElongatingProbeOnly = draftSanitized.assistantTurnIsElongatingProbeOnly;
 
+  const unifiedValidation = await runPostClaudeUnifiedDraftValidation({
+    deps,
+    params,
+    rawText: rawApiText,
+    strippedText,
+    draft: draftSanitized,
+  });
+  text = unifiedValidation.text;
+  const draftValidation = unifiedValidation.validation;
+  const rawApiHadInterviewComplete = draftValidation.rawApiHadInterviewComplete;
+
   const forcedConstructProbes = await runPostClaudeForcedConstructProbeGates(
     deps,
     params,
@@ -73,6 +77,7 @@ export async function runPostClaudeAssistantTurn(
     draftSanitized,
     parallelStreamingPlaybackUsed,
     speakAssistantTurn,
+    draftValidation,
   );
   strippedText = forcedConstructProbes.strippedText;
   const needsScenarioBJamesDifferentlyInsert = forcedConstructProbes.needsScenarioBJamesDifferentlyInsert;
@@ -135,6 +140,7 @@ export async function runPostClaudeAssistantTurn(
       parallelStreamingPlaybackUsed,
       streamFullTrimmed,
       rawApiHadInterviewComplete,
+      shouldRunEmptyTranscriptFallback: draftValidation.shouldRunEmptyTranscriptFallback,
     },
     text,
     speakAssistantTurn,

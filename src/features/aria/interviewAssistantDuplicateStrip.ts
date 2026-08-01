@@ -14,13 +14,15 @@ import {
 import type { MessageWithScenario } from './interviewScenarioScoringSlice';
 import {
   isIncompleteScenarioARepairLeadSentence,
-  looksLikeScenarioARepairQuestion,
-  stripEmbeddedScenarioARepairQuestionAsk,
-} from './interviewDisengagementProbes';
-import {
   isScenarioARepairFollowUpCompleteInTranscript,
   looksLikeScenarioARepairQuestionLoose,
 } from './scenarioFollowUpTranscriptGuard';
+import {
+  isDanglingInterviewRepeatLeadFragment,
+  looksLikeScenarioARepairQuestion,
+  repairAssistantDraftAfterDanglingRepeatLead,
+  stripEmbeddedScenarioARepairQuestionAsk,
+} from './scenarioARepairQuestionHelpers';
 
 export function stripDuplicateScenarioAContemptProbeParagraphs(
   draft: string,
@@ -85,6 +87,9 @@ export function stripDuplicateScenarioARepairQuestionParagraphs(
     if (stripped !== draft.trim()) {
       if (isIncompleteScenarioARepairLeadSentence(stripped)) {
         return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+      }
+      if (isDanglingInterviewRepeatLeadFragment(stripped)) {
+        return repairAssistantDraftAfterDanglingRepeatLead(stripped);
       }
       return stripped;
     }

@@ -1,6 +1,7 @@
 import { textContainsScenarioBVignetteBody } from './emotionScenarioTransitionInference';
 import { normalizeApostrophes } from './disengagementProbeNormalize';
 import { looksLikeUnassessableScenarioAnswer } from './interviewAnswerRelevance';
+import { scenarioARepairAnswerAlreadySatisfiedInTranscript } from './interviewRepairRefusalDetection';
 import {
   stripSkipAcceptedNextQuestionBridge,
   withSkipAcceptedNextQuestionBridgePreserved,
@@ -25,6 +26,37 @@ import {
   SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 import { stripBriefInterviewAcknowledgmentPrefixForRepeat } from './interviewRepeatRequestTarget';
+
+const DANGLING_INTERVIEW_REPEAT_LEAD_RE =
+  /\b(?:of course|got it|no problem),?\s+i said\s*[—–-]\s*(?:this)?\??\s*$/i;
+
+/** Incomplete "Of course, I said — this?" tail after repair-question dedup strips the repeat body. */
+export function isDanglingInterviewRepeatLeadFragment(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (looksLikeScenarioARepairQuestion(t)) return false;
+  return DANGLING_INTERVIEW_REPEAT_LEAD_RE.test(t);
+}
+
+export function stripDanglingInterviewRepeatLeadFragment(text: string): string {
+  const t0 = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t0) return text;
+  const stripped = t0.replace(DANGLING_INTERVIEW_REPEAT_LEAD_RE, '').trim();
+  return cleanupScenarioWrapAfterRepairStrip(stripped);
+}
+
+/** After repair dedup removed the embedded ask, restore a complete redirect + canonical repair question. */
+export function repairAssistantDraftAfterDanglingRepeatLead(text: string): string {
+  if (!isDanglingInterviewRepeatLeadFragment(text)) return text;
+  const before = text;
+  const cleaned = stripDanglingInterviewRepeatLeadFragment(text).trim();
+  const repaired = !cleaned
+    ? SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY
+    : looksLikeScenarioARepairQuestion(cleaned) || /\?\s*$/.test(cleaned)
+      ? cleaned
+      : `${cleaned.replace(/[.!?…]+\s*$/, '').trim()}. ${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`.trim();
+  return repaired;
+}
 
 /** Scenario A repair-as-Ryan (canonical + paraphrases aligned with interviewerFrameworkPrompt). */
 export function looksLikeScenarioARepairQuestion(text: string): boolean {
@@ -110,6 +142,9 @@ export function normalizeScenarioARepairQuestionInAssistantDraft(draft: string):
   if (/\bthis with emma\?/i.test(t) || /\brepair this with emma\b/i.test(t)) {
     return coerceScenarioARepairQuestionForTts(t);
   }
+  if (isDanglingInterviewRepeatLeadFragment(t)) {
+    return repairAssistantDraftAfterDanglingRepeatLead(t);
+  }
   return draft;
 }
 
@@ -131,6 +166,7 @@ export function stripEmbeddedScenarioARepairQuestionAsk(draft: string): string {
   if (!t0) return draft;
   let t = t0;
   const patterns: RegExp[] = [
+    /\bIf you were Ryan, how would you repair this\??\s*/gi,
     /\bHow would you repair this relationship if you were Ryan\??\s*/gi,
     /\bWhat if you were Ryan\??\s*How would you repair this (?:situation|relationship)\??\s*/gi,
     /\bIf you were Ryan[^?.!\n]{0,120}?repair[^?.!\n]{0,120}?[?.!]?\s*/gi,
@@ -349,7 +385,7 @@ export function shouldAllowScenarioARepairAfterContemptAnswer(params: {
     });
   return (
     params.scenarioAContemptProbeAsked &&
-    !params.scenarioARepairQuestionAsked &&
+    !scenarioARepairAnswerAlreadySatisfiedInTranscript(params.messagesToUse) &&
     (!params.replyingToScenarioAQ1 || params.specificEmmaLineAlreadyAddressed) &&
     !params.shouldForceScenarioAContemptProbe &&
     contemptAnswered

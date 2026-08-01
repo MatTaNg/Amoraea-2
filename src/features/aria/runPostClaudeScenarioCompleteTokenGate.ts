@@ -1,6 +1,6 @@
 import { sanitizeAssistantInterviewerCharacterNames } from '@/constants/interviewCharacterNames';
-import { buildClientScenarioBoundaryHandoffBundle } from '@features/aria/interviewTransitionBundles';
 import { MOMENT_4_PERSONAL_CARD } from '@features/aria/interviewMomentScenarioConfig';
+import { buildClientScenarioBoundaryHandoffBundleAsync } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { buildPostClaudeProgressRefsPayload } from '@features/aria/buildPostClaudeProgressRefsPayload';
 import { persistInterviewHandoffCheckpoint } from '@features/aria/interviewActivePersistenceTypes';
 import { filterPersistableInterviewTranscriptMessages } from '@features/aria/interviewTranscriptPersistenceHelpers';
@@ -88,15 +88,12 @@ export async function runPostClaudeScenarioCompleteTokenGate(
     deps.currentScenarioRef.current === 3
       ? deps.currentScenarioRef.current
       : null;
-  let displayText = buildClientScenarioBoundaryHandoffBundle(
+  let displayText = await buildClientScenarioBoundaryHandoffBundleAsync(
     scenarioNumber,
     params.participantFirstNameForSpoken,
-    {
-      scenario1: resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
-      scenario2: resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 2),
-      scenario3: resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 3),
-    },
+    resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, scenarioNumber),
     MOMENT_4_PERSONAL_CARD,
+    { interviewSessionId: deps.interviewSessionIdRef.current },
   );
   displayText = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
     sanitizeAssistantInterviewerCharacterNames(displayText),

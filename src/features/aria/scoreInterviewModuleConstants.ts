@@ -1,3 +1,4 @@
+import type { GenerateAIReasoningOptions } from '@features/aria/aiReasoningUserPrompt';
 import type { GateResult } from '@features/aria/computeGateResult';
 import {
   classifyAIReasoningRequestError,
@@ -76,6 +77,7 @@ type GenerateAIReasoningSafeOptions = {
   onRetry?: (attempt: number) => void;
   onOuterRetry?: (outerAttempt: number) => void;
   onUnrecoverable?: (err: unknown) => void;
+  reasoningOptions?: GenerateAIReasoningOptions;
 };
 
 export async function generateAIReasoningSafe(
@@ -120,7 +122,10 @@ export async function generateAIReasoningSafe(
         weightedScore,
         passed,
         unassessedMarkers,
-        { perAttemptTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS },
+        {
+          perAttemptTimeoutMs: DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS,
+          ...options?.reasoningOptions,
+        },
       );
     } catch (err) {
       lastErr = err;

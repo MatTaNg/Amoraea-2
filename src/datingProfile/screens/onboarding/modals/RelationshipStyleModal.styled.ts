@@ -16,6 +16,12 @@ export const styles = StyleSheet.create({
   container: {
     ...onboardingModalLayout.centeredContainer,
   },
+  description: {
+    fontSize: 15,
+    color: theme.colors.textSecondary,
+    marginBottom: 20,
+    lineHeight: 22,
+  },
   option: {
     padding: 16,
     borderRadius: 12,

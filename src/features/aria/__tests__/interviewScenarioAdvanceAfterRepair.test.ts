@@ -435,6 +435,20 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     expect(out).not.toMatch(/What landed\s*$/i);
   });
 
+  it('advances Scenario C when repair Q2 is answered but model replays the repair question verbatim', () => {
+    const userAnswer =
+      'Daniel would be best off seeking some sort of counseling or guidance that should occasionally include her so that she feels heard. He needs to understand why he runs away and make a distinct effort to combat those old patterns.';
+    const messages = [
+      { role: 'assistant', content: 'How do you think this situation could be repaired?' },
+      { role: 'user', content: userAnswer },
+    ];
+    const repairReplay = 'Got it. How do you think this situation could be repaired?';
+    expect(shouldAdvanceScenarioCAfterSatisfiedDanielRepair(messages, repairReplay, 3)).toBe(true);
+    const out = applyPostClaudeScenarioAdvanceBundleOverride(repairReplay, 'Matt', messages, 3, 3);
+    expect(out).toMatch(/\[SCENARIO_COMPLETE:3\]/i);
+    expect(out).toMatch(/held a grudge|really hard time with/i);
+  });
+
   it('recognizes session-log James repair answer as satisfying Scenario B repair prompt', () => {
     const userAnswer =
       'If I were James, I would apologize and reflect on my behavior and assure her that I will try to be better in the future.';
@@ -478,6 +492,29 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     const out = applyPostClaudeScenarioAdvanceBundleOverride(q2, 'Matt', messages, 2, 2);
     expect(out).toMatch(/\[SCENARIO_COMPLETE:2\]/i);
     expect(out).toMatch(/Sophie and Daniel/i);
+  });
+
+  it('does not count process-meta Scenario B turns toward minimum handoff engagement', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2,
+      },
+      { role: 'user', content: 'Give a question.', scenarioNumber: 2 },
+      {
+        role: 'assistant',
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content:
+          "Again, there's nothing really to comment on. She gets a job offer, he asks a question, she tears up, am I supposed to be making assumptions as to why she's tearing up? So far there's no new questions.",
+        scenarioNumber: 2,
+      },
+    ];
+    expect(scenarioBMinimumEngagementForHandoff(messages)).toBe(false);
   });
 
   it('does not advance Scenario B when only one Scenario B user turn exists after Q1 jump-ahead', () => {

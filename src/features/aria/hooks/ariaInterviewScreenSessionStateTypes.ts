@@ -135,6 +135,9 @@ export type AriaInterviewScreenSessionGateState = {
     s3RepairProbeDeliveredRef: React.MutableRefObject<boolean>;
     turnAudioIndexRef: React.MutableRefObject<number>;
     lastUserTurnAudioDurationMsRef: React.MutableRefObject<number | null>;
+    lastUserTurnMicStopTelemetryRef: React.MutableRefObject<
+      import('@features/aria/interviewCutOffDetectionTypes').UserTurnMicStopTelemetry | null
+    >;
     responseTimingsRef: React.MutableRefObject<
       Array<{
         question_id: string;

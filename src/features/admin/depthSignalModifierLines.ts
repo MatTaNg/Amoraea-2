@@ -1,16 +1,14 @@
 import type { ComputeGateResultOptions } from '@features/aria/computeGateResultCore';
 import { moment4Moment5ConcretenessDepthSignalDelta } from '@features/aria/moment4ConcretenessClassification';
 import type { DefensePatternsJson } from '@features/aria/defensePatternsDetection';
-import { resolveEmotionRecognitionRawScoreForGate } from '@features/aria/emotionRecognitionInterview';
+import { resolveEmotionRecognitionCorrectCountForGate } from '@features/aria/emotionRecognitionInterview';
 import {
   countDefensePatternsForDepthModifier,
   DEFENSE_PATTERN_COUNT_MODIFIERS,
   EGO_DEVELOPMENT_LEVEL_MODIFIERS,
   MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS,
+  emotionRecognitionDepthSignalModifierFromCorrectCount,
 } from '@config/scoring/depthSignalModifiers';
-
-const EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX = 0.34;
-const EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX = 0.67;
 
 export type DepthSignalModifierLine = {
   label: string;
@@ -95,29 +93,18 @@ export function buildDepthSignalModifierLines(
     }
   }
 
-  const erScore = resolveEmotionRecognitionRawScoreForGate({
+  const erCorrectCount = resolveEmotionRecognitionCorrectCountForGate({
     emotionRecognitionRawScore: options?.emotionRecognitionRawScore,
     emotionRecognitionCorrectCount: options?.emotionRecognitionCorrectCount,
     emotionRecognitionResponses: options?.emotionRecognitionResponses,
   });
-  if (erScore !== null) {
-    if (erScore < EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX) {
+  if (erCorrectCount !== null) {
+    const delta = emotionRecognitionDepthSignalModifierFromCorrectCount(erCorrectCount);
+    if (delta !== 0) {
       lines.push({
         label: 'Emotion recognition',
-        detail: `${Math.round(erScore * 100)}% correct — floor band`,
-        delta: -0.2,
-      });
-    } else if (erScore < EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX) {
-      lines.push({
-        label: 'Emotion recognition',
-        detail: `${Math.round(erScore * 100)}% correct — review band`,
-        delta: -0.2,
-      });
-    } else if (erScore >= 0.99) {
-      lines.push({
-        label: 'Emotion recognition',
-        detail: '3/3 correct',
-        delta: 0.1,
+        detail: `${erCorrectCount}/3 correct`,
+        delta,
       });
     }
   }

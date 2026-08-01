@@ -20,7 +20,6 @@ export interface CompatibilityFormData {
     | 'spiritual_not_religious'
     | 'atheist_agnostic'
     | 'other'
-    | 'prefer_not_say'
     | null;
   faithPracticeLevel: 'never' | 'occasionally' | 'regularly' | 'central_to_life' | null;
   partnerSharesFaithPracticeImportance: number | null; // 1-7
@@ -35,7 +34,7 @@ export interface CompatibilityFormData {
 
   // Sex / intimacy
   sexualConnectionImportance: number | null; // 1-7
-  sexFrequency: 'rarely' | 'once_week' | '2_3_week' | 'several_week' | 'daily' | 'prefer_not' | null;
+  sexFrequency: 'rarely' | 'once_week' | '2_3_week' | 'several_week' | 'daily' | null;
   sexFrequencyFlexible: boolean | null;
   sexualExplorationOpenness: number | null; // 1-7
 
@@ -53,7 +52,7 @@ export interface CompatibilityFormData {
   // Income & physical
   incomeRange: string | null;
   partnerSimilarFinancialPositionImportance: number | null; // 1-7
-  weight: '100_120' | '121_140' | '141_160' | '161_180' | '181_200' | '200_plus' | 'prefer_not' | null;
+  weight: '100_120' | '121_140' | '141_160' | '161_180' | '181_200' | '200_plus' | null;
 
   /** Partner body type (BMI) preference from BMI selector. null = not set. */
   partnerBMIPreference:

@@ -62,6 +62,7 @@ export function createInterviewRuntimeTurnMetadataSyncSlice(params: SyncExtraPar
     lastVoiceTurnLanguageRef: params.lastVoiceTurnLanguageRef,
     lastVoiceTurnConfidenceRef: params.lastVoiceTurnConfidenceRef,
     lastUserTurnAudioDurationMsRef: params.lastUserTurnAudioDurationMsRef,
+    lastUserTurnMicStopTelemetryRef: params.lastUserTurnMicStopTelemetryRef,
   };
 }
 

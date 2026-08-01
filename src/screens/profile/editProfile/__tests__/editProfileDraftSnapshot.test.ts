@@ -18,7 +18,7 @@ describe('editProfileDraftSnapshot', () => {
     attractedUi: ['Women'],
     sexInterestSelected: ['kink-friendly'],
     lifeDomainsState: { ...DEFAULT_ONBOARDING_LIFE_DOMAINS },
-    weightLbsStr: '165',
+    weightKgPick: 74.8,
     heightCmPick: 175,
     typologyValues: { 'ECR-36-q1': 'Agree' },
     matchPrefs: { ageMin: 25 },
@@ -29,6 +29,7 @@ describe('editProfileDraftSnapshot', () => {
     archetypeSelection: ['explorer', 'creator'] as ['explorer', 'creator'],
     lifeDomainAnswers: { finance: { yearlyIncome: '100k' } },
     validatedBirthLocation: 'Denver, CO',
+    profilePrompts: [],
   };
 
   it('ignores untracked draft keys and draft.photos', () => {

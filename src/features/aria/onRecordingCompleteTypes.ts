@@ -1,3 +1,4 @@
+import type { UserTurnMicStopTelemetry } from '@features/aria/interviewCutOffDetectionTypes';
 import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
 import type { TranscribeSafeResult } from '@features/aria/transcribeSafeTypes';
 
@@ -50,6 +51,7 @@ export type OnRecordingCompleteDeps = {
   lastVoiceTurnConfidenceRef: React.MutableRefObject<number | null>;
   turnAudioIndexRef: React.MutableRefObject<number>;
   lastUserTurnAudioDurationMsRef: React.MutableRefObject<number | null>;
+  lastUserTurnMicStopTelemetryRef: React.MutableRefObject<UserTurnMicStopTelemetry | null>;
   interviewNameRef: React.MutableRefObject<string | null>;
   interviewNameReaskPendingRef: React.MutableRefObject<boolean>;
   lastQuestionTextRef: React.MutableRefObject<string | null>;

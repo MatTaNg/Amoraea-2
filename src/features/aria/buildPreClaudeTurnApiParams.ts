@@ -11,9 +11,21 @@ import {
   hadPriorSubstantiveAnswerInScenarioForFrustration,
 } from '@features/aria/metaCommentClassification';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
+import { buildOrchestratorClaudeSystemSuffix } from '@features/aria/buildOrchestratorClaudeSystemSuffix';
+import { buildOrchestratorSkipProbeSatisfiedSuffix } from '@features/aria/buildOrchestratorSkipProbeSatisfiedSuffix';
+import { evaluateInterviewProbeConstructSatisfaction } from '@features/aria/evaluateInterviewProbeConstructSatisfaction';
+import { buildInterviewTurnStateSnapshot } from '@features/aria/buildInterviewTurnStateSnapshot';
+import { evaluateInterviewTurnOrchestratorDecision } from '@features/aria/evaluateInterviewTurnOrchestratorDecision';
+import type { InterviewTurnOrchestratorDecision } from '@features/aria/interviewTurnOrchestratorTypes';
+import {
+  INTERVIEW_TURN_ORCHESTRATOR_PHASE2_ENABLED,
+} from '@features/aria/interviewTurnOrchestratorConfig';
+import { INTERVIEW_TURN_ORCHESTRATOR_PHASE2_META_INSTRUCTIONS } from '@features/aria/interviewTurnOrchestratorPhase2Instructions';
+import { shouldBypassLegacyMetaInjectForClaude } from '@features/aria/shouldBypassLegacyMetaInjectForClaude';
 import type { PreClaudeTurnGateDeps, PreClaudeTurnGateParams } from '@features/aria/preClaudeTurnGateTypes';
 import { moment5TranscriptHasConcreteAnchor } from '@features/aria/probeAndScoringUtils';
 import type { PreClaudeScenarioConstructProbeFlags } from '@features/aria/resolvePreClaudeScenarioConstructProbeFlags';
+import type { ConstructSatisfactionResolvedByProbe } from '@features/aria/interviewConstructSatisfactionLlmTypes';
 
 export type BuildPreClaudeTurnApiParamsContext = {
   messagesToUse: MessageWithScenario[];
@@ -35,6 +47,8 @@ export type BuildPreClaudeTurnApiParamsContext = {
   frustrationSkipDeclinePipeline: boolean;
   proactiveScenarioSkipConfirmationInjection: boolean;
   constructProbeFlags: PreClaudeScenarioConstructProbeFlags;
+  constructSatisfactionResolvedByProbe?: ConstructSatisfactionResolvedByProbe;
+  orchestratorDecision?: InterviewTurnOrchestratorDecision;
 };
 
 function resolveMaxTokensForPreClaudeTurn(
@@ -82,6 +96,8 @@ export function buildPreClaudeTurnApiParams(
     frustrationSkipDeclinePipeline,
     proactiveScenarioSkipConfirmationInjection,
     constructProbeFlags,
+    constructSatisfactionResolvedByProbe,
+    orchestratorDecision: orchestratorDecisionFromCtx,
   } = ctx;
 
   const {
@@ -127,6 +143,8 @@ export function buildPreClaudeTurnApiParams(
           userScenarioTag as 1 | 2 | 3,
         )
       : undefined;
+  const activeQuestionText =
+    (deps.lastQuestionTextRef.current ?? '').trim() || lastAssistantContent.trim();
   const metaCommentSystemSuffix =
     metaCommentClassification != null
       ? buildMetaCommentHandlingSuffix({
@@ -134,6 +152,7 @@ export function buildPreClaudeTurnApiParams(
           repeatedFrustrationInMoment:
             repeatedFrustrationInMoment && metaCommentClassification.type === 'frustration',
           hadPriorSubstantiveAnswerInMoment: hadPriorSubstantiveAnswerForFrustrationOffer,
+          activeQuestionText,
           alreadyAnsweredPriorSubstantiveVerified:
             metaCommentClassification.type === 'already_answered'
               ? alreadyAnsweredPriorSubstantiveVerified === true
@@ -151,6 +170,53 @@ export function buildPreClaudeTurnApiParams(
             moment5TranscriptHasConcreteAnchor(messagesToUse),
         })
       : '';
+
+  let orchestratorSystemSuffix = '';
+  if (INTERVIEW_TURN_ORCHESTRATOR_PHASE2_ENABLED) {
+    const orchestratorDecision =
+      orchestratorDecisionFromCtx ??
+      evaluateInterviewTurnOrchestratorDecision({
+        snapshot: buildInterviewTurnStateSnapshot(
+          deps,
+          trimmed,
+          messagesToUse,
+          lastAssistantContent,
+        ),
+        messages: messagesToUse,
+        constructFlags: constructProbeFlags,
+        metaCommentClassification,
+        constructSatisfactionResolvedByProbe,
+      });
+    orchestratorSystemSuffix = buildOrchestratorClaudeSystemSuffix({
+      decision: orchestratorDecision,
+      activeQuestionText,
+    });
+    if (orchestratorDecision.action.kind === 'skip_probe_already_satisfied') {
+      const probeId = orchestratorDecision.action.probeId;
+      const satisfaction =
+        constructSatisfactionResolvedByProbe?.[probeId] ??
+        evaluateInterviewProbeConstructSatisfaction({
+          probeId,
+          messages: messagesToUse,
+          userText: trimmed,
+          constructFlags: constructProbeFlags,
+        });
+      orchestratorSystemSuffix += buildOrchestratorSkipProbeSatisfiedSuffix({
+        decision: orchestratorDecision,
+        activeQuestionText,
+        satisfactionReason: satisfaction.reason,
+      });
+    }
+  }
+
+  const phase2MetaInstructionsSuffix =
+    INTERVIEW_TURN_ORCHESTRATOR_PHASE2_ENABLED &&
+    shouldBypassLegacyMetaInjectForClaude(trimmed, metaCommentClassification)
+      ? INTERVIEW_TURN_ORCHESTRATOR_PHASE2_META_INSTRUCTIONS
+      : '';
+
+  const combinedMetaCommentSystemSuffix =
+    metaCommentSystemSuffix + orchestratorSystemSuffix + phase2MetaInstructionsSuffix;
 
   deps.metaClassificationForPendingAssistantRef.current = metaCommentClassification;
   if (
@@ -209,7 +275,7 @@ export function buildPreClaudeTurnApiParams(
   params.progressSuffix = progressSuffix;
   params.participantFirstNameSystemSuffix = participantFirstNameSystemSuffix;
   params.elongatingSuppressedForUserTurn = elongatingSuppressedForUserTurn;
-  params.metaCommentSystemSuffix = metaCommentSystemSuffix;
+  params.metaCommentSystemSuffix = combinedMetaCommentSystemSuffix;
   params.muteParallelTtsForScenarioAContemptProbeStream = muteParallelTtsForScenarioAContemptProbeStream;
   params.muteParallelTtsForS3ToM4HandoffStream = muteParallelTtsForS3ToM4HandoffStream;
   params.allowScenarioARepairAfterContemptAnswer = allowScenarioARepairAfterContemptAnswer;

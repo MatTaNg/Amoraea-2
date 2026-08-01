@@ -2,12 +2,7 @@ import { sanitizeAssistantInterviewerCharacterNames } from '@/constants/intervie
 import { supabase } from '@data/supabase/client';
 import { splitScenarioTransitionForEmotionModal } from '@features/aria/emotionRecognitionInterview';
 import type { InterviewMomentIndex, InterviewProgressRefs } from '@features/aria/interviewProgressSync';
-import { deriveClosingPillarContextFromScenarioScores } from '@features/aria/closingReflectionGrounding';
-import { markPreparingResultsSession, saveInterviewProgress } from '@features/aria/interviewLocalPersistence';
-import { compactInterviewTranscriptTurns } from '@features/aria/interviewTranscriptDedup';
-import { enrichPersonalMomentClosingForTts } from '@features/aria/personalMomentClosingEnrichment';
-import { buildMoment5UserSkippedScoresAggregate } from '@features/aria/moment5ScoringParse';
-import { sanitizeMoment5PersonalScoresForAggregate } from '@features/aria/personalMomentSliceSanitize';
+import { deliverClientOwnedMoment5InterviewComplete } from '@features/aria/deliverClientOwnedMoment5InterviewComplete';
 import {
   SKIP_ACCEPTED_NEXT_QUESTION_BRIDGE,
   SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE,
@@ -17,15 +12,13 @@ import {
 import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
 import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
-import { SCENARIO_2_TEXT, SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
 import {
   computeSkipPenaltyGateComputation,
   individualPenaltyForSkipNumber,
 } from '@features/aria/interviewSkipPenalties';
 import {
-  buildScenario1To2BundleForInterview,
-  buildScenario2To3BundleForInterview,
-} from '@features/aria/interviewTransitionBundles';
+  buildScenarioFictionHandoffBundleWithDynamicLead,
+} from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import {
@@ -45,12 +38,6 @@ import {
 import { getScenarioNumberForNewMessage } from '@features/aria/scenarioNumberDetection';
 import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime, markQuestionDelivered, writeSessionLog } from '@utilities/sessionLogging';
-import { persistInterviewAttemptSessionLifecycle } from '@utilities/interviewAttemptLifecycle';
-import { getCurrentScenario } from '@utilities/storage/InterviewStorage';
-import {
-  fetchAttemptScoringBaseline,
-  persistMoment5ScoresImmediate,
-} from '@utilities/persistPersonalMomentScoresIncremental';
 
 function momentCountsTowardSkipPenaltyLadder(momentNum: number): boolean {
   return (momentNum >= 1 && momentNum <= 3) || momentNum === 5;
@@ -168,10 +155,12 @@ async function deliverSkipAcceptedScenarioHandoff(
     (deps.interviewNameRef.current ?? '').trim() || participantFirstName.trim() || '';
   const userCorpus = resolveScenarioUserTextForBoundaryReflection(messagesToUse, completedMoment);
   const lead = `${SKIP_ACCEPTED_SCENARIO_COMPLETE_BRIDGE}. `;
-  const bundle =
-    completedMoment === 1
-      ? buildScenario1To2BundleForInterview(firstName, SCENARIO_2_TEXT, userCorpus)
-      : buildScenario2To3BundleForInterview(firstName, SCENARIO_3_TEXT, userCorpus);
+  const bundle = await buildScenarioFictionHandoffBundleWithDynamicLead({
+    completedScenario: completedMoment,
+    firstName,
+    lastUserAnswer: userCorpus,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
   let fullDisplay = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
     sanitizeAssistantInterviewerCharacterNames(lead + bundle),
     firstName,
@@ -240,123 +229,7 @@ async function deliverSkipAcceptedMoment5InterviewComplete(
   deps: PreClaudeTurnGateDeps,
   messagesToUse: MessageWithScenario[],
 ): Promise<PreClaudeTurnSkipInjectionResult> {
-  deps.interviewMomentsCompleteRef.current[4] = true;
-  deps.interviewMomentsCompleteRef.current[5] = true;
-  deps.isInterviewCompleteRef.current = true;
-  deps.skipContinuationSystemSuffixRef.current = '';
-
-  const participantFirstName = (deps.interviewNameRef.current ?? '').trim();
-  const closing = enrichPersonalMomentClosingForTts(
-    '',
-    participantFirstName,
-    null,
-    deriveClosingPillarContextFromScenarioScores(deps.scenarioScoresRef.current),
-  );
-  const liveTranscript = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : messagesToUse) as MessageWithScenario[];
-  commitDedupedAssistantTranscriptTurn(
-    liveTranscript,
-    messagesToUse,
-    closing,
-    {
-      scenarioNumber: 3,
-      interviewMoment: 5,
-    },
-    (next) => deps.setMessages(next),
-  );
-  void remoteLog('[SKIP_ACCEPTED_M5_INTERVIEW_COMPLETE_CLIENT]', {
-    interviewSessionId: deps.interviewSessionIdRef.current,
-    preview: closing.slice(0, 220),
-  });
-  await deps.speakTextSafe(closing, {
-    ...ASSISTANT_INTERVIEW_SPEECH,
-    skipLastQuestionRef: true,
-  });
-  markQuestionDelivered(new Date().toISOString());
-
-  const attemptId = deps.interviewSessionAttemptIdRef.current;
-  if (attemptId && deps.userId) {
-    const skippedM5 = sanitizeMoment5PersonalScoresForAggregate(buildMoment5UserSkippedScoresAggregate());
-    if (skippedM5) {
-      try {
-        const baseline = await fetchAttemptScoringBaseline(supabase, attemptId, deps.userId);
-        await persistMoment5ScoresImmediate(
-          supabase,
-          attemptId,
-          deps.userId,
-          skippedM5,
-          baseline,
-          { skipped_by_user: true, skip_trigger: 'm5_skip_request_confirmed' },
-        );
-      } catch (persistErr) {
-        void remoteLog('[WARN] persistMoment5ScoresImmediate_failed_m5_skip', {
-          message: persistErr instanceof Error ? persistErr.message : String(persistErr),
-        });
-      }
-    }
-  }
-
-  void persistInterviewAttemptSessionLifecycle(deps.interviewSessionAttemptIdRef.current, 'completed');
-  const transcriptForScoring = compactInterviewTranscriptTurns(
-    [...messagesToUse, { role: 'assistant', content: closing, scenarioNumber: 3, interviewMoment: 5 }].filter(
-      (m) => m.role === 'user' || m.role === 'assistant',
-    ),
-  );
-  deps.pendingCompletionTranscriptRef.current = transcriptForScoring;
-  if (deps.userId) {
-    const completed = Array.from(deps.scoredScenariosRef.current);
-    const scenarioScoresPayload: Record<
-      number,
-      {
-        pillarScores: Record<string, number | null>;
-        pillarConfidence: Record<string, string>;
-        keyEvidence: Record<string, string>;
-        scenarioName?: string;
-      }
-    > = {};
-    [1, 2, 3].forEach((n) => {
-      const s = deps.scenarioScoresRef.current[n] as
-        | {
-            pillarScores: Record<string, number | null>;
-            pillarConfidence: Record<string, string>;
-            keyEvidence: Record<string, string>;
-            scenarioName?: string;
-          }
-        | undefined;
-      if (s) {
-        scenarioScoresPayload[n] = {
-          pillarScores: s.pillarScores,
-          pillarConfidence: s.pillarConfidence,
-          keyEvidence: s.keyEvidence,
-          scenarioName: s.scenarioName,
-        };
-      }
-    });
-    try {
-      await saveInterviewProgress(deps.userId, {
-        messages: transcriptForScoring,
-        scenariosCompleted: completed,
-        scenarioScores: scenarioScoresPayload,
-        currentScenario: getCurrentScenario(deps.scoredScenariosRef.current),
-        resumeActiveScenario: deps.resumeActiveScenarioRef.current,
-        emotionItemResponses: [...deps.emotionItemResponsesRef.current],
-        pendingCompletion: true,
-        scenarioSkipConfirmedCount: deps.scenarioSkipConfirmedCountRef.current,
-      });
-    } catch (persistErr) {
-      void remoteLog('[WARN] saveInterviewProgress_failed_before_m5_skip_completion', {
-        message: persistErr instanceof Error ? persistErr.message : String(persistErr),
-      });
-    }
-  }
-  deps.kickCompletionScoring('m5_skip_accepted', transcriptForScoring);
-  deps.interviewStatusRef.current = 'preparing_results';
-  deps.setInterviewStatus('preparing_results');
-  if (deps.userId) markPreparingResultsSession(deps.userId);
-  deps.setPendingCompletion(true);
-  deps.setVoiceState('idle');
-  deps.setIsWaiting(false);
+  await deliverClientOwnedMoment5InterviewComplete(deps, messagesToUse, 'm5_skip_accepted');
   return { haltTurn: true };
 }
 

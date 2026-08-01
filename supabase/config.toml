@@ -385,6 +385,9 @@ deno_version = 2
 # Per-function Edge settings (used when you `supabase functions deploy` — see
 # https://supabase.com/docs/guides/functions/function-configuration
 # Cron-style functions validate CRON_SECRET in the handler, not a user JWT.
+[functions.dev-auto-confirm-test-email]
+verify_jwt = false
+
 [functions.apply-six-month-interview-reset]
 verify_jwt = false
 

@@ -25,6 +25,7 @@ import {
   isDevScenarioJumpEmail,
 } from '@features/aria/devScenarioJumpReferral';
 import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
+import { readAuthErrorMessageForDisplay } from '@features/authentication/confirmTestAccountEmail';
 import type { Gender } from '@domain/models/Profile';
 
 const GOOGLE_FONTS_URL =
@@ -128,15 +129,24 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
           }
         }
       }
-      await signUp(email.trim(), password, {
+      const signUpResult = await signUp(email.trim(), password, {
         ...(codeToSend ? { inviteCode: codeToSend } : {}),
         age: parsedAge,
         gender: mapRegisterGenderToProfileGender(gender),
       });
+      if (signUpResult.session) {
+        return;
+      }
+      if (isDevScenarioJumpEmail(email.trim())) {
+        setError(
+          'Test account could not sign in automatically. Try signing in — your account should be confirmed after the latest update.',
+        );
+        return;
+      }
       lastResendMsRef.current = Date.now();
       setSent(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+      setError(readAuthErrorMessageForDisplay(err));
     } finally {
       setLoading(false);
     }

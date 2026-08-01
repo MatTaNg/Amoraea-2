@@ -89,6 +89,37 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
     );
   });
 
+  it('does not deliver James differently when user asks for the question', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2 as const,
+      },
+      {
+        role: 'user' as const,
+        content: 'Give a question.',
+        scenarioNumber: 2 as const,
+      },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      lastQuestionTextRef: { current: messages[0].content },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      messages[1].content,
+      messages,
+      messages[0].content,
+      baseFlags({ replyingToScenarioBQ1: true, scenarioBQ1Engaged: true }),
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
   it('delivers canonical James repair after differently Q2 without Claude', async () => {
     const messages = [
       {

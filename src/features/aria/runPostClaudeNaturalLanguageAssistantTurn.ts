@@ -15,6 +15,7 @@ import {
   applyPostClaudeClosingQuestionTokenFromRawText,
   resolvePostClaudeNaturalLanguageDisplayText,
 } from '@features/aria/resolvePostClaudeNaturalLanguageDisplayText';
+import { enrichScenarioBoundaryHandoffDisplayTextForSpeak } from '@features/aria/enrichScenarioBoundaryHandoffDisplayTextForSpeak';
 
 export type PostClaudeNaturalLanguageTurnContext = Pick<
   SanitizePostClaudeAssistantDraftResult,
@@ -28,6 +29,7 @@ export type PostClaudeNaturalLanguageTurnContext = Pick<
   parallelStreamingPlaybackUsed: boolean;
   streamFullTrimmed: string;
   rawApiHadInterviewComplete: boolean;
+  shouldRunEmptyTranscriptFallback: boolean;
 };
 
 /** Default assistant turn: display prep, transcript persist, emotion-modal natural handoff, M5 close failsafe. */
@@ -50,27 +52,35 @@ export async function runPostClaudeNaturalLanguageAssistantTurn(
     );
   }
 
-  const emptyTranscriptFallback = await runPostClaudeEmptyTranscriptFallbackGates(
-    deps,
-    params,
-    {
-      assistantTurnIsElongatingProbeOnly: ctx.assistantTurnIsElongatingProbeOnly,
-      shouldInjectScenarioARepairAfterContemptAnswer: ctx.shouldInjectScenarioARepairAfterContemptAnswer,
-      assistantIssuedScenarioAContemptProbe: ctx.assistantIssuedScenarioAContemptProbe,
-      assistantIssuedScenarioBFullProbe: ctx.assistantIssuedScenarioBFullProbe,
-      needsScenarioBJamesDifferentlyInsert: ctx.needsScenarioBJamesDifferentlyInsert,
-      parallelStreamingPlaybackUsed: ctx.parallelStreamingPlaybackUsed,
-      streamFullTrimmed: ctx.streamFullTrimmed,
-    },
-    text,
-    displayText,
-    speakAssistantTurn,
-  );
+  const emptyTranscriptFallback = ctx.shouldRunEmptyTranscriptFallback
+    ? await runPostClaudeEmptyTranscriptFallbackGates(
+        deps,
+        params,
+        {
+          assistantTurnIsElongatingProbeOnly: ctx.assistantTurnIsElongatingProbeOnly,
+          shouldInjectScenarioARepairAfterContemptAnswer: ctx.shouldInjectScenarioARepairAfterContemptAnswer,
+          assistantIssuedScenarioAContemptProbe: ctx.assistantIssuedScenarioAContemptProbe,
+          assistantIssuedScenarioBFullProbe: ctx.assistantIssuedScenarioBFullProbe,
+          needsScenarioBJamesDifferentlyInsert: ctx.needsScenarioBJamesDifferentlyInsert,
+          parallelStreamingPlaybackUsed: ctx.parallelStreamingPlaybackUsed,
+          streamFullTrimmed: ctx.streamFullTrimmed,
+        },
+        text,
+        displayText,
+        speakAssistantTurn,
+      )
+    : { handled: false as const, text, displayText };
   if (emptyTranscriptFallback.handled) {
     return;
   }
   let nextText = emptyTranscriptFallback.text;
   displayText = emptyTranscriptFallback.displayText;
+  displayText = await enrichScenarioBoundaryHandoffDisplayTextForSpeak({
+    displayText,
+    firstName: params.participantFirstNameForSpoken,
+    messages: params.messagesToUse,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
 
   const transcript = persistPostClaudeNaturalLanguageTranscriptTurn(deps, params, displayText, nextText);
   const {

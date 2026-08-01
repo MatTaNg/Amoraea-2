@@ -44,4 +44,6 @@ export type InterviewMicLifecycleDeps = {
   classifyInterviewQuestionType: (
     text: string,
   ) => 'analysis' | 'repair' | 'probe' | 'personal' | 'unknown';
+  interviewUserTurnEpochRef?: React.MutableRefObject<number>;
+  flushInterviewProgressForNavigationAway?: () => void;
 };

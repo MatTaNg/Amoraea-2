@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
 import { resolveAssessableQuestionTextForResponseTiming, resolveQuestionOnlyTextForResumeWelcome } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
+import { SCENARIO_B_JAMES_REPAIR_CANONICAL } from '@features/aria/scenarioBProbeLogic';
 import { buildScenario3ToMoment4BundleForInterview } from '@features/aria/interviewTransitionBundles';
 import { MOMENT_4_PERSONAL_CARD } from '@features/aria/interviewMomentScenarioConfig';
 import { buildMoment4ThresholdAnswerToMoment5Bundle } from '@features/aria/interviewTransitionBundles';
@@ -34,6 +35,14 @@ describe('resolveAssessableQuestionTextForResponseTiming', () => {
         'Got it. How do you think this situation could be repaired?',
       ),
     ).toBe('How do you think this situation could be repaired?');
+  });
+
+  it('maps Scenario B James repair paraphrase to canonical repair copy', () => {
+    expect(
+      resolveAssessableQuestionTextForResponseTiming(
+        'How do you think James could repair this with Sarah now?',
+      ),
+    ).toBe(SCENARIO_B_JAMES_REPAIR_CANONICAL);
   });
 });
 

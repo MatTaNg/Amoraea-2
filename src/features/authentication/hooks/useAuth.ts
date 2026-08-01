@@ -37,6 +37,11 @@ import {
   isAuthCallbackDeepLink,
   parseAuthCallbackUrl,
 } from '@features/authentication/authDeepLink';
+import {
+  confirmTestAccountEmailIfNeeded,
+  isEmailNotConfirmedAuthError,
+} from '@features/authentication/confirmTestAccountEmail';
+import { isDevScenarioJumpEmail } from '@features/aria/devScenarioJumpReferral';
 import * as ExpoLinking from 'expo-linking';
 
 export {
@@ -178,6 +183,9 @@ const applySessionForApp = async (
   }
 
   if (!verifiedUser.email_confirmed_at && !opts?.allowUnconfirmedForRecovery) {
+    if (isDevScenarioJumpEmail(verifiedUser.email)) {
+      return { session, user: verifiedUser };
+    }
     await supabase.auth.signOut();
     return { session: null, user: null };
   }
@@ -596,10 +604,17 @@ export const useAuth = () => {
   const signIn = async (email: string, password: string) => {
     clearPasswordResetPendingInStorage();
     setSnapshot({ emailConfirmationLinkError: null });
-    const { data, error } = await supabase.auth.signInWithPassword({
+    let { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
     });
+    if (error && isEmailNotConfirmedAuthError(error) && isDevScenarioJumpEmail(email)) {
+      await confirmTestAccountEmailIfNeeded(email);
+      ({ data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      }));
+    }
     if (error) throw error;
     return data;
   };
@@ -644,6 +659,15 @@ export const useAuth = () => {
     }
     if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
       throw new Error('An account with this email already exists. Sign in instead.');
+    }
+    if (isDevScenarioJumpEmail(email)) {
+      await confirmTestAccountEmailIfNeeded(email, data.user.id);
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (signInError) throw signInError;
+      return signInData;
     }
     return data;
   };

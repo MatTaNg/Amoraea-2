@@ -5,6 +5,7 @@ import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import {
   prepareScenarioScoresForCompletion,
   rescoreMissingStandardScenarioScores,
+  listMissingAssessableScenarioScores,
 } from '@features/aria/prepareScenarioScoresForCompletion';
 import {
   scoreStandardDeferredMoment4,
@@ -161,7 +162,7 @@ export async function runStandardOnboardingServerDelegate(
 
   if (serverDelegateOk) {
     const attemptIdForNarrativeBackup = deps.interviewSessionAttemptIdRef.current;
-    if (deps.userId && attemptIdForNarrativeBackup) {
+    if (deps.userId && attemptIdForNarrativeBackup && listMissingAssessableScenarioScores(deps).length === 0) {
       void kickClientInterviewNarrativeIfPending(
         deps.userId,
         attemptIdForNarrativeBackup,

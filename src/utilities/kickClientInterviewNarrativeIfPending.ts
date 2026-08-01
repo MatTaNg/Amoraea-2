@@ -6,13 +6,16 @@ import {
   buildReasoningFailurePatch,
   recoverFailedReasoningPayload,
 } from '@features/aria/aiReasoningPostProcess';
-import { generateAIReasoning } from '@features/aria/generateAIReasoning';
+import { generateAIReasoningSafe } from '@features/aria/scoreInterviewModuleConstants';
+import { isTransientNarrativeGenerationErrorMessage } from '@features/aria/narrativeTranscriptCompaction';
 import {
   resolvePillarScoresForNarrativeFromAttempt,
   type NarrativeAttemptRowInput,
   type NarrativePillarResolution,
 } from '@features/aria/resolvePillarScoresForNarrative';
+import { shouldDeferClientNarrativeForScoringInFlight } from '@features/onboarding/clientNarrativeKickGate';
 import { finalizeInterviewOnlyGateForAttempt } from '@features/psychometrics/finalizeInterviewOnlyGate';
+import { evaluateScoringStagesReadyForRollup } from '@features/psychometrics/ensureInterviewRollupArtifacts';
 import { buildEvidenceContextFromAttemptPatterns } from '@features/reports/narrativeEvidenceAudit';
 
 const CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS = 300_000;
@@ -145,6 +148,31 @@ async function persistRollupIfNeeded(
     .eq('user_id', userId);
 }
 
+async function persistNarrativeGenerationDeferred(
+  attemptId: string,
+  userId: string,
+  ar: Record<string, unknown> | null,
+  source: string,
+  err: string,
+  note: string,
+): Promise<void> {
+  await supabase
+    .from('interview_attempts')
+    .update({
+      reasoning_pending: true,
+      ai_reasoning: {
+        ...(ar ?? {}),
+        _reasoningPending: true,
+        note,
+        last_error: err,
+        _queuedAt: new Date().toISOString(),
+        _clientNarrativeBackupSource: source,
+      },
+    })
+    .eq('id', attemptId)
+    .eq('user_id', userId);
+}
+
 export async function kickClientInterviewNarrativeIfPending(
   userId: string,
   attemptId: string,
@@ -170,13 +198,23 @@ export async function kickClientInterviewNarrativeIfPending(
     return { skipped: true };
   }
 
+  if (shouldDeferClientNarrativeForScoringInFlight(row)) {
+    const missing = evaluateScoringStagesReadyForRollup(row).missing;
+    console.log(
+      `[narrative] deferred for attempt ${attemptId} — scoring stages in flight (${missing.join(', ') || 'unknown'})`,
+    );
+    return { skipped: true, error: 'scoring_in_flight' };
+  }
+
   const resolved = await resolvePillarScoresForNarrativeWithWait(userId, attemptId, row);
   const rowForNarrative = resolved.row;
   const resolution = resolved.resolution;
   if (!resolution) {
     const error = 'missing_pillar_scores';
-    console.error(
-      `[narrative] ${error} for attempt ${attemptId} — rollup still in flight; keeping reasoning_pending`,
+    const stillInFlight = shouldDeferClientNarrativeForScoringInFlight(rowForNarrative);
+    const logFn = stillInFlight ? console.log.bind(console) : console.error.bind(console);
+    logFn(
+      `[narrative] ${error} for attempt ${attemptId} — ${stillInFlight ? 'scoring stages still in flight' : 'rollup unavailable'}; keeping reasoning_pending`,
     );
     await supabase
       .from('interview_attempts')
@@ -226,7 +264,7 @@ export async function kickClientInterviewNarrativeIfPending(
       (rowForNarrative.scenario_specific_patterns ?? null) as Record<string, unknown> | null,
       rowForNarrative,
     );
-    const reasoning = await generateAIReasoning(
+    const reasoning = await generateAIReasoningSafe(
       pillars,
       scenarioScoresFromAttemptRow(rowForNarrative),
       transcript,
@@ -234,11 +272,32 @@ export async function kickClientInterviewNarrativeIfPending(
       resolution.passed ?? rowForNarrative.passed === true,
       [],
       {
-        perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS,
-        maxAttempts: 4,
-        evidenceContext,
+        reasoningOptions: {
+          perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS,
+          maxAttempts: 4,
+          compactTranscript: true,
+          evidenceContext,
+        },
       },
     );
+    if ((reasoning as { _reasoningPending?: boolean })._reasoningPending) {
+      const err = (reasoning as { _error?: string })._error ?? 'reasoning_pending';
+      const resourceLimit = /WORKER_RESOURCE_LIMIT/i.test(err);
+      console.log(
+        `[narrative] deferred for attempt ${attemptId} — ${resourceLimit ? 'edge worker capacity' : 'transient failure'}; keeping reasoning_pending`,
+      );
+      await persistNarrativeGenerationDeferred(
+        attemptId,
+        userId,
+        ar,
+        source,
+        err,
+        resourceLimit
+          ? 'Narrative generation queued (edge capacity — will retry).'
+          : 'Narrative generation queued (transient failure — will retry).',
+      );
+      return { skipped: true, error: err };
+    }
     console.log(`[narrative] Model returned response, writing to DB for attempt ${attemptId}`);
     await supabase
       .from('interview_attempts')
@@ -257,6 +316,20 @@ export async function kickClientInterviewNarrativeIfPending(
     return { skipped: false, ok: true };
   } catch (e) {
     const err = e instanceof Error ? e.message : String(e);
+    if (isTransientNarrativeGenerationErrorMessage(err)) {
+      console.log(
+        `[narrative] deferred for attempt ${attemptId} — transient generation error; keeping reasoning_pending`,
+      );
+      await persistNarrativeGenerationDeferred(
+        attemptId,
+        userId,
+        ar,
+        source,
+        err,
+        'Narrative generation queued (transient failure — will retry).',
+      );
+      return { skipped: true, error: err };
+    }
     if (e instanceof Error && (e.name === 'AbortError' || /aborted/i.test(e.message))) {
       console.error('[narrative] AbortError on client narrative backup:', err);
     }

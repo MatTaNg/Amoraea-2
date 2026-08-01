@@ -4,6 +4,7 @@ import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenari
 import { textContainsScenarioCVignetteBody } from '@features/aria/scenarioVignetteBodyDetection';
 import { looksLikeInterviewClosingAssistantMessage } from '@features/aria/elongatingProbe';
 import { applyPostClaudeScenarioAdvanceBundleOverride } from '@features/aria/interviewScenarioAdvanceAfterRepair';
+import { enrichScenarioBoundaryHandoffBundleWithDynamicLead } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { SHOW_SCENARIO_CARD_CANONICAL_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import {
   mergeShowScenarioCardTransitionPrefixWithSpoken,
@@ -118,8 +119,15 @@ export async function speakMissedScenarioBoundaryLeadAtStreamEnd(
   );
   if (!advanceBundle) return;
 
+  const enrichedBundle = await enrichScenarioBoundaryHandoffBundleWithDynamicLead({
+    bundleText: advanceBundle,
+    firstName: params.participantFirstNameForSpoken,
+    messages: params.messagesToUse,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
+
   const bundleText = stripControlTokens(
-    advanceBundle.replace(/\[SCENARIO_COMPLETE:\s*\d+\]/gi, ''),
+    enrichedBundle.replace(/\[SCENARIO_COMPLETE:\s*\d+\]/gi, ''),
   ).trim();
   if (!bundleText) return;
 

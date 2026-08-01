@@ -36,6 +36,37 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(speak).not.toHaveBeenCalled();
   });
 
+  it('short-circuits when orchestrator skip flags bypass all forced probes', async () => {
+    const deps = createMockPostClaudeDeps();
+    const params = createMockPostClaudeParams({
+      shouldForceScenarioAContemptProbe: true,
+      shouldForceMoment4ThresholdProbe: true,
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult();
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      'Thanks Alex.',
+      draft,
+      false,
+      speak,
+      {
+        skipScenarioForcedProbes: true,
+        skipMoment4ThresholdForced: true,
+      } as never,
+    );
+
+    expect(result).toEqual({
+      handled: false,
+      strippedText: draft.strippedText,
+      scenarioBSkippedJamesIntermediate: false,
+      needsScenarioBJamesDifferentlyInsert: false,
+    });
+    expect(speak).not.toHaveBeenCalled();
+  });
+
   it('forces S1 contempt probe when shouldForceScenarioAContemptProbe is true', async () => {
     const deps = createMockPostClaudeDeps({
       scenarioAContemptProbeAskedRef: { current: false },
@@ -132,6 +163,32 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
       expect.stringMatching(/work through versus.*walk away/i),
       expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
     );
+  });
+
+  it('skips M4 threshold forced probe when orchestrator owns M4 delivery', async () => {
+    const deps = createMockPostClaudeDeps({
+      moment4ThresholdProbeAskedRef: { current: false },
+    });
+    const params = createMockPostClaudeParams({
+      shouldForceMoment4ThresholdProbe: true,
+      trimmed: 'I would walk away when trust is gone.',
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult({ strippedText: '' });
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      'Some model text',
+      draft,
+      false,
+      speak,
+      { skipMoment4ThresholdForced: true } as never,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.moment4ThresholdProbeAskedRef.current).toBe(false);
+    expect(speak).not.toHaveBeenCalled();
   });
 
   it('forces M4 threshold probe when shouldForceMoment4ThresholdProbe is true', async () => {

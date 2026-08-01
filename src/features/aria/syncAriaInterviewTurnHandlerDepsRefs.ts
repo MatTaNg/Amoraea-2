@@ -290,6 +290,7 @@ export function syncAriaInterviewTurnHandlerDeps(
         scenarioSkipConfirmedCountRef: ctx.scenarioSkipConfirmedCountRef,
         scenarioSkipPenaltySumRef: ctx.scenarioSkipPenaltySumRef,
         lastUserTurnAudioDurationMsRef: ctx.lastUserTurnAudioDurationMsRef,
+        lastUserTurnMicStopTelemetryRef: ctx.lastUserTurnMicStopTelemetryRef,
         lastVoiceTurnConfidenceRef: ctx.lastVoiceTurnConfidenceRef,
         lastVoiceTurnLanguageRef: ctx.lastVoiceTurnLanguageRef,
         responseTimingsRef: ctx.responseTimingsRef,

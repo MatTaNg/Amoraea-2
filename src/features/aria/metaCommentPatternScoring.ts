@@ -4,10 +4,22 @@ import {
 } from './metaCommentConfusionRepeat';
 import { SUFFICIENCY_CHALLENGE_FRUSTRATION_RES } from './metaCommentSkipFrustration';
 import { getInabilitySubstantiveOverrideDetail } from './metaCommentInabilityOverride';
+import { priorAnswerMetaScoreBoost, looksLikeSufficiencyCheckInShape } from './interviewPriorAnswerMetaDetection';
 import type {
   MetaCommentClassification,
   MetaCommentType,
 } from '@features/aria/metaCommentClassificationTypes';
+
+export {
+  classifyPriorAnswerMetaKind,
+  looksLikeAlreadyAnsweredClaim,
+  looksLikeAlreadyAnsweredShape,
+  looksLikeCheckingInSufficiencyAsk,
+  looksLikePriorAnswerMetaComment,
+  looksLikeSufficiencyCheckInShape,
+  looksLikeVerifyPriorAnswerShape,
+  type PriorAnswerMetaKind,
+} from './interviewPriorAnswerMetaDetection';
 
 export function wordCount(text: string): number {
   return text
@@ -46,7 +58,11 @@ const CONFUSION_RES: RegExp[] = [
   /\b(no|wasn'?t|was not|never|didn'?t|did not)\s+(a\s+)?question\s+(was\s+)?(asked|said)\b/i,
   /\byou (didn'?t|did not|never)\s+(ask|asked|say|said)\s+(a\s+)?question\b/i,
   /\b(there was|there'?s|theres)\s+no\s+question\b/i,
+  /\bso far there'?s no question\b/i,
   /\bi (didn'?t|did not)\s+(hear|get|catch)\s+(a\s+)?question\b/i,
+  /\b(?:am i|are we) supposed to\b/i,
+  /\bmaking assumptions\b/i,
+  /\bnothing (?:really )?to comment on\b/i,
   /\bi'?m confused\b/i,
   /\bthat (doesn'?t|does not|didn'?t|did not)\s+make sense\b/i,
   /\bi'?m lost\b/i,
@@ -96,6 +112,9 @@ const ALREADY_ANSWERED_RES: RegExp[] = [
   /\bi\s+already\s+said\s+that\b/i,
   /\bi\s+already\s+answered\s+that\b/i,
   /\bi\s+already\s+answered\s+this\b/i,
+  /\bi\s+answered\s+this\s+question\s+already\b/i,
+  /\bthis\s+question\s+already\b/i,
+  /\bi\s+thought\s+i\s+already\s+answered\b/i,
   /\bdidn'?t\s+i\s+already\s+answer\b/i,
   /\bdid\s+i\s+already\s+answer\b/i,
   /\bi\s+already\s+said\s+what\s+i\s+think\b/i,
@@ -106,9 +125,7 @@ const ALREADY_ANSWERED_RES: RegExp[] = [
   /\bi\s+just\s+said\s+that\b/i,
 ];
 
-/**
- * Genuine inability to answer — not refusal (handled separately). Narrow overlaps with frustration phrases.
- */
+/** Genuine inability to answer — not refusal (handled separately). Narrow overlaps with frustration phrases. */
 export const INABILITY_RES: RegExp[] = [
   /\bi\s+(honestly\s+)?have\s+no\s+idea\b/i,
   /\bi\s+got\s+nothing\b/i,
@@ -135,6 +152,8 @@ const INABILITY_RES_WITHOUT_THATS_HARD_ONE_HEDGE = INABILITY_RES.filter(
 
 /** Checking whether their answer registered / was enough. */
 const CHECKING_IN_RES: RegExp[] = [
+  /\bwasn'?t that enough\b/i,
+  /\b(isn'?t|ain'?t) that enough\b/i,
   /\bwas that enough\b/i,
   /\bdid you hear me\b/i,
   /\bis that okay\b/i,
@@ -145,6 +164,33 @@ const CHECKING_IN_RES: RegExp[] = [
   /\bis that (what you (wanted|needed))\b/i,
   /\bwas that (good|okay|alright)\b/i,
 ];
+
+/** Client-owned checking-in replies — not assessable scenario questions to re-ask or "looking for". */
+export function looksLikeCheckingInClientOwnedAckAssistantLine(content: string): boolean {
+  const t = (content ?? '').trim().replace(/\s+/g, ' ');
+  if (!t) return false;
+  const lower = t.toLowerCase();
+
+  if (/^what i'?m looking for here is/i.test(t)) {
+    if (/yes\s*[—–-]\s*that'?s enough|\bgot it\b|\bi'?m with you\b/i.test(t)) return true;
+    if (!/\?/.test(t) && t.length < 140) return true;
+  }
+
+  if (!/\?/.test(t)) {
+    const startsWithSufficiencyAck =
+      /^yes\s*[—–-]\s*(that'?s enough|i heard you|got it)\b/i.test(t) ||
+      /^got it\s*[—–-]\s*that works\b/i.test(t);
+    if (startsWithSufficiencyAck) {
+      if (/how would you repair|if you were james|what would you do differently/i.test(lower)) {
+        return false;
+      }
+      return true;
+    }
+    if (/^yes\s*[—–-]\s*i heard you\b/i.test(t) && /\byou said\b/i.test(t)) return true;
+  }
+
+  return false;
+}
 
 export function patternScore(text: string, patterns: RegExp[]): number {
   const hits = patterns.reduce((n, re) => (re.test(text) ? n + 1 : n), 0);
@@ -183,10 +229,12 @@ export function metaScores(text: string): Record<MetaCommentType, number> {
     confusion = Math.max(confusion, 0.48);
   }
   let checking = patternScore(t, CHECKING_IN_RES);
-
-  const checkingPhraseBoost =
-    /\b(enough)\s*\?/i.test(t) && /\b(was|is|wasn'?t|isn'?t|did|does)\b/i.test(t);
-  const checkingAdj = checkingPhraseBoost ? Math.max(checking, 0.52) : checking;
+  const priorBoost = priorAnswerMetaScoreBoost(t);
+  const checkingAdj = Math.max(
+    checking,
+    priorBoost.checking_in,
+    looksLikeSufficiencyCheckInShape(t) ? 0.52 : 0,
+  );
 
   let inability = patternScore(t, INABILITY_RES);
   /** "That's a hard one…" is often a verbal hedge before substantive fiction engagement — do not treat as inability alone. */
@@ -210,7 +258,7 @@ export function metaScores(text: string): Record<MetaCommentType, number> {
 
   return {
     skip_request: skipRequestScore(t),
-    already_answered: patternScore(t, ALREADY_ANSWERED_RES),
+    already_answered: Math.max(patternScore(t, ALREADY_ANSWERED_RES), priorBoost.already_answered),
     inability,
     frustration,
     confusion,

@@ -128,6 +128,30 @@ describe('moment4SpecificityFollowUp', () => {
     expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
   });
 
+  it('does not fire for trip-individual answer with pronouns but no proper name (session log)', () => {
+    const sessionAnswer =
+      "But yes, I had a few where I really liked, haven't liked individuals, not quite had a grudge because I don't really do grudges, but when I have done with one individual, this individual I took on a trip and they acted completely inappropriately, disrespectfully to me and others organizing the trip and acted very much like a child and had a tantrum and made the situation way unsafe and were very disrespectful to me and others and we had to kick them out and send them packing back to the airport, but that was over a year ago. When I was seeing them a few times, I've also learned that they have some mental instability, some mental health issues and a few other things which means this is behavior that she has repeatedly done again and again and it's not personal, it's her own personal issues. I learned that I can't hold being mad at her for something that wasn't quite within her ability to control and I let it go and I've forgotten, I haven't forgotten, but I forgive";
+    const evalResult = evaluateMoment4SpecificityProbe(sessionAnswer);
+    expect(evalResult.hasNamedPerson).toBe(true);
+    expect(evalResult.hasSpecificEvent).toBe(true);
+    expect(evalResult.probeShouldFire).toBe(false);
+    expect(needsMoment4SpecificityFollowUp(sessionAnswer)).toBe(false);
+  });
+
+  it('does not fire for short named-friend rupture (Devanshu/Devon t-shirt session log)', () => {
+    for (const t of [
+      "And my friend Devon who didn't like my t-shirt. I like my t-shirt, so we don't talk anymore",
+      "Yeah, my friend Devanshu didn't like my t-shirt. I like my t-shirt and so we don't talk anymore.",
+    ]) {
+      const evalResult = evaluateMoment4SpecificityProbe(t);
+      expect(evalResult.hasNamedPerson).toBe(true);
+      expect(evalResult.hasSpecificEvent).toBe(true);
+      expect(evalResult.probeShouldFire).toBe(false);
+      expect(evalResult.triggerReason).toBeNull();
+      expect(needsMoment4SpecificityFollowUp(t)).toBe(false);
+    }
+  });
+
   it('does not fire for cut-off generic opener mid-sentence (session log)', () => {
     const cutOff = "I'm generally too nice and I don't";
     const evalResult = evaluateMoment4SpecificityProbe(cutOff);
@@ -289,6 +313,19 @@ describe('moment4SpecificityFollowUp', () => {
       { role: 'user' as const, content: 'My cousin Rita and I fell out last year.' },
     ];
     expect(isAnsweringMoment4SpecificityFollowUp(msgs)).toBe(true);
+  });
+
+  it('derive gate: not resolved when user re-answers grudge with a vague second answer', () => {
+    const grudge = MOMENT_4_GRUDGE_QUESTION_TEXT;
+    const specificEnough =
+      "Yeah, I had a close friend about three years ago who I felt completely betrayed by. She shared something I told her in confidence with a group of mutual friends.";
+    const vagueRetry = 'I try not to hold grudges much anymore in general.';
+    const msgs = [
+      { role: 'assistant' as const, content: grudge },
+      { role: 'user' as const, content: specificEnough },
+      { role: 'user' as const, content: vagueRetry },
+    ];
+    expect(deriveMoment4PostGrudgeSpecificityResolvedFromMessages(msgs)).toBe(false);
   });
 
   it('derive gate: not resolved until user answers specificity probe', () => {

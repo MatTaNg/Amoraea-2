@@ -21,6 +21,7 @@ const baseCtx = (
   parallelStreamingPlaybackUsed: false,
   streamFullTrimmed: '',
   rawApiHadInterviewComplete: false,
+  shouldRunEmptyTranscriptFallback: true,
   ...overrides,
 });
 

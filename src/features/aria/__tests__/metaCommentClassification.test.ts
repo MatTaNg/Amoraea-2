@@ -68,6 +68,18 @@ describe('classifyUserMetaComment', () => {
     expect(b?.confidence).toBe(1.0);
     const c = classifyUserMetaComment('what was the question');
     expect(c?.confusion_subtype).toBe('repeat_request');
+    const processMeta = classifyUserMetaComment('Give a question.');
+    expect(processMeta?.type).toBe('confusion');
+    expect(processMeta?.confusion_subtype).toBeUndefined();
+    expect(processMeta?.confidence).toBeGreaterThanOrEqual(0.9);
+  });
+
+  it('classifies substantive scenario confusion without repeat_request subtype', () => {
+    const confused =
+      "Again, there's nothing really to comment on, she gets a job offer, he asks her a question, she tears up. Am I supposed to be making assumptions as to why she's tearing up or am I making assumptions as to how committed he is to live to find this new job? So far there's no question.";
+    const r = classifyUserMetaComment(confused);
+    expect(r?.type).toBe('confusion');
+    expect(r?.confusion_subtype).toBeUndefined();
   });
 
   it('pre-classifies explicit repeat phrases with confidence 1.0 before ambiguous_short', () => {
@@ -120,6 +132,22 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment("What's my score?")).toBeNull();
   });
 
+  it('suppresses ambiguous_short when audio telemetry indicates a mic-stop cut-off', () => {
+    const resolved = resolveMetaCommentForInterviewTurn("If I'm right and I really", {
+      lastQuestionText: 'If you were Ryan, how would you repair this?',
+      priorUserUtteranceCount: 3,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+      micStopTelemetry: {
+        audioDurationMs: 0,
+        wordCount: 6,
+        wordsPerSecond: 0,
+        ratioFlag: true,
+      },
+    });
+    expect(resolved.effective).toBeNull();
+  });
+
   it('does not classify mid-sentence cut-offs as ambiguous_short meta', () => {
     expect(classifyUserMetaComment('I think')).toBeNull();
     expect(classifyUserMetaComment('I think that')).toBeNull();
@@ -127,6 +155,8 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment('I think that Daniel')).toBeNull();
     expect(classifyUserMetaComment('Daniel felt genuinely')).toBeNull();
     expect(classifyUserMetaComment('If I were Ryan, I would')).toBeNull();
+    expect(classifyUserMetaComment("If I'm right and I really")).toBeNull();
+    expect(classifyUserMetaComment("If I'm right and I really care")).toBeNull();
     expect(classifyUserMetaComment("I'm generally too nice and I don't")).toBeNull();
     expect(classifyUserMetaComment('I think that James could have')).toBeNull();
     expect(classifyUserMetaComment('This situation can be repaired.')).toBeNull();
@@ -221,6 +251,12 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment('I just told you.')?.type).toBe('already_answered');
     expect(classifyUserMetaComment("Didn't I already answer this?")?.type).toBe('already_answered');
     expect(classifyUserMetaComment('I already answered this')?.type).toBe('already_answered');
+    expect(classifyUserMetaComment('I thought I already answered this question.')?.type).toBe(
+      'already_answered',
+    );
+    expect(classifyUserMetaComment('I answered this question already.')?.type).toBe(
+      'already_answered',
+    );
   });
 
   it('priority: skip_request beats already_answered when both match', () => {
@@ -236,6 +272,23 @@ describe('buildSkipRequestConfirmationSpeech', () => {
     const s = buildSkipRequestConfirmationSpeech({ priorSubstantiveNonMetaExcerpt: longPrior });
     expect(s).toContain('Are you sure you want to skip');
     expect(s.toLowerCase()).toContain('emma');
+  });
+
+  it('omits prior reflection for explicit skip_request confirmation', () => {
+    const longPrior =
+      'I think that there is a pattern of behavior with James and this may be the first time he showed up like this.';
+    const s = buildSkipRequestConfirmationSpeech({
+      priorSubstantiveNonMetaExcerpt: longPrior,
+      includePriorReflection: false,
+    });
+    expect(s).toBe(SKIP_REQUEST_CONFIRMATION_PROMPT_LINE);
+  });
+
+  it('does not prefix incomplete run-on answers without sentence punctuation', () => {
+    const runOn =
+      'I think that there is a pattern of behavior with James and this may be the first time he genuinely showed up like this and or there is the potential that this is simply the aspect';
+    const s = buildSkipRequestConfirmationSpeech({ priorSubstantiveNonMetaExcerpt: runOn });
+    expect(s).toBe(SKIP_REQUEST_CONFIRMATION_PROMPT_LINE);
   });
 });
 
@@ -616,6 +669,19 @@ describe('resolveMetaCommentForInterviewTurn', () => {
     expect(resolved.exemptMetaCommentTurn).toBe(false);
     expect(resolved.effective?.type).toBe('confusion');
     expect(resolved.effective?.confusion_subtype).toBe('repeat_request');
+  });
+
+  it('does not exempt inability during post-meta-ack window', () => {
+    const resolved = resolveMetaCommentForInterviewTurn("I don't know", {
+      lastQuestionText: "What's going on between these two?",
+      priorUserUtteranceCount: 3,
+      isInterviewAppRoute: true,
+      hasProfileFirstName: true,
+      suppressMetaClassificationPostMetaAckAwaitingSubstantive: true,
+      spokenWordCount: 3,
+    });
+    expect(resolved.exemptMetaCommentTurn).toBe(false);
+    expect(resolved.effective?.type).toBe('inability');
   });
 });
 

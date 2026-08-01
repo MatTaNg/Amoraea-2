@@ -18,6 +18,8 @@ export type CheckInterviewStatusDeps = {
   interviewStatusRef: MutableRefObject<string>;
   isInterviewCompleteRef: MutableRefObject<boolean>;
   statusRef: MutableRefObject<string>;
+  resumeLoadingFlowActiveRef?: MutableRefObject<boolean>;
+  hasResumedRef?: MutableRefObject<boolean>;
   interviewSessionIdRef: MutableRefObject<string>;
   userInterviewRoutingTable: string;
   userInterviewPassSelect: string;

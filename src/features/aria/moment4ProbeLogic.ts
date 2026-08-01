@@ -56,7 +56,33 @@ const MOMENT4_THRESHOLD_FORK_LANGUAGE_RE =
 
 /** Work-through / stay side of the threshold fork (e.g. "worth saving if you love each other"). */
 const MOMENT4_THRESHOLD_WORK_THROUGH_COMMITMENT_RE =
-  /\b(?:worth\s+(?:sav(?:ing|e)|it|trying|fighting\s+for)|save(?:ing)?\s+(?:it|the\s+relationship|when|if)|willing\s+to\s+(?:do\s+)?(?:the\s+)?work|work\s+together|(?:do|put\s+in)\s+the\s+work|no\s+matter\s+how\s+hard|fight\s+for\s+(?:it|the\s+relationship|each\s+other)|keep\s+(?:working|trying|going))\b/i;
+  /\b(?:worth\s+(?:sav(?:ing|e)|it|trying|fighting\s+for)|save(?:ing)?\s+(?:it|the\s+relationship|when|if)|willing\s+to\s+(?:do\s+)?(?:the\s+)?work|work\s+together|(?:do|put\s+in)\s+the\s+work|no\s+matter\s+how\s+hard|fight\s+for\s+(?:it|the\s+relationship|each\s+other)|keep\s+(?:working|trying|going)|(?:make|making)\s+it\s+work|do\s+(?:your\s+best|whatever\s+it\s+takes))\b/i;
+
+/** Mutual-commitment stay-side answers (e.g. "if you're both committed… make it work"). */
+const MOMENT4_THRESHOLD_MUTUAL_COMMITMENT_STAY_RE =
+  /\b(?:(?:both|you(?:'re| are) both|if you(?:'re| are) both|when you(?:'re| are) both)\s+committed|committed\s+to\s+(?:the\s+relationship|making\s+it\s+work|growth))\b/i;
+
+function looksLikeMoment4ThresholdItDependsAnswer(low: string, wordCount: number): boolean {
+  return (
+    wordCount >= 12 &&
+    /\bit depends\b/.test(low) &&
+    /\b(?:relationship|committed|commitment|partner|love|work|make it work|making it work)\b/.test(low)
+  );
+}
+
+/** True when the user substantively addresses the work-through vs walk-away threshold fork. */
+export function looksLikeAssessableMoment4ThresholdAnswer(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeUnassessableScenarioAnswer(t)) return false;
+  if (hasCommitmentThresholdSignal(t)) return true;
+  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  const wordCount = low.split(/\s+/).filter(Boolean).length;
+  if (MOMENT4_THRESHOLD_FORK_LANGUAGE_RE.test(low)) return true;
+  if (MOMENT4_THRESHOLD_WORK_THROUGH_COMMITMENT_RE.test(low)) return true;
+  if (MOMENT4_THRESHOLD_MUTUAL_COMMITMENT_STAY_RE.test(low)) return true;
+  if (looksLikeMoment4ThresholdItDependsAnswer(low, wordCount)) return true;
+  return false;
+}
 
 /**
  * True when a user answer to the M4 commitment-threshold question cannot be scored —
@@ -66,11 +92,11 @@ export function looksLikeUnassessableMoment4ThresholdAnswer(text: string): boole
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return true;
   if (looksLikeUnassessableScenarioAnswer(t)) return true;
-  if (hasCommitmentThresholdSignal(t)) return false;
-  const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
-  if (MOMENT4_THRESHOLD_FORK_LANGUAGE_RE.test(low)) return false;
-  if (MOMENT4_THRESHOLD_WORK_THROUGH_COMMITMENT_RE.test(low)) return false;
-  const wordCount = low.split(/\s+/).filter(Boolean).length;
+  if (looksLikeAssessableMoment4ThresholdAnswer(t)) return false;
+  const wordCount = t
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean).length;
   // Partner/relationship keywords alone do not satisfy the threshold fork — block M5 advance.
   return wordCount <= 30;
 }
@@ -145,6 +171,13 @@ export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
       /\breal tension with another person\b/.test(t) ||
       /\bcuts deep\b/.test(t) ||
       (/\bare you someone who\b/.test(t) && /\b(?:walk away|walking away)\b/.test(t)));
+  /** Complete but unauthorized fork — e.g. "Is that something you'd try to work through, or walk away from?" */
+  const directWorkThroughOrWalkAwayQuestion =
+    workThroughPhrase &&
+    walkAwayPhrase &&
+    (/\bis that (?:something|the kind of thing)\b/.test(t) ||
+      /\b(?:try to |would you )?work through\b.*\b(?:,|\bor\b|\bversus\b)\b.*\bwalk away\b/.test(t) ||
+      /\bwork through\b.*\bor walk away\b/.test(t));
   return (
     canonicalPhrase ||
     lineBetweenWorkAndLeaveFork ||
@@ -152,7 +185,8 @@ export function looksLikeMoment4ThresholdQuestion(text: string): boolean {
     friendshipContinuingFork ||
     thresholdVersusWalkAwayFork ||
     trustBrokenFriendshipFork ||
-    workThroughVersusWalkAwayPersonalityFork
+    workThroughVersusWalkAwayPersonalityFork ||
+    directWorkThroughOrWalkAwayQuestion
   );
 }
 

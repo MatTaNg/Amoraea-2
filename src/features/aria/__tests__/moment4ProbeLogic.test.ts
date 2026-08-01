@@ -2,6 +2,7 @@ import {
   evaluateMoment4RelationshipType,
   isAnsweringFirstUserTurnAfterMoment4Threshold,
   isIncompleteMoment4ThresholdLeadSentence,
+  looksLikeAssessableMoment4ThresholdAnswer,
   looksLikeMisplacedNonGrudgeMoment4Answer,
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
@@ -121,6 +122,14 @@ describe('moment4ProbeLogic', () => {
     );
   });
 
+  it('detects and coerces session-log try-to-work-through-or-walk-away paraphrase', () => {
+    const paraphrase = "Is that something you'd try to work through, or walk away from?";
+    expect(looksLikeMoment4ThresholdQuestion(paraphrase)).toBe(true);
+    expect(coerceMoment4ThresholdQuestionForTts(paraphrase)).toBe(
+      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
+    );
+  });
+
   it('detects incomplete cuts-deep threshold lead before walk-away fork', () => {
     const truncated =
       "When something like that happens — when someone you care about says something that cuts deep — where's your line between working through it";
@@ -171,7 +180,7 @@ describe('moment4ProbeLogic', () => {
       { role: 'assistant', content: M4_THRESHOLD_FORCED_INJECT },
       {
         role: 'user',
-        content: 'I think it depends. If you really love each other, then you should try your best to make it work.',
+        content: "If my partner is with me, I can't do anything about it.",
       },
       {
         role: 'assistant',
@@ -325,6 +334,21 @@ describe('moment4ProbeLogic', () => {
           "I think if two partners are willing to do the work, no matter how hard it gets, it's worth saving if you really love each other.",
         ),
       ).toBe(false);
+      expect(
+        looksLikeAssessableMoment4ThresholdAnswer(
+          "I think it depends. I think if you're both committed to the relationship, then you should do your best to make it work.",
+        ),
+      ).toBe(true);
+      expect(
+        looksLikeUnassessableMoment4ThresholdAnswer(
+          "I think it depends. I think if you're both committed to the relationship, then you should do your best to make it work.",
+        ),
+      ).toBe(false);
+      expect(
+        looksLikeAssessableMoment4ThresholdAnswer(
+          "If you're both committed to making it work and committed to growth then I think you should do whatever it takes.",
+        ),
+      ).toBe(true);
     });
   });
 });

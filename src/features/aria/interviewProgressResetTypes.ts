@@ -42,6 +42,9 @@ export type ResetInterviewProgressRefsDeps = ResetScenarioCClientGatesDeps & {
   moment5ClientScoringMetaRef: MutableRefObject<Moment5ClientScoringMetadata | null>;
   deferredMoment4NarrativeRef: MutableRefObject<string | null>;
   lastUserTurnAudioDurationMsRef: MutableRefObject<number | null>;
+  lastUserTurnMicStopTelemetryRef: MutableRefObject<
+    import('@features/aria/interviewCutOffDetectionTypes').UserTurnMicStopTelemetry | null
+  >;
   scenarioAContemptProbeAskedRef: MutableRefObject<boolean>;
   scenarioAContemptProbePlaybackConfirmedRef: MutableRefObject<boolean>;
   showScenarioCardCanonicalPlaybackConfirmedKindsRef: MutableRefObject<

@@ -2,9 +2,10 @@ import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 
-import { mergeScenarioOpeningDeliveredFromPlaybackConfirmed } from '@features/aria/scenarioDeliveryResumeCheckpoint';
+import { mergeScenarioOpeningDeliveredFromPlaybackConfirmed, lastQuestionTextIndicatesScenarioOpeningDelivered, mergeScenarioOpeningDeliveredFor } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import type { ShowScenarioCardCanonicalPlaybackConfirmedKinds } from '@features/aria/showScenarioCardCanonicalTts';
 import type { ScenarioScoreResult } from '@features/aria/scoreInterviewScoringHelpers';
+import { takeInterviewAudioInterruptedByBackground } from '@features/aria/interviewLocalPersistence';
 import { getCurrentScenario } from '@utilities/storage/InterviewStorage';
 
 export type InterviewProgressSnapshotRefs = {
@@ -131,6 +132,78 @@ export type InterviewAuthSignedOutSaveDeps = InterviewProgressSnapshotRefs & {
   saveInterviewProgress: InterviewProgressSaveFn;
   setSessionExpired: Dispatch<SetStateAction<boolean>>;
 };
+
+export type InterviewNavigationAwayFlushDeps = InterviewProgressSnapshotRefs & {
+  userId: string | undefined;
+  isAdmin?: boolean;
+  interviewStatusRef: MutableRefObject<string>;
+  interviewSessionAttemptIdRef?: MutableRefObject<string | null>;
+  currentScenarioRef?: MutableRefObject<number>;
+  saveInterviewProgress: InterviewProgressSaveFn;
+};
+
+function stripScenarioOpeningCheckpointAfterTtsInterrupt(
+  snapshot: InterviewProgressSnapshotPayload,
+  deps: InterviewNavigationAwayFlushDeps,
+): InterviewProgressSnapshotPayload {
+  const scenario = deps.currentScenarioRef?.current;
+  if (scenario !== 1 && scenario !== 2 && scenario !== 3) return snapshot;
+  const nextOpening = snapshot.scenarioOpeningDeliveredFor?.filter((s) => s !== scenario);
+  const kind =
+    scenario === 1 ? 'situation_1' : scenario === 2 ? 'situation_2' : 'situation_3';
+  if (deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current?.[kind]) {
+    const confirmed = { ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current };
+    delete confirmed[kind];
+    deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = confirmed;
+  }
+  return {
+    ...snapshot,
+    scenarioOpeningDeliveredFor:
+      nextOpening && nextOpening.length > 0 ? nextOpening : undefined,
+  };
+}
+
+/** Best-effort checkpoint before Android back / navigation pops the interview screen. */
+export function flushInterviewProgressForNavigationAway(
+  deps: InterviewNavigationAwayFlushDeps,
+): void {
+  if (!deps.userId || deps.isAdmin) return;
+  if (deps.interviewStatusRef.current !== 'in_progress') {
+    return;
+  }
+  try {
+    const interrupted = takeInterviewAudioInterruptedByBackground();
+    let snapshot = buildInterviewProgressSnapshotFromRefs(deps);
+    if (interrupted === 'tts') {
+      snapshot = stripScenarioOpeningCheckpointAfterTtsInterrupt(snapshot, deps);
+    } else {
+      const scenario = deps.currentScenarioRef?.current;
+      if (
+        (scenario === 1 || scenario === 2 || scenario === 3) &&
+        lastQuestionTextIndicatesScenarioOpeningDelivered(snapshot.lastQuestionText, scenario)
+      ) {
+        snapshot = {
+          ...snapshot,
+          scenarioOpeningDeliveredFor: mergeScenarioOpeningDeliveredFor(
+            snapshot.scenarioOpeningDeliveredFor,
+            scenario,
+          ),
+        };
+      }
+    }
+    const playbackConfirmed =
+      deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {};
+    void deps.saveInterviewProgress(deps.userId, {
+      ...snapshot,
+      sessionAttemptId: deps.interviewSessionAttemptIdRef?.current ?? undefined,
+      navigationAwayFlush: true,
+      navigationAwayAudioInterrupt: interrupted ?? undefined,
+      backgroundProgressFlush: interrupted != null,
+    });
+  } catch {
+    // best-effort
+  }
+}
 
 export function installInterviewAuthSignedOutSaveListener(
   depsRef: MutableRefObject<InterviewAuthSignedOutSaveDeps>,

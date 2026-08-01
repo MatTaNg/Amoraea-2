@@ -1,10 +1,8 @@
-import { wrapForcedProbeWithAck } from '@features/aria/interviewAssistantReflection';
-import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
+import { deliverPostClaudeForcedCanonicalProbe } from '@features/aria/deliverPostClaudeForcedCanonicalProbe';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
-  PostClaudeInterviewMessage,
 } from '@features/aria/postClaudeAssistantTurnTypes';
 import {
   finishPostClaudeForcedConstructProbeGate,
@@ -13,10 +11,10 @@ import {
   type ForcedConstructProbeContext,
   type PostClaudeForcedConstructProbeGatesResult,
 } from '@features/aria/postClaudeForcedConstructProbeShared';
-import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { remoteLog } from '@utilities/remoteLog';
 
+/** Legacy S2 appreciation wording — distinct from canonical James-differently registry text. */
 const FORCED_SCENARIO_B_APPRECIATION_PROBE =
   "What do you think James could've done differently so Sarah feels better?";
 
@@ -66,31 +64,18 @@ export async function runPostClaudeScenarioBAppreciationForcedProbeGate(
     scenarioBQ1Engaged: params.scenarioBQ1Engaged,
     assistantIssuedScenarioBFullProbe,
   });
-  const wrappedAppreciationProbe = wrapForcedProbeWithAck(
-    params.trimmed,
-    strippedText,
-    FORCED_SCENARIO_B_APPRECIATION_PROBE,
-    recentAsstForAck,
-  );
-  const probeMsg: PostClaudeInterviewMessage = {
-    role: 'assistant',
-    content: wrappedAppreciationProbe,
-    scenarioNumber: deps.resolveAssistantScenarioNumber(wrappedAppreciationProbe, stagedMessages),
-  };
-  const liveTranscript = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : stagedMessages) as PostClaudeInterviewMessage[];
-  commitDedupedAssistantTranscriptTurn(
-    liveTranscript,
+
+  await deliverPostClaudeForcedCanonicalProbe({
+    deps,
+    params,
     stagedMessages,
-    wrappedAppreciationProbe,
-    {
-      scenarioNumber: probeMsg.scenarioNumber,
-      interviewMoment: deps.currentInterviewMomentRef.current,
-    },
-    (next) => deps.setMessages(next),
-  );
-  await deps.speakTextSafe(wrappedAppreciationProbe, ASSISTANT_INTERVIEW_SPEECH);
+    probeId: 's2_james_differently',
+    strippedText,
+    recentAsstForAck,
+    probeTextOverride: FORCED_SCENARIO_B_APPRECIATION_PROBE,
+    useSpeakTextSafe: true,
+    logTag: '[S2_APPRECIATION_FORCED_DELIVER]',
+  });
 
   return finishPostClaudeForcedConstructProbeGate(deps, {
     strippedText,

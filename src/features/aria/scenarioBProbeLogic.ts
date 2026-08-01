@@ -6,7 +6,8 @@ import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestra
 import { assistantTextLooksLikeMoment4HandoffLead } from './interviewTransitionBundles';
 import { isScenarioBoundaryPositiveAddressReflection } from './interviewReflectionTextStrips';
 import { isDecline } from './interviewControlTokens';
-import { looksLikeIncompleteCutOffUserAnswer } from './interviewAnswerRelevance';
+import { looksLikeIncompleteCutOffUserAnswer, looksLikeInterviewProcessMetaComment, looksLikeInterviewProcessQuestionRepeatRequest } from './interviewAnswerRelevance';
+import { classifyUserMetaComment } from './metaCommentClassifierCore';
 import {
   findLastUserWithPriorScenarioARepairContext,
   findLastUserWithPriorScenarioBJamesRepairContext,
@@ -216,6 +217,55 @@ export function lastScenarioBUserAnswerContent(messages?: readonly MessageWithSc
 }
 
 /** User turns since Scenario B vignette / Q1 — blocks premature S2→S3 after a single answer. */
+export function isScenarioBNonSubstantiveUserTurnForHandoff(
+  userContent: string,
+  priorAssistantContent?: string,
+): boolean {
+  const t = (userContent ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+  if (looksLikeInterviewProcessQuestionRepeatRequest(t)) return true;
+  if (looksLikeInterviewProcessMetaComment(t) && t.split(/\s+/).filter(Boolean).length <= 8) {
+    return true;
+  }
+  const prior = (priorAssistantContent ?? '').replace(/\s+/g, ' ').trim();
+  if (
+    prior &&
+    (looksLikeScenarioBQ1Question(prior) || isScenarioBQ1Prompt(prior)) &&
+    /\b(?:nothing really to comment on|am i supposed to be making assumptions|so far there'?s no (?:new )?question)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
+export function countScenarioBSubstantiveUserTurns(messages: readonly MessageWithScenario[]): number {
+  let count = 0;
+  let sawS2Start = false;
+  let lastAssistant = '';
+  for (const m of messages) {
+    if (m.role === 'assistant') {
+      lastAssistant = m.content ?? '';
+      if (textContainsScenarioBVignetteBody(lastAssistant) || looksLikeScenarioBQ1Question(lastAssistant)) {
+        sawS2Start = true;
+      }
+    }
+    if (m.role === 'user' && sawS2Start) {
+      if (!isScenarioBNonSubstantiveUserTurnForHandoff(m.content ?? '', lastAssistant)) {
+        count += 1;
+      }
+    }
+  }
+  if (count > 0) return count;
+  return messages.filter(
+    (m) =>
+      m.role === 'user' &&
+      m.scenarioNumber === 2 &&
+      !isScenarioBNonSubstantiveUserTurnForHandoff(m.content ?? '', lastAssistant),
+  ).length;
+}
+
 export function countScenarioBUserTurns(messages: readonly MessageWithScenario[]): number {
   let count = 0;
   let sawS2Start = false;
@@ -235,7 +285,7 @@ export function countScenarioBUserTurns(messages: readonly MessageWithScenario[]
 }
 
 export function scenarioBMinimumEngagementForHandoff(messages: readonly MessageWithScenario[]): boolean {
-  const userTurns = countScenarioBUserTurns(messages);
+  const userTurns = countScenarioBSubstantiveUserTurns(messages);
   if (userTurns >= 2) return true;
 
   const jamesRepairCtx = findLastUserWithPriorScenarioBJamesRepairContext(messages);
@@ -281,6 +331,32 @@ export function resolveScenarioBNextRequiredFollowUpPrompt(
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }
   return SCENARIO_B_JAMES_REPAIR_CANONICAL;
+}
+
+/** Active Scenario B question while S2 is in progress — never replay S1→S2 boundary copy. */
+export function resolveScenarioBActiveQuestionWhenInProgress(
+  messages: readonly MessageWithScenario[],
+): string {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const raw = (m.content ?? '').replace(/\s+/g, ' ').trim();
+    if (!raw) continue;
+    if (hasScenarioBoundaryWrapPhrase(raw)) continue;
+    if (looksLikeScenarioBRepairAsJamesQuestion(raw)) {
+      return coerceScenarioBJamesRepairQuestionForTts(raw);
+    }
+    if (
+      looksLikeScenarioBJamesDifferentlyQuestion(raw) &&
+      !looksLikeScenarioBRepairAsJamesQuestion(raw)
+    ) {
+      return coerceScenarioBJamesDifferentlyQuestionForTts(raw);
+    }
+    if (looksLikeScenarioBQ1Question(raw) || isScenarioBQ1Prompt(raw)) {
+      return coerceScenarioBQ1QuestionForTts(raw);
+    }
+  }
+  return SCENARIO_B_Q1_CANONICAL;
 }
 
 /** Scenario B Q3 repair-as-James already answered — skip re-asking Q2 or Q3. */
@@ -613,7 +689,11 @@ export function looksLikeScenarioBRepairAsJamesQuestion(text: string): boolean {
     /\b(repair|repairing|repairs|fix|make it right|make things right|patch things|apologize|mend|make up|sort (this|it) out)\b/.test(
       t,
     );
-  return asJames || howRepairJames || howJamesRepairThirdPerson || compact;
+  const howThinkJamesCouldRepair =
+    /\bhow do you think james\b/.test(t) &&
+    /\b(could|would|might|can)\b/.test(t) &&
+    /\brepair\b/.test(t);
+  return asJames || howRepairJames || howJamesRepairThirdPerson || howThinkJamesCouldRepair || compact;
 }
 
 /** Model jumped to Scenario C (or completion) without asking what James could have done differently first. */
@@ -1025,6 +1105,7 @@ export function shouldForceScenarioBJamesRepairProbe(params: {
   if (params.currentMoment !== 2) return false;
   if (scenarioBJamesRepairProbeAlreadySatisfied(params.messages)) return false;
   if (isDecline(params.userAnswer)) return false;
+  if (classifyUserMetaComment(params.userAnswer)?.type === 'checking_in') return false;
   if (looksLikeIncompleteCutOffUserAnswer(params.userAnswer)) return false;
   if (!looksLikeScenarioBJamesDifferentlyQuestion(params.lastAssistantContent)) return false;
   if (transcriptAlreadyContainsScenarioBRepairAsJamesQuestion(params.messages)) return false;

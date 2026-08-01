@@ -45,6 +45,7 @@ export {
   scoreEmotionItems,
   emotionRecognitionCorrectCount,
   resolveEmotionRecognitionRawScoreForGate,
+  resolveEmotionRecognitionCorrectCountForGate,
   isLegacyEmotionRecognitionFloorOnlyFail,
   LEGACY_EMOTION_RECOGNITION_FLOOR_REVIEW_NOTE,
 } from './emotionRecognitionScoring';

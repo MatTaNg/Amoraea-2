@@ -32,6 +32,7 @@ import {
   pickClientDisengagementProbe,
   repairAnswerHasConcreteSuggestionActionOrStep,
   repairAnswerShowsRefusalOrCharacterDeflection,
+  scenarioARepairAnswerAlreadySatisfiedInTranscript,
   scenarioALastAssistantIsRepairProbeOrFollowUp,
   userAnswerHasSophiePerspectiveLanguage,
 } from '../interviewDisengagementProbes';
@@ -66,6 +67,16 @@ describe('interviewDisengagementProbes', () => {
         "How would you describe James's approach when Sarah got upset?",
       ),
     ).toBe(false);
+    expect(
+      looksLikeScenarioBRepairAsJamesQuestion(
+        'How do you think James could repair this with Sarah now?',
+      ),
+    ).toBe(true);
+    expect(
+      isScenarioBRepairAsJamesQuestion(
+        'How do you think James could repair this with Sarah now?',
+      ),
+    ).toBe(true);
     expect(
       isScenarioBRepairAsJamesQuestion(
         "How would you describe James's approach when Sarah got upset?",
@@ -450,6 +461,25 @@ describe('interviewDisengagementProbes', () => {
     );
   });
 
+  it('treats Ryan limit-calls / prioritize-Emma boundary answers as concrete repair content', () => {
+    const userAnswer =
+      "If I were Ryan, I would limit calls with my family unless it's an emergency, I would limit them while Emma and I are spending time together, or I would schedule a call with that family member for a later time and make sure that I'm prioritizing my time with Emma if it's not an emergency type situation.";
+    expect(repairAnswerHasConcreteSuggestionActionOrStep(userAnswer)).toBe(true);
+    expect(
+      evaluateRepairRefusalDetection(userAnswer, userAnswer.split(/\s+/).length).has_concrete_repair_content,
+    ).toBe(true);
+    expect(
+      userAnswerSatisfiesScenarioARepairPrompt(
+        userAnswer,
+        'If you were Ryan, how would you repair this?',
+      ),
+    ).toBe(true);
+    expect(scenarioARepairAnswerAlreadySatisfiedInTranscript([
+      { role: 'assistant', content: 'If you were Ryan, how would you repair this?' },
+      { role: 'user', content: userAnswer },
+    ])).toBe(true);
+  });
+
   it('treats first-person Ryan sit-down / setting-boundaries answers as concrete repair content', () => {
     const userAnswer =
       "If I were Ryan, which I'm not, I would have a sit down with both my mother and with Emma. For my mother, I would be setting boundaries, letting her know that she doesn't have instant constant access to me. As for Emma, I would truly assert in how she feels, not only what's happening right in the now, I would go deeper into her emotional state and her triggering in her past to find out why this is so triggering for her.";
@@ -683,7 +713,7 @@ describe('interviewDisengagementProbes', () => {
     const out = applyPostClaudeScenarioAdvanceBundleOverride(draft, 'Matt', messages, 1, 1);
     expect(out).toMatch(/\[SCENARIO_COMPLETE:1\]/i);
     expect(out).toMatch(/Sarah has been job hunting/i);
-    expect(out).toMatch(/What (?:I (?:got|heard)|came through) was that/i);
+    expect(out).toMatch(/What do you think is going on here/i);
   });
 
   it('advances Scenario A when model re-asks repair after a concrete repair answer', () => {
@@ -1206,6 +1236,23 @@ describe('interviewDisengagementProbes', () => {
 });
 
 describe('findLastRepeatableInterviewQuestionText', () => {
+  it('replays S1 opening Q1 when a later phantom repair probe exists before the user answers Q1', () => {
+    const scenarioQuestion =
+      "Here's the first situation:\n\nEmma and Ryan have dinner plans. Ryan takes a call from his mother halfway through. What's going on between these two?";
+    const messages = [
+      { role: 'assistant', content: 'Welcome to Amoraea.' },
+      { role: 'user', content: 'Matt' },
+      { role: 'assistant', content: 'Are you ready?' },
+      { role: 'user', content: 'Yes' },
+      { role: 'assistant', content: scenarioQuestion },
+      { role: 'assistant', content: 'If you were Ryan, how would you repair this?' },
+    ];
+    const replayed = findLastRepeatableInterviewQuestionText(messages, 'If you were Ryan, how would you repair this?', {
+      activeScenario: 1,
+    });
+    expect(replayed).toBe("What's going on between these two?");
+  });
+
   it('skips elongating and meta-comment probes and returns prior scenario question', () => {
     const scenarioQuestion =
       "Here's the first situation:\n\nEmma and Ryan have dinner plans. What's going on between these two?";

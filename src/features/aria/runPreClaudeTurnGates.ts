@@ -26,6 +26,7 @@ import {
 import type { PreClaudeTurnGateDeps, PreClaudeTurnGateParams } from '@features/aria/preClaudeTurnGateTypes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { triggerLiveMoment4ScoringOnM5Entry } from '@features/aria/liveMoment4ScoringOnM5Entry';
+import { logInterviewTurnOrchestratorShadow } from '@features/aria/logInterviewTurnOrchestratorShadow';
 import { reconcileMoment5DeliveryFromTranscript } from '@features/aria/moment5DeliveryReconcile';
 
 export async function runPreClaudeTurnGates(
@@ -82,6 +83,7 @@ export async function runPreClaudeTurnGates(
     skipMeta.metaCommentClassification,
     preCommit.isNameEntryTurn,
     skipMeta.suppressForcedConstructProbesForMetaFrustration,
+    skipMeta.checkingInFrustrationAdjacent,
   );
   if (lateIntercept.handled) {
     return false;
@@ -101,6 +103,19 @@ export async function runPreClaudeTurnGates(
   if (!assertPreClaudeAnthropicConfigured(deps)) {
     return false;
   }
+
+  const resolvedOrchestrator = lateIntercept.resolvedOrchestrator;
+
+  logInterviewTurnOrchestratorShadow({
+    deps,
+    trimmed: params.trimmed,
+    messagesToUse,
+    lastAssistantContent: lateIntercept.lastAssistantContent,
+    constructProbeFlags: lateIntercept.constructProbeFlags,
+    metaCommentClassification: skipMeta.metaCommentClassification,
+    constructSatisfactionResolvedByProbe: lateIntercept.constructSatisfactionResolvedByProbe,
+    resolvedOrchestrator,
+  });
 
   buildPreClaudeTurnApiParams(deps, params, {
     messagesToUse,
@@ -122,6 +137,8 @@ export async function runPreClaudeTurnGates(
     frustrationSkipDeclinePipeline: skipMeta.frustrationSkipDeclinePipeline,
     proactiveScenarioSkipConfirmationInjection: skipMeta.proactiveScenarioSkipConfirmationInjection,
     constructProbeFlags: lateIntercept.constructProbeFlags,
+    constructSatisfactionResolvedByProbe: lateIntercept.constructSatisfactionResolvedByProbe,
+    orchestratorDecision: resolvedOrchestrator.decision,
   });
   return true;
 }

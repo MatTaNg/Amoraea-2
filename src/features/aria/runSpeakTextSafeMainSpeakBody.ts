@@ -111,8 +111,10 @@ export async function runSpeakTextSafeMainSpeakBody(
 
     let audioPlaybackTruncated = false;
     let durationMatch = false;
+    let expectedTtsMs = 0;
     if (userId) {
-      ({ audioPlaybackTruncated, durationMatch } = writeSpeakTextSafePlaybackCompletionTelemetry({
+      ({ audioPlaybackTruncated, durationMatch, expectedTtsMs } =
+        writeSpeakTextSafePlaybackCompletionTelemetry({
         userId,
         text,
         telemetrySource,
@@ -131,6 +133,8 @@ export async function runSpeakTextSafeMainSpeakBody(
         text,
         audioPlaybackTruncated,
         durationMatch,
+        actualDurationMs: actualTtsMs,
+        expectedDurationMs: expectedTtsMs,
         lastQuestionText: lastQuestionTextRef?.current ?? null,
         sessionAttemptId: interviewSessionAttemptIdRef?.current ?? null,
         currentScenario: currentScenarioRef.current,

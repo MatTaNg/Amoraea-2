@@ -12,7 +12,7 @@ import {
 import type { InterviewProgressRefs } from '@features/aria/interviewProgressSync';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
-import { buildScenario1To2BundleForInterview } from '@features/aria/interviewTransitionBundles';
+import { buildScenarioFictionHandoffBundleWithDynamicLead } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
@@ -75,11 +75,12 @@ export async function runPreClaudeScenario1RepairHardStopGate(
     [...messagesToUse, { role: 'user', content: trimmed, scenarioNumber: 1 }],
     1,
   );
-  const bundle = buildScenario1To2BundleForInterview(
-    participantFirstNameForSpoken,
-    SCENARIO_2_TEXT,
-    userCorpus,
-  );
+  const bundle = await buildScenarioFictionHandoffBundleWithDynamicLead({
+    completedScenario: 1,
+    firstName: participantFirstNameForSpoken,
+    lastUserAnswer: userCorpus,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
   const lead = "Understood — we'll leave it there for this one. ";
   let fullDisplay = dedupeAdjacentBoundaryValidationsBeforeParticipantName(
     sanitizeAssistantInterviewerCharacterNames(lead + bundle),

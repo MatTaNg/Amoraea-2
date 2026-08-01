@@ -93,9 +93,7 @@ export interface OnboardingData {
   prefPartnerSharesSexualInterests?: string;
   sexDrive?: string;
   sexInterestCategories?: string[];
-  /** Pace after the initial excitement of meeting someone */
-  datingPaceAfterExcitement?: string;
-  /** Most recent dating: what happened in the first 2–3 weeks */
+  /** Most recent dating: how often you saw each other in the first 2–3 weeks */
   recentDatingEarlyWeeks?: string;
   /** Bandwidth / priority for a new relationship right now */
   spaceForNewRelationship?: string;

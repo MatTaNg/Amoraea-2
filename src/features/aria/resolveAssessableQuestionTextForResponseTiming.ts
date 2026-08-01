@@ -8,6 +8,11 @@ import {
 } from '@features/aria/moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
 import {
+  looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBRepairAsJamesQuestion,
+  SCENARIO_B_JAMES_REPAIR_CANONICAL,
+} from '@features/aria/scenarioBProbeLogic';
+import {
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCSophiePerspectiveQuestion,
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
@@ -43,6 +48,9 @@ export function resolveAssessableQuestionTextForResponseTiming(
   }
   if (isScenarioCRepairAssistantPrompt(t)) {
     return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+  }
+  if (looksLikeScenarioBRepairAsJamesQuestion(t)) {
+    return SCENARIO_B_JAMES_REPAIR_CANONICAL;
   }
 
   const extracted = extractScenarioModalQuestionFromAssistantText(t);

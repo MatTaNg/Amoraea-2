@@ -31,7 +31,30 @@ import {
 } from '@/shared/constants/typologyOnboardingOptions';
 import { normalizeArchetypesFromProfile, isCompleteArchetypeSelection } from '@/shared/constants/archetypes';
 import { fetchLifeDomainAnswersMap } from '@/screens/profile/editProfile/lifeDomainProfileService';
+import { parseStoredHeightCm, parseStoredWeightKg } from '@/shared/utils/unitConversions';
 import { ONBOARDING_STEPS_ORDER } from '../onboardingStepOrder';
+
+function filterPersistableProfilePhotoUrls(photos: string[] | undefined): string[] {
+  if (!Array.isArray(photos)) return [];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of photos) {
+    const url = typeof raw === 'string' ? raw.trim() : '';
+    if (!url) continue;
+    const normalized = url.startsWith('//') ? `https:${url}` : url;
+    const ok =
+      /^https?:\/\//i.test(normalized) ||
+      normalized.startsWith('file:') ||
+      normalized.startsWith('blob:') ||
+      normalized.startsWith('content:') ||
+      normalized.startsWith('ph://') ||
+      normalized.startsWith('assets-library:');
+    if (!ok || seen.has(normalized)) continue;
+    seen.add(normalized);
+    out.push(normalized);
+  }
+  return out;
+}
 
 class ModalOnboardingService {
   private matchPrefStringMissing(ctx: any, key: string): boolean {
@@ -250,11 +273,6 @@ class ModalOnboardingService {
       religion: coalesce((p as any).religion, d.religion),
       sexDrive: coalesce((p as any).sexDrive, (p as any).sex_drive, d.sexDrive),
       sexInterestCategories: coalesce((p as any).sexInterestCategories, d.sexInterestCategories),
-      datingPaceAfterExcitement: coalesce(
-        (p as any).datingPaceAfterExcitement,
-        (p as any).dating_pace_after_excitement,
-        d.datingPaceAfterExcitement,
-      ),
       recentDatingEarlyWeeks: coalesce(
         (p as any).recentDatingEarlyWeeks,
         (p as any).recent_dating_early_weeks,
@@ -488,7 +506,9 @@ class ModalOnboardingService {
             : savedStep === 'sexOpenness' || savedStep === 'sexFrequency'
               ? 'sexInterests'
               : savedStep === 'sexualFeedback' || savedStep === 'sexualNeedsCommunication'
-                ? 'datingPaceAfterExcitement'
+                ? 'recentDatingEarlyWeeks'
+                : savedStep === 'datingPaceAfterExcitement'
+                  ? 'recentDatingEarlyWeeks'
                 : savedStep;
       const tailSteps = [
         'recreationalDrugsSocial',
@@ -502,7 +522,6 @@ class ModalOnboardingService {
         'sexInterests',
         'partnerMoodMismatch',
         'sexualFocus',
-        'datingPaceAfterExcitement',
         'recentDatingEarlyWeeks',
         ...LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
         'spaceForNewRelationship',
@@ -572,8 +591,6 @@ class ModalOnboardingService {
       return resumeStep;
     }
     if (!ctx?.displayName) return 'name';
-    if (this.hobbiesMissing(ctx)) return 'hobbies';
-    if (this.hobbyDealbreakerMissing(ctx)) return 'hobbyDealbreaker';
     if (!ctx?.attractedTo || ctx.attractedTo.length === 0) return 'attraction';
     if (!(ctx as any)?.ethnicity || String((ctx as any).ethnicity).trim() === '') return 'ethnicity';
     if (this.ethnicityAttractionMissing(ctx)) return 'ethnicityAttraction';
@@ -584,8 +601,15 @@ class ModalOnboardingService {
     if (!longest || String(longest).trim() === '') return 'longestRelationship';
     if (!ctx?.location) return 'location';
     if (!(ctx as any)?.educationLevel && !(ctx as any)?.education_level) return 'educationLevel';
-    if (!ctx?.height && !ctx?.weight && (ctx as any).height_cm == null && (ctx as any).weight_kg == null)
+    if (
+      (ctx as any).height_cm == null &&
+      !ctx?.height &&
+      (ctx as any).weight_kg == null &&
+      !ctx?.weight
+    )
       return 'heightWeight';
+    if (this.hobbiesMissing(ctx)) return 'hobbies';
+    if (this.hobbyDealbreakerMissing(ctx)) return 'hobbyDealbreaker';
     if (!ctx?.workout) return 'workout';
     if (!ctx?.smoking) return 'smoking';
     if (this.matchPrefStringMissing(ctx, 'partnerAlignmentTobacco')) return 'partnerAlignmentTobacco';
@@ -621,12 +645,6 @@ class ModalOnboardingService {
     if (this.ctxStringMissing(ctx, 'prefPartnerSharesSexualInterests')) return 'partnerSharesSexualInterests';
     if (!String((ctx as any)?.partnerMoodMismatchResponse ?? '').trim()) return 'partnerMoodMismatch';
     if (!String((ctx as any)?.sexualFocusPreference ?? '').trim()) return 'sexualFocus';
-    if (
-      !String(
-        (ctx as any)?.datingPaceAfterExcitement ?? (ctx as any)?.dating_pace_after_excitement ?? '',
-      ).trim()
-    )
-      return 'datingPaceAfterExcitement';
     if (!String((ctx as any)?.recentDatingEarlyWeeks ?? (ctx as any)?.recent_dating_early_weeks ?? '').trim())
       return 'recentDatingEarlyWeeks';
     const incompleteLifeDomainQuestions = this.firstIncompleteLifeDomainQuestionStep(ctx);
@@ -706,6 +724,8 @@ class ModalOnboardingService {
       birthLocation: (profile as any)?.birthLocation,
       height: profile?.height != null ? String(profile.height) : undefined,
       weight: profile?.weight != null ? String(profile.weight) : undefined,
+      height_cm: parseStoredHeightCm(profile as Record<string, unknown>),
+      weight_kg: parseStoredWeightKg(profile as Record<string, unknown>),
       gender: profile?.gender ? mapGenderToUi(profile.gender) : undefined,
       ethnicity: (profile as any)?.ethnicity ? String((profile as any).ethnicity) : undefined,
       attractedTo: profile?.attractedTo,
@@ -781,8 +801,6 @@ class ModalOnboardingService {
       sexInterestCategories: Array.isArray((profile as any)?.sexInterestCategories)
         ? [...(profile as any).sexInterestCategories]
         : undefined,
-      datingPaceAfterExcitement:
-        (profile as any)?.datingPaceAfterExcitement ?? (profile as any)?.dating_pace_after_excitement,
       recentDatingEarlyWeeks:
         (profile as any)?.recentDatingEarlyWeeks ?? (profile as any)?.recent_dating_early_weeks,
       spaceForNewRelationship:
@@ -1150,8 +1168,6 @@ class ModalOnboardingService {
       if (data.sexDrive !== undefined) (profileUpdates as any).sexDrive = data.sexDrive;
       if (data.sexInterestCategories !== undefined)
         (profileUpdates as any).sexInterestCategories = data.sexInterestCategories;
-      if (data.datingPaceAfterExcitement !== undefined)
-        (profileUpdates as any).datingPaceAfterExcitement = data.datingPaceAfterExcitement;
       if (data.recentDatingEarlyWeeks !== undefined)
         (profileUpdates as any).recentDatingEarlyWeeks = data.recentDatingEarlyWeeks;
       if (data.spaceForNewRelationship !== undefined)
@@ -1175,8 +1191,9 @@ class ModalOnboardingService {
       }
       if (data.contactPreference) profileUpdates.contactPreference = data.contactPreference;
       if (data.phoneNumber) profileUpdates.phoneNumber = data.phoneNumber;
-      if (data.photos && data.photos.length > 0) {
-        profileUpdates.photos = data.photos;
+      const persistablePhotos = filterPersistableProfilePhotoUrls(data.photos);
+      if (persistablePhotos.length > 0) {
+        profileUpdates.photos = persistablePhotos;
       }
       if (data.bio) profileUpdates.bio = data.bio;
       if (data.lifeDomains) {

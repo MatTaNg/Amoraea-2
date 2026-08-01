@@ -28,5 +28,10 @@ export function isInterviewResumeHandleActive(userId: string | undefined): boole
 
 /** User tapped Begin while a stale resume guard blocked progress — allow a fresh attempt. */
 export function clearInterviewResumeHandle(userId: string | undefined): void {
-  if (userId) activeResumeByUserId.delete(userId);
+  if (userId) {
+    const had = activeResumeByUserId.has(userId);
+    activeResumeByUserId.delete(userId);
+    if (had) {
+    }
+  }
 }

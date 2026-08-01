@@ -17,6 +17,7 @@ import {
   isScenarioAHandoffWithoutNextVignette,
 } from '@features/aria/scenarioAContemptProbeTextMatch';
 import type { PostClaudeInterviewMessage } from '@features/aria/postClaudeAssistantTurnTypes';
+import { hasScenarioBoundaryWrapPhrase } from '@features/aria/emotionModalTransitionOrchestration';
 import {
   textHasScenarioBoundaryConclusion,
   extractScenarioBoundaryReflectionFromHandoff,
@@ -29,8 +30,10 @@ import { looksLikeInterviewClosingAssistantMessage } from '@features/aria/elonga
 import {
   isScenarioBBoundaryReflectionWithoutNextVignette,
   isScenarioBQ1Prompt,
+  countScenarioBUserTurns,
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
+  resolveScenarioBActiveQuestionWhenInProgress,
   resolveScenarioBNextRequiredFollowUpPrompt,
   scenarioBMinimumEngagementForHandoff,
   scenarioBJamesRepairProbeAlreadySatisfied,
@@ -181,9 +184,24 @@ function hasS2ToS3HandoffCue(raw: string, hasS3Vignette: boolean): boolean {
 function looksLikeScenarioBInProgressAssistantProbe(text: string): boolean {
   const t = (text ?? '').trim();
   if (!t) return false;
+  if (isLegitimateS1ToS2HandoffDelivery(t)) return false;
   if (looksLikeScenarioBRepairAsJamesQuestion(t)) return true;
   if (looksLikeScenarioBJamesDifferentlyQuestion(t)) return true;
   if (isScenarioBQ1Prompt(t)) return true;
+  return false;
+}
+
+function scenarioBUserEngagementStarted(messages: PostClaudeInterviewMessage[]): boolean {
+  if (countScenarioBUserTurns(messages) > 0) return true;
+  return messages.some((m) => m.role === 'user' && m.scenarioNumber === 2);
+}
+
+function isLegitimateS1ToS2HandoffDelivery(raw: string): boolean {
+  const t = (raw ?? '').trim();
+  if (!t) return false;
+  if (hasScenarioBoundaryWrapPhrase(t)) return true;
+  if (/sarah has been job hunting for four months/i.test(t)) return true;
+  if (isScenarioAHandoffWithoutNextVignette(t)) return true;
   return false;
 }
 
@@ -238,6 +256,33 @@ export function coerceScenarioBoundaryHandoffDisplayText(
     );
 
   if (s1Handoff) {
+    if (
+      s2DeliveryIrrevocable &&
+      activeScenario === 2 &&
+      !scenarioBMinimumEngagementForHandoff(messages) &&
+      (scenarioBUserEngagementStarted(messages) ||
+        !isLegitimateS1ToS2HandoffDelivery(raw))
+    ) {
+      if (looksLikeScenarioBInProgressAssistantProbe(raw)) {
+        return displayText;
+      }
+      if (
+        /\?\s*$/.test(raw) &&
+        !hasScenarioBoundaryWrapPhrase(raw) &&
+        !/\b(?:here'?s the next situation|end of this scenario|that'?s the end of)\b/i.test(raw)
+      ) {
+        void remoteLog('[S1_S2_HANDOFF_SKIPPED_S2_IN_PROGRESS_KEEP_REDIRECT]', {
+          preview: raw.slice(0, 220),
+        });
+        return displayText;
+      }
+      const redirect = resolveScenarioBActiveQuestionWhenInProgress(messages);
+      void remoteLog('[S1_S2_HANDOFF_SKIPPED_S2_IN_PROGRESS]', {
+        preview: raw.slice(0, 200),
+        redirectPreview: redirect.slice(0, 200),
+      });
+      return redirect;
+    }
     if (!scenarioAMinimumEngagementForHandoff(messages) && !s2DeliveryIrrevocable) {
       const stripped = stripPrematureScenarioABoundaryFromDraft(raw);
       const redirect = resolveScenarioANextRequiredFollowUpPrompt(messages);

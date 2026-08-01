@@ -17,6 +17,7 @@ import {
 import {
   buildScenarioPlusQuestionRepeatTts,
   getScenarioVignetteBodyForRepeat,
+  looksLikeScenarioRepeatRequest,
   shouldAttachScenarioVignetteForRepeat,
   withRepeatRequestAcknowledgment,
 } from '@features/aria/interviewRepeatRequestTarget';
@@ -102,11 +103,14 @@ export async function runPreClaudeResumeRepeatGate(
     welcomeIntent = 'repeat_scenario';
   }
 
+  const isConfusionRepeatMeta =
+    args.metaCommentClassification?.type === 'confusion' &&
+    args.metaCommentClassification?.confusion_subtype === 'repeat_request';
+
   const deferRepeatToMetaVerbatimHandler =
-    welcomeIntent === 'ambiguous' &&
-    ((args.metaCommentClassification?.type === 'confusion' &&
-      args.metaCommentClassification?.confusion_subtype === 'repeat_request') ||
-      isExplicitRepeatRequestPreClassification(args.trimmed));
+    (welcomeIntent === 'ambiguous' &&
+      (isConfusionRepeatMeta || isExplicitRepeatRequestPreClassification(args.trimmed))) ||
+    (isConfusionRepeatMeta && !looksLikeScenarioRepeatRequest(args.trimmed));
   if (deferRepeatToMetaVerbatimHandler) {
     // Keep resumeLastAssistantTextRef — meta verbatim replay uses it as fallback so a
     // post-reentry "repeat what you said" does not fall through to the opening briefing.

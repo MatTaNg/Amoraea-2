@@ -42,8 +42,12 @@ import {
 } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { SCENARIO_2_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
+import {
+  applyPostClaudeScenarioAdvanceBundleOverride,
+  resolveScenarioUserTextForBoundaryReflection,
+} from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import { buildScenario1To2BundleForInterview } from '@features/aria/interviewTransitionBundles';
-import { applyPostClaudeScenarioAdvanceBundleOverride, resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
+import { enrichScenarioBoundaryHandoffBundleWithDynamicLead } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { shouldAdvanceScenarioAAfterSatisfiedRepair } from '@features/aria/interviewDisengagementProbes';
 import { hasScenarioBoundaryWrapPhrase } from '@features/aria/emotionModalTransitionOrchestration';
 import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
@@ -534,6 +538,16 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
       emotionCatchUpSource: 'elongating_suppressed_m5_close_fallback',
     });
     return { handled: true };
+  }
+
+  if (/\[SCENARIO_COMPLETE:/i.test(nextText)) {
+    nextText = await enrichScenarioBoundaryHandoffBundleWithDynamicLead({
+      bundleText: nextText,
+      firstName: params.participantFirstNameForSpoken,
+      messages: params.messagesToUse,
+      interviewSessionId: deps.interviewSessionIdRef.current,
+    });
+    nextDisplayText = stripControlTokens(nextText);
   }
 
   return { handled: false, text: nextText, displayText: nextDisplayText };

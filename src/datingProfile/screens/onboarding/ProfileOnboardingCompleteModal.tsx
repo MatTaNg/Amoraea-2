@@ -7,12 +7,13 @@ import { theme } from '@/shared/theme/theme';
 
 type Props = {
   onContinue: () => void;
+  continuing?: boolean;
 };
 
 /**
  * Shown after modal profile onboarding (including life domains) before edit profile.
  */
-export function ProfileOnboardingCompleteModal({ onContinue }: Props) {
+export function ProfileOnboardingCompleteModal({ onContinue, continuing = false }: Props) {
   return (
     <SafeAreaView style={styles.safe} edges={ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM}>
       <ScrollView
@@ -45,7 +46,13 @@ export function ProfileOnboardingCompleteModal({ onContinue }: Props) {
           </View>
 
           <View style={styles.buttonBlock}>
-            <Button title="View my profile →" onPress={onContinue} variant="solid" />
+            <Button
+              title="View my profile →"
+              onPress={onContinue}
+              variant="solid"
+              loading={continuing}
+              disabled={continuing}
+            />
           </View>
         </View>
       </ScrollView>

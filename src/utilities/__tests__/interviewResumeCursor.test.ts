@@ -618,6 +618,42 @@ describe('interviewResumeCursor', () => {
     expect(plan.effectiveMoment).toBe(4);
   });
 
+  it('uses resume_post_scenarios when corrupt S3 scoring but M4 grudge is in lastQuestionText only', () => {
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2, 3],
+      scenarioScores: {},
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      transcriptMessages: [
+        { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioNumber: 3 },
+        { role: 'user', content: 'They could repair if Daniel acknowledged her feelings.', scenarioNumber: 3 },
+      ],
+      syncedMoments: {
+        momentsComplete: { 1: false, 2: false, 3: false, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+      lastQuestionText: MOMENT_4_GRUDGE_QUESTION_TEXT,
+    });
+    expect(plan.mode).toBe('resume_post_scenarios');
+    expect(plan.effectiveMoment).toBe(4);
+    expect(plan.rewindDueToCorruptScoring).toBe(false);
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: MOMENT_4_GRUDGE_QUESTION_TEXT,
+      }).toLowerCase(),
+    ).toContain('personal part');
+    expect(
+      buildResumeWelcomeMessage({
+        mode: plan.mode,
+        resumeScenario: plan.resumeScenario,
+        lastQuestionText: MOMENT_4_GRUDGE_QUESTION_TEXT,
+      }).toLowerCase(),
+    ).not.toContain('scenario three');
+  });
+
   it('stays on scenario 3 when all scenarios scored but S3 Q&A is still in progress', () => {
     const s3Question =
       "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
@@ -662,6 +698,36 @@ describe('interviewResumeCursor', () => {
         lastQuestionText: s3Question,
       }).toLowerCase(),
     ).not.toContain('personal part');
+  });
+
+  it('stays on scenario 3 when Sophie perspective was delivered but not yet answered', () => {
+    const s3Q1 =
+      "When Daniel comes back and says 'I didn't know what to say,' what do you make of that?";
+    const sophieQ = 'What do you think this pattern of leaving has been like for Sophie over time?';
+    const transcriptMessages = [
+      { role: 'assistant', content: s3Q1, scenarioNumber: 3 },
+      { role: 'user', content: 'Daniel avoids conflict and shuts down.', scenarioNumber: 3 },
+      { role: 'assistant', content: sophieQ, scenarioNumber: 3 },
+    ];
+    const plan = computeInterviewResumePlan({
+      scenariosCompleted: [1, 2],
+      scenarioScores: {
+        1: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+        2: { pillarScores: { repair: 6 }, pillarConfidence: {}, keyEvidence: {} },
+      },
+      resumeActiveFromStorage: 3,
+      resumeActiveFromAttempt: 3,
+      transcriptMessages,
+      syncedMoments: {
+        momentsComplete: { 1: true, 2: true, 3: false, 4: false, 5: false },
+        currentMoment: 3,
+        personalHandoffInjected: false,
+      },
+    });
+    expect(plan.mode).toBe('replay_incomplete');
+    expect(plan.effectiveMoment).toBe(3);
+    expect(plan.resumeScenario).toBe(3);
+    expect(plan.momentsComplete[3]).toBe(false);
   });
 
   it('advances to Moment 4 when S3 repair is satisfied but scenario scores never persisted', () => {

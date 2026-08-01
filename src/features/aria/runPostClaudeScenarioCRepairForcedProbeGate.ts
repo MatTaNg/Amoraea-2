@@ -1,9 +1,8 @@
-import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
+import { deliverPostClaudeForcedCanonicalProbe } from '@features/aria/deliverPostClaudeForcedCanonicalProbe';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
-  PostClaudeInterviewMessage,
 } from '@features/aria/postClaudeAssistantTurnTypes';
 import {
   finishPostClaudeForcedConstructProbeGate,
@@ -22,37 +21,28 @@ import {
   markS3RepairProbeTtsDelivered,
 } from '@features/aria/scenarioCDeliveryReconcile';
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
-import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { remoteLog } from '@utilities/remoteLog';
 
-function commitScenarioCRepairTranscriptIfNeeded(
-  deps: PostClaudeAssistantTurnDeps,
-  params: PostClaudeAssistantTurnParams,
-): void {
-  if (!shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_C_REPAIR_QUESTION_CANONICAL)) {
-    return;
-  }
-  const repairMsg: PostClaudeInterviewMessage = {
-    role: 'assistant',
-    content: SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    scenarioNumber: deps.resolveAssistantScenarioNumber(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-      params.messagesToUse,
-    ),
-  };
-  const liveTranscript = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : params.messagesToUse) as PostClaudeInterviewMessage[];
-  commitDedupedAssistantTranscriptTurn(
-    liveTranscript,
-    params.messagesToUse,
-    SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    {
-      scenarioNumber: repairMsg.scenarioNumber,
-      interviewMoment: deps.currentInterviewMomentRef.current,
-    },
-    (next) => deps.setMessages(next),
-  );
+async function deliverS3RepairForcedProbe(args: {
+  deps: PostClaudeAssistantTurnDeps;
+  params: PostClaudeAssistantTurnParams;
+  speakAssistantTurn?: PostClaudeSpeakAssistantTurn;
+  skipSpeak?: boolean;
+  logTag: string;
+}): Promise<void> {
+  await deliverPostClaudeForcedCanonicalProbe({
+    deps: args.deps,
+    params: args.params,
+    stagedMessages: args.params.messagesToUse,
+    probeId: 's3_repair',
+    skipAckWrap: true,
+    respectTranscriptDedup: true,
+    skipSpeak: args.skipSpeak,
+    speakAssistantTurn: args.speakAssistantTurn,
+    forceSpeakDespiteParallelStream: true,
+    logTag: args.logTag,
+  });
+  markS3RepairProbeTtsDelivered(args.deps);
 }
 
 export async function runPostClaudeScenarioCRepairForcedProbeGate(
@@ -95,8 +85,12 @@ export async function runPostClaudeScenarioCRepairForcedProbeGate(
     if (!repairStillPending) {
       return null;
     }
-    commitScenarioCRepairTranscriptIfNeeded(deps, params);
-    markS3RepairProbeTtsDelivered(deps);
+    await deliverS3RepairForcedProbe({
+      deps,
+      params,
+      skipSpeak: true,
+      logTag: '[S3_REPAIR_FORCED_SKIPPED_STREAM_ALREADY_SPOKE]',
+    });
     void remoteLog('[S3_REPAIR_FORCED_SKIPPED_STREAM_ALREADY_SPOKE]', {
       interviewSessionId: deps.interviewSessionIdRef.current,
       deliveredRef: deps.s3RepairProbeDeliveredRef.current,
@@ -121,11 +115,11 @@ export async function runPostClaudeScenarioCRepairForcedProbeGate(
     return null;
   }
 
-  commitScenarioCRepairTranscriptIfNeeded(deps, params);
-  markS3RepairProbeTtsDelivered(deps);
-  await speakAssistantTurn(SCENARIO_C_REPAIR_QUESTION_CANONICAL, {
-    ...ASSISTANT_INTERVIEW_SPEECH,
-    forceSpeakDespiteParallelStream: true,
+  await deliverS3RepairForcedProbe({
+    deps,
+    params,
+    speakAssistantTurn,
+    logTag: '[S3_REPAIR_FORCED]',
   });
   void remoteLog('[S3_REPAIR_FORCED]', {
     injectedRepairQ2: true,

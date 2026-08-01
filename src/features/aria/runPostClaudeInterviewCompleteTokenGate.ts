@@ -3,6 +3,7 @@ import {
   finalizePostClaudePendingInterviewCompletion,
   markPostClaudeInterviewCompletionState,
 } from '@features/aria/finalizePostClaudePendingInterviewCompletion';
+import { hasInterviewClosingTtsDeliveredForSession } from '@features/aria/interviewClosingTtsSession';
 import { sanitizePostClaudeClosingDisplayText } from '@features/aria/sanitizePostClaudeClosingDisplayText';
 import type {
   PostClaudeAssistantTurnDeps,
@@ -53,10 +54,14 @@ export async function runPostClaudeInterviewCompleteTokenGate(
   const finalMessages = [...params.messagesToUse, finalAssistant];
   deps.setMessages(finalMessages);
   const transcriptForScoring = finalMessages.filter((m) => m.role === 'user' || m.role === 'assistant');
+  const closingTtsSessionKey =
+    deps.interviewSessionAttemptIdRef.current ?? deps.interviewSessionIdRef.current;
+  const closingAlreadyAudible = hasInterviewClosingTtsDeliveredForSession(closingTtsSessionKey);
   try {
     await speakAssistantTurn(displayText, {
       telemetrySource: 'turn',
       interviewSpeechRole: 'assistant_response',
+      forceSpeakDespiteParallelStream: !closingAlreadyAudible,
     });
   } catch {
     /* proceed to scoring even if TTS fails */

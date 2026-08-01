@@ -13,6 +13,8 @@ import { runPreClaudeMoment5ConflictValidityClarificationGate } from '@features/
 import { runPreClaudeMoment5PersistentAbstractMoveOnGate } from '@features/aria/runPreClaudeMoment5PersistentAbstractMoveOnGate';
 import { runPreClaudeMoment5ResolutionFollowUpGate } from '@features/aria/runPreClaudeMoment5ResolutionFollowUpGate';
 import { runPreClaudeMoment5SpecificityRedirectGate } from '@features/aria/runPreClaudeMoment5SpecificityRedirectGate';
+import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
+import { shouldDeferGatesForDedicatedMetaHandling } from '@features/aria/metaCommentDedicatedPostCommitDeferral';
 
 export type { PreClaudeMoment5AccountabilityInjectGatesResult } from '@features/aria/preClaudeMoment5AccountabilityInjectShared';
 
@@ -24,8 +26,12 @@ export async function runPreClaudeMoment5AccountabilityInjectGates(
   trimmed: string,
   messagesToUse: MessageWithScenario[],
   lastInterviewerContent: string,
+  metaCommentClassification: MetaCommentClassification | null = null,
 ): Promise<PreClaudeMoment5AccountabilityInjectGatesResult> {
   reconcileMoment5DeliveryFromTranscript(deps, messagesToUse);
+  if (shouldDeferGatesForDedicatedMetaHandling(metaCommentClassification, trimmed)) {
+    return { handled: false, moment5CombinedUserText: trimmed };
+  }
   if (looksLikeIncompleteCutOffUserAnswer(trimmed)) {
     console.log('[M5] accountability inject gates — skip cut-off answer', {
       attemptId: deps.interviewSessionAttemptIdRef.current ?? null,

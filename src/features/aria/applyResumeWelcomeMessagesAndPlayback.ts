@@ -2,8 +2,13 @@ import { awaitResumePlaybackAfterLoadingDismissed } from '@features/aria/awaitRe
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import {
   acquireResumeWelcomePlaybackLock,
+  clearResumeWelcomeSpokenForHydration,
+  consumeMountResumeOwnsWelcomePlayback,
   getResumeWelcomePlaybackGeneration,
+  markResumeWelcomeSpoken,
   releaseResumeWelcomePlaybackLock,
+  resolveResumeWelcomeStorageAttemptId,
+  wasResumeWelcomeSpoken,
 } from '@features/aria/interviewLocalPersistence';
 import {
   clearResumeDeferredUserSpeech,
@@ -24,11 +29,6 @@ import {
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '@features/aria/moment5ProbeLogic';
 import { resolveQuestionOnlyTextForResumeWelcome } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
-import {
-  clearResumeWelcomeSpokenForHydration,
-  markResumeWelcomeSpoken,
-  wasResumeWelcomeSpoken,
-} from '@features/aria/interviewLocalPersistence';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import type { HandleResumeDeps } from '@features/aria/sessionLifecycleTypes';
 import { markSessionResumedForNextRecordingStart } from '@utilities/sessionLogging/sessionResumeRecordingTelemetry';
@@ -64,6 +64,7 @@ type ResumeWelcomeDeps = Pick<
   | 'resumeEmotionCatchUpIndicesRef'
   | 'resumeEmotionAfterModalTextRef'
   | 'interviewSessionAttemptIdRef'
+  | 'interviewSessionIdRef'
   | 'currentMessagesRef'
   | 'resumeLoadingFlowActiveRef'
   | 'interviewNameRef'
@@ -221,16 +222,17 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
 
   const persistenceAttemptIdForWelcome =
     typeof persistenceAttemptId === 'string' ? persistenceAttemptId : null;
-  const isFirstWelcomeHydrationForAttempt =
-    persistenceAttemptIdForWelcome != null &&
-    deps.resumeWelcomeHydrationAttemptRef.current !== persistenceAttemptIdForWelcome;
-  if (isFirstWelcomeHydrationForAttempt) {
-    deps.resumeWelcomeHydrationAttemptRef.current = persistenceAttemptIdForWelcome;
-    if (deps.resumeOfferWelcomeTtsRef.current) {
-      await clearResumeWelcomeSpokenForHydration(persistenceAttemptIdForWelcome);
-    }
+  const welcomeStorageAttemptId = resolveResumeWelcomeStorageAttemptId({
+    persistenceAttemptId: persistenceAttemptIdForWelcome,
+    interviewSessionAttemptId: deps.interviewSessionAttemptIdRef.current,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
+  if (deps.resumeOfferWelcomeTtsRef.current && welcomeStorageAttemptId) {
+    await clearResumeWelcomeSpokenForHydration(welcomeStorageAttemptId);
   }
-  const welcomeAlreadySpoken = await wasResumeWelcomeSpoken(persistenceAttemptIdForWelcome);
+  const welcomeAlreadySpoken = welcomeStorageAttemptId
+    ? await wasResumeWelcomeSpoken(welcomeStorageAttemptId)
+    : false;
   const messagesWithWelcome =
     !deps.resumeOfferWelcomeTtsRef.current || welcomeAlreadySpoken
       ? scenarioIntroMsg
@@ -247,8 +249,7 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
   deps.resumeRepeatChoicePendingRef.current = false;
   markSessionResumedForNextRecordingStart();
 
-  const attemptIdForPlaybackLock =
-    typeof persistenceAttemptId === 'string' ? persistenceAttemptId : deps.interviewSessionAttemptIdRef.current;
+  const attemptIdForPlaybackLock = welcomeStorageAttemptId;
   const willRunResumePlayback =
     deps.resumeOfferWelcomeTtsRef.current ||
     Boolean(scenarioIntroBody?.trim()) ||
@@ -258,10 +259,12 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
   }
 
   void (async () => {
-    const playbackGeneration = getResumeWelcomePlaybackGeneration();
     try {
       await awaitResumePlaybackAfterLoadingDismissed(deps.resumeLoadingFlowActiveRef);
-      if (getResumeWelcomePlaybackGeneration() !== playbackGeneration) {
+      const playbackGeneration = getResumeWelcomePlaybackGeneration();
+      const isResumePlaybackStale = (): boolean =>
+        getResumeWelcomePlaybackGeneration() !== playbackGeneration;
+      if (isResumePlaybackStale()) {
         return;
       }
       if (Platform.OS !== 'web') {
@@ -275,8 +278,13 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
         deps.resumeEmotionCatchUpIndicesRef.current = null;
       }
       const offerWelcome = deps.resumeOfferWelcomeTtsRef.current;
-      const attemptId = deps.interviewSessionAttemptIdRef.current;
+      const welcomeAttemptId = resolveResumeWelcomeStorageAttemptId({
+        persistenceAttemptId,
+        interviewSessionAttemptId: deps.interviewSessionAttemptIdRef.current,
+        interviewSessionId: deps.interviewSessionIdRef.current,
+      });
       const speakLastQuestionReplay = async (): Promise<void> => {
+        if (isResumePlaybackStale()) return;
         const last = resolveResumeWelcomeQuestionText(
           deps.currentMessagesRef.current,
           deps.resumeLastAssistantTextRef.current ?? deps.lastQuestionTextRef.current,
@@ -287,6 +295,7 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
           },
         );
         if (!last?.trim()) return;
+        if (isResumePlaybackStale()) return;
         await deps.speakTextSafe(stripControlTokens(last), {
           telemetrySource: 'replay',
           ttsTriggerSource: 'callback',
@@ -297,7 +306,14 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
         });
       };
       const speakWelcomeIfNeeded = async (): Promise<void> => {
-        if (!offerWelcome || (await wasResumeWelcomeSpoken(attemptId))) return;
+        const alreadySpoken =
+          welcomeAttemptId != null ? await wasResumeWelcomeSpoken(welcomeAttemptId) : false;
+        if (!offerWelcome || alreadySpoken) {
+          return;
+        }
+        if (isResumePlaybackStale()) {
+          return;
+        }
         await deps.speakTextSafe(welcomeBack, {
           telemetrySource: 'greeting',
           ttsTriggerSource: 'callback',
@@ -307,11 +323,14 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
           skipQuestionTiming: true,
           skipScenarioAContemptProbeSessionDedup: true,
         });
-        await markResumeWelcomeSpoken(attemptId);
+        if (welcomeAttemptId) {
+          await markResumeWelcomeSpoken(welcomeAttemptId);
+        }
       };
       const hadCatchUp = catchUpIndices != null && catchUpIndices.length > 0;
       if (scenarioIntroBody?.trim()) {
         await speakWelcomeIfNeeded();
+        if (isResumePlaybackStale()) return;
         await deps.speakTextSafe(scenarioIntroBody, {
           telemetrySource: 'greeting',
           ttsTriggerSource: 'callback',
@@ -320,6 +339,7 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
         const afterModal = deps.resumeEmotionAfterModalTextRef.current;
         deps.resumeEmotionAfterModalTextRef.current = null;
         await speakWelcomeIfNeeded();
+        if (isResumePlaybackStale()) return;
         await deps.speakTextSafe(stripControlTokens(afterModal), {
           telemetrySource: 'replay',
           ttsTriggerSource: 'callback',
@@ -330,6 +350,7 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
         });
       } else {
         await speakWelcomeIfNeeded();
+        if (isResumePlaybackStale()) return;
         if (!welcomeEmbedsLastQuestion) {
           await speakLastQuestionReplay();
         }
@@ -341,6 +362,7 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
       deps.resumeOfferWelcomeTtsRef.current = false;
       clearResumeDeferredUserSpeech();
     } finally {
+      consumeMountResumeOwnsWelcomePlayback();
       releaseResumeWelcomePlaybackLock(attemptIdForPlaybackLock);
       void flushResumeDeferredUserSpeechWhenUnblocked({
         processUserSpeech: deps.processUserSpeech,

@@ -377,7 +377,53 @@ describe('computeGateResultCore', () => {
     });
     expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
     expect(r.reviewFlags).toContain('emotion_recognition_review');
-    expect(r.depthSignalModifier).toBeLessThan(0);
+    expect(r.depthSignalModifier).toBe(0);
+  });
+
+  it('complete battery with 1/3 correct applies -0.2 modifier and review flag', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionRawScore: 1,
+      emotionRecognitionResponses: ['B', 'A', 'A'],
+    });
+    expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
+    expect(r.reviewFlags).toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBeCloseTo(-0.2, 5);
+  });
+
+  it('complete battery with 2/3 correct applies -0.1 modifier and review flag', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionRawScore: 2,
+      emotionRecognitionResponses: ['B', 'C', 'A'],
+    });
+    expect(r.reviewFlags).toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBeCloseTo(-0.1, 5);
+  });
+
+  it('complete battery with 3/3 correct applies no emotion modifier', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionRawScore: 3,
+      emotionRecognitionResponses: ['B', 'C', 'C'],
+    });
+    expect(r.reviewFlags).not.toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBe(0);
+  });
+
+  it('complete battery with 0/3 correct applies no modifier but review flag', () => {
+    const pillars = allMarkers(7);
+    const r = computeGateResultCore(pillars, null, {
+      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
+      emotionRecognitionRawScore: 0,
+      emotionRecognitionResponses: ['A', 'A', 'A'],
+    });
+    expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
+    expect(r.reviewFlags).toContain('emotion_recognition_review');
+    expect(r.depthSignalModifier).toBe(0);
   });
 
   it('null emotion scores for incomplete battery do not fail gate or apply modifier', () => {
@@ -390,18 +436,6 @@ describe('computeGateResultCore', () => {
     expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
     expect(r.reviewFlags).not.toContain('emotion_recognition_review');
     expect(r.depthSignalModifier).toBe(0);
-  });
-
-  it('complete battery with low raw score applies modifier but not gate fail', () => {
-    const pillars = allMarkers(7);
-    const r = computeGateResultCore(pillars, null, {
-      scenarioPillarScoresByScenario: { 1: pillars, 2: pillars, 3: pillars },
-      emotionRecognitionRawScore: 0,
-      emotionRecognitionResponses: ['A', 'A', 'A'],
-    });
-    expect(r.failReasonCodes ?? []).not.toContain('emotion_recognition_floor');
-    expect(r.reviewFlags).toContain('emotion_recognition_review');
-    expect(r.depthSignalModifier).toBeCloseTo(-0.2, 5);
   });
 
   it('coerces string mentalizingOvercertaintyCount for overcertainty review', () => {

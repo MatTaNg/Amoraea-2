@@ -46,7 +46,7 @@ export async function runPreClaudeTurnOpeningPipeline(
   deps: PreClaudeTurnGateDeps,
   params: PreClaudeTurnGateParams,
 ): Promise<PreClaudeTurnOpeningPipelineResult> {
-  const skipAndMeta = resolvePreClaudeTurnSkipAndMetaGates(
+  const skipAndMeta = await resolvePreClaudeTurnSkipAndMetaGates(
     deps,
     params.trimmed,
     params.resumeGatePendingEarly,

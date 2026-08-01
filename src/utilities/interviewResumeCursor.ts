@@ -386,6 +386,7 @@ function tryBuildResumePostScenariosPersonalPartPlan(input: {
     currentMoment: InterviewMomentIndex;
     personalHandoffInjected: boolean;
   };
+  lastQuestionText?: string | null;
 }): InterviewResumePlan | null {
   const transcriptForRepair = (input.transcriptMessages ?? []) as MessageWithScenario[];
   const hasS3TranscriptProgress = transcriptHasInScenarioProgressPastOpening(
@@ -393,17 +394,20 @@ function tryBuildResumePostScenariosPersonalPartPlan(input: {
     3,
   );
 
-  const personalPartActive = resumeTranscriptIndicatesPersonalPartActive(
+  const personalPartActive = resumeCheckpointIndicatesPersonalPartActive(
     input.transcriptMessages,
     input.syncedMoments,
+    input.lastQuestionText,
   );
   if (personalPartActive) {
+    const grudgeHandoffFromCheckpoint = looksLikeMoment4GrudgePrompt(input.lastQuestionText ?? '');
     return {
       lastCompletedScenario: input.lastC,
       resumeScenario: 3,
       effectiveMoment: Math.max(input.syncedMoments.currentMoment, 4) as InterviewMomentIndex,
       momentsComplete: cloneMoments(input.syncedMoments.momentsComplete),
-      personalHandoffInjected: input.syncedMoments.personalHandoffInjected,
+      personalHandoffInjected:
+        input.syncedMoments.personalHandoffInjected || grudgeHandoffFromCheckpoint,
       mode: 'resume_post_scenarios',
       partialScenarioDataWritten: input.partialScenarioDataWritten,
       rewindDueToCorruptScoring: false,
@@ -475,6 +479,8 @@ export function computeInterviewResumePlan(input: {
     personalHandoffInjected: boolean;
   };
   scoringFailed?: ReadonlyArray<{ scenario: number }> | null;
+  /** Persisted assessable question at save — M4 grudge may be here before transcript commit. */
+  lastQuestionText?: string | null;
   /** When known from DB `scenario_specific_patterns.moment_4_scores` (null = unknown / not fetched). */
   moment4ScoresIntact?: boolean | null;
 }): InterviewResumePlan {
@@ -518,6 +524,25 @@ export function computeInterviewResumePlan(input: {
       if (syncedMoment >= 4 && personalHandoffInjected) {
         mc[3] = true;
       }
+      if (
+        resumeCheckpointIndicatesPersonalPartActive(
+          input.transcriptMessages,
+          { currentMoment: syncedMoment, personalHandoffInjected },
+          input.lastQuestionText,
+        )
+      ) {
+        const postScenariosPlan = tryBuildResumePostScenariosPersonalPartPlan({
+          lastC,
+          partialScenarioDataWritten: !scenarioHasPersistedScores(
+            candidateProgress,
+            input.scenarioScores,
+          ),
+          transcriptMessages: input.transcriptMessages,
+          syncedMoments: input.syncedMoments,
+          lastQuestionText: input.lastQuestionText,
+        });
+        if (postScenariosPlan) return postScenariosPlan;
+      }
       return {
         lastCompletedScenario: lastC,
         resumeScenario: candidateProgress,
@@ -532,6 +557,17 @@ export function computeInterviewResumePlan(input: {
         rewindDueToCorruptScoring: false,
         rewindToMoment4DueToCorruptScoring: false,
       };
+    }
+
+    const postScenariosBeforeRewind = tryBuildResumePostScenariosPersonalPartPlan({
+      lastC,
+      partialScenarioDataWritten: true,
+      transcriptMessages: input.transcriptMessages,
+      syncedMoments: input.syncedMoments,
+      lastQuestionText: input.lastQuestionText,
+    });
+    if (postScenariosBeforeRewind) {
+      return postScenariosBeforeRewind;
     }
 
     const mc = createMomentCompletionFromLastC(lastC);
@@ -601,6 +637,7 @@ export function computeInterviewResumePlan(input: {
     partialScenarioDataWritten,
     transcriptMessages: input.transcriptMessages,
     syncedMoments: input.syncedMoments,
+    lastQuestionText: input.lastQuestionText,
   });
   if (postScenariosPlan) {
     return postScenariosPlan;
@@ -873,6 +910,24 @@ export function resumeTranscriptIndicatesPersonalPartActive(
       typeof m.content === 'string' &&
       transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content),
   );
+}
+
+/** Transcript or persisted lastQuestionText proves Moment 4+ already started (e.g. M4 TTS before transcript commit). */
+export function resumeCheckpointIndicatesPersonalPartActive(
+  transcriptMessages: ReadonlyArray<PersonalPartTranscriptTurn> | undefined,
+  synced: {
+    currentMoment: InterviewMomentIndex;
+    personalHandoffInjected: boolean;
+  },
+  lastQuestionText?: string | null,
+): boolean {
+  if (resumeTranscriptIndicatesPersonalPartActive(transcriptMessages, synced)) return true;
+  const q = (lastQuestionText ?? '').trim();
+  if (!q) return false;
+  if (looksLikeMoment4GrudgePrompt(q)) return true;
+  if (looksLikeMoment4ThresholdQuestion(q)) return true;
+  if (looksLikeMoment4SpecificityFollowUpEcho(q)) return true;
+  return false;
 }
 
 export function buildResumeWelcomeMessage(params: {

@@ -1,4 +1,5 @@
 import { countWords, normalizeApostrophes } from './disengagementProbeNormalize';
+import { looksLikePriorAnswerMetaComment } from './interviewPriorAnswerMetaDetection';
 import { isRepairRefusalProbeAssistantLine } from './interviewRepairQuestionDetection';
 import { scenarioALastAssistantIsRepairProbeOrFollowUp } from './interviewDisengagementTranscriptHelpers';
 import {
@@ -80,7 +81,13 @@ export function repairAnswerHasConcreteSuggestionActionOrStep(text: string): boo
     /\b(talk|discuss|listen|explain|share|ask|apologiz\w*|acknowledg\w*|validat\w*)\b/i.test(t) ||
     /\b(talk\s+about\s+what'?s\s+going\s+on|have\s+the\s+conversation|discuss\s+it\s+together|make\s+(him|her|them)\s+feel\s+heard)\b/i.test(
       t,
-    )
+    ) ||
+    /** "I would limit calls…" / boundary-setting without a communication verb */
+    /\b(i|we)\s+(would|will)\s+limit\b/i.test(t) ||
+    (/\bprioritiz\w*\b/i.test(t) &&
+      /\b(emma|her|partner|relationship|time together|date)\b/i.test(t)) ||
+    (/\bschedule\b/i.test(t) && /\b(later|call|another time)\b/i.test(t)) ||
+    /\bunless\b[^.]{0,80}\bemergency\b/i.test(t)
   );
 }
 
@@ -154,12 +161,21 @@ export function userAnswerSatisfiesScenarioARepairPrompt(
   const t = normalizeApostrophes(answer).toLowerCase().trim();
   if (!t) return false;
 
-  if (scenarioARepairAsRyanSignalsInAnswer(answer)) return true;
-
   const parties = repairFocalAndOtherFromPrompt(lastAssistantContent);
-  if (parties?.focal === 'ryan' && repairAnswerHasConcreteSuggestionActionOrStep(answer)) {
+  const priorPrompt = (lastAssistantContent ?? '').trim();
+
+  if (parties?.focal === 'ryan' || looksLikeScenarioARepairQuestion(priorPrompt)) {
+    if (scenarioARepairAsRyanSignalsInAnswer(answer)) return true;
     return /\b(both|together|each|talk|listen|apolog|commit|boundary|agreement)\b/i.test(t);
   }
+
+  if (
+    looksLikeScenarioAContemptProbeQuestion(priorPrompt) ||
+    looksLikeScenarioARepairStreamFragment(priorPrompt)
+  ) {
+    return userAnswerIncludesExplicitScenarioARepairAsRyan(answer);
+  }
+
   return false;
 }
 
@@ -201,6 +217,7 @@ function isTransientScenarioBAssistantInterstitial(content: string): boolean {
   if (!c) return true;
   if (isScenarioModalFollowUpProbe(c)) return true;
   if (isShortAckOnlySentence(c)) return true;
+  if (isNonRepeatableAssistantLineForVerbatimReplay(c)) return true;
   return false;
 }
 
@@ -279,6 +296,17 @@ function isTransientScenarioAAssistantInterstitial(content: string): boolean {
   return false;
 }
 
+/** Unauthorized preventive Ryan coaching after repair is already satisfied — advance to S1 wrap. */
+export function looksLikeUnauthorizedScenarioAPreventiveRyanFollowUp(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  if (/\bwhat could ryan have done differently\b/.test(t)) return true;
+  if (/\bbefore emma ever said anything\b/.test(t) && /\bryan\b/.test(t)) return true;
+  if (/\bwhat could ryan have done\b/.test(t) && /\bbefore\b/.test(t) && /\bemma\b/.test(t)) {
+    return true;
+  }
+  return false;
+}
+
 /** Model wording probe after a satisfied repair-as-Ryan answer — not a valid re-ask. */
 export function looksLikeScenarioARepairWordingFollowUp(text: string): boolean {
   const t = normalizeApostrophes(text).toLowerCase();
@@ -294,13 +322,41 @@ export function scenarioARepairAnswerAlreadySatisfiedInTranscript(
   messages: Array<{ role: string; content?: string | null }>,
 ): boolean {
   const repairCtx = findLastUserWithPriorScenarioARepairContext(messages);
-  if (!repairCtx.lastUserContent || !repairCtx.priorRepairAssistantContent) {
-    return false;
+  if (repairCtx.lastUserContent && repairCtx.priorRepairAssistantContent) {
+    return userAnswerSatisfiesScenarioARepairPrompt(
+      repairCtx.lastUserContent,
+      repairCtx.priorRepairAssistantContent,
+    );
   }
-  return userAnswerSatisfiesScenarioARepairPrompt(
-    repairCtx.lastUserContent,
-    repairCtx.priorRepairAssistantContent,
-  );
+
+  let lastUserIdx = -1;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].role === 'user') {
+      lastUserIdx = i;
+      break;
+    }
+  }
+  if (lastUserIdx < 0) return false;
+  const lastUserContent = (messages[lastUserIdx].content ?? '').trim();
+  if (!lastUserContent) return false;
+
+  for (let j = lastUserIdx - 1; j >= 0; j -= 1) {
+    if (messages[j].role !== 'assistant') continue;
+    const content = messages[j].content ?? '';
+    if (isNonRepeatableAssistantLineForVerbatimReplay(content)) continue;
+    if (looksLikeScenarioAContemptProbeQuestion(content)) {
+      return userAnswerIncludesExplicitScenarioARepairAsRyan(lastUserContent);
+    }
+    if (
+      looksLikeScenarioARepairQuestion(content) ||
+      looksLikeScenarioARepairReAskQuestion(content) ||
+      looksLikeScenarioARepairStreamFragment(content)
+    ) {
+      return userAnswerSatisfiesScenarioARepairPrompt(lastUserContent, content);
+    }
+    if (!isTransientScenarioAAssistantInterstitial(content)) break;
+  }
+  return false;
 }
 
 /** Parallel-stream guard: drop repair/contempt/modal echoes once Ryan repair is satisfied. */
@@ -471,6 +527,7 @@ export function shouldAdvanceScenarioAAfterSatisfiedRepair(
   return (
     looksLikeScenarioARepairReAskQuestion(draft) ||
     looksLikeScenarioARepairWordingFollowUp(draft) ||
+    looksLikeUnauthorizedScenarioAPreventiveRyanFollowUp(draft) ||
     looksLikeScenarioARepairQuestion(draft) ||
     looksLikeScenarioAContemptProbeQuestion(draft) ||
     scenarioAEmmaVeryClearContemptReask(draft) ||
@@ -551,6 +608,17 @@ export function evaluateRepairRefusalDetection(
   wordCount = countWords(userAnswer),
   lastAssistantContent?: string,
 ): RepairRefusalDetectionDetail {
+  if (looksLikePriorAnswerMetaComment(userAnswer)) {
+    return {
+      repair_refusal_detected: false,
+      trigger_condition: null,
+      trigger_reason: null,
+      response_word_count: wordCount,
+      repair_refusal_anomaly: false,
+      has_concrete_repair_content: false,
+    };
+  }
+
   const t = normalizeApostrophes(userAnswer).toLowerCase();
   const hasConcreteRepairContent = repairAnswerHasConcreteSuggestionActionOrStep(userAnswer);
   const hasCommunicationVerb = repairAnswerHasCommunicationVerb(userAnswer);

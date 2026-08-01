@@ -1,11 +1,17 @@
 import { supabase } from '@data/supabase/client';
 import { resolvePillarScoresForNarrativeFromAttempt } from '@features/aria/resolvePillarScoresForNarrative';
+import {
+  shouldKickClientNarrativeForAttempt,
+  type ClientNarrativeKickGateRow,
+} from '@features/onboarding/clientNarrativeKickGate';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import { finalizeInterviewOnlyGateForAttempt } from '@features/psychometrics/finalizeInterviewOnlyGate';
+import { evaluateScoringStagesReadyForRollup } from '@features/psychometrics/ensureInterviewRollupArtifacts';
 import {
   kickClientInterviewNarrativeIfPending,
-  narrativeFailedWithMissingPillarScores,
 } from '@utilities/kickClientInterviewNarrativeIfPending';
+
+const deferredScoringResumeAttemptIds = new Set<string>();
 
 export const INTERVIEW_REPORT_PILLAR_KEYS = [
   'repair',
@@ -101,7 +107,8 @@ const INTERVIEW_REPORT_ATTEMPT_SELECT = `
   moment_4_concreteness,
   moment_5_concreteness,
   personal_moment_emotional_vocab_density,
-  personal_moment_emotional_vocab_low
+  personal_moment_emotional_vocab_low,
+  scoring_deferred
 ` as const;
 
 export type InterviewAttemptPillarSourceRow = {
@@ -203,12 +210,45 @@ function mapInterviewReportAttemptRow(data: Record<string, unknown>): InterviewR
   };
 }
 
+async function maybeResumeDeferredStandardInterviewScoring(
+  userId: string,
+  attemptId: string,
+  sourceRow: ClientNarrativeKickGateRow,
+): Promise<void> {
+  if (deferredScoringResumeAttemptIds.has(attemptId)) return;
+  if (sourceRow.scoring_deferred !== true) return;
+  const stages = evaluateScoringStagesReadyForRollup(sourceRow);
+  if (stages.ready) return;
+  deferredScoringResumeAttemptIds.add(attemptId);
+  const { error } = await supabase.functions.invoke('complete-standard-interview', {
+    body: { attempt_id: attemptId },
+  });
+  if (error && __DEV__) {
+    console.warn('[PostInterviewLaunch] complete-standard-interview resume failed', error.message);
+  }
+}
+
 /** Persist rollup / kick narrative backup when the partial-report screen loads. */
 export async function refreshInterviewReportAttemptForPartialReport(
   userId: string,
 ): Promise<InterviewReportAttempt | null> {
-  const row = await loadInterviewReportAttempt(userId);
+  const resolvedId = await fetchMostRecentCompletedInterviewAttemptId(userId);
+  if (!resolvedId) return null;
+
+  const { data, error } = await supabase
+    .from('interview_attempts')
+    .select(INTERVIEW_REPORT_ATTEMPT_SELECT)
+    .eq('id', resolvedId)
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (error || !data) return null;
+
+  const sourceRow = data as ClientNarrativeKickGateRow & Record<string, unknown>;
+  const row = mapInterviewReportAttemptRow(sourceRow);
   if (!row?.id) return row;
+
+  await maybeResumeDeferredStandardInterviewScoring(userId, row.id, sourceRow);
 
   // Must check persisted DB columns — client-resolved pillars from S1–S3 used to mask
   // missing holistic rollup and skip finalize, so partial report generation had thin/empty data.
@@ -217,12 +257,15 @@ export async function refreshInterviewReportAttemptForPartialReport(
     await finalizeInterviewOnlyGateForAttempt(userId, row.id);
   }
 
-  const refreshed = (await loadInterviewReportAttempt(userId)) ?? row;
+  const refreshed = (await loadInterviewReportAttempt(userId, row.id)) ?? row;
+  const refreshedSource = (await fetchInterviewReportSourceRow(userId, row.id)) ?? sourceRow;
 
-  const shouldKickNarrative =
-    refreshed.reasoning_pending ||
-    (refreshed.hasPersistedPillarScores &&
-      narrativeFailedWithMissingPillarScores(refreshed.ai_reasoning));
+  const shouldKickNarrative = shouldKickClientNarrativeForAttempt({
+    reasoning_pending: refreshed.reasoning_pending,
+    hasPersistedPillarScores: refreshed.hasPersistedPillarScores,
+    ai_reasoning: refreshed.ai_reasoning,
+    sourceRow: refreshedSource,
+  });
   if (shouldKickNarrative) {
     void kickClientInterviewNarrativeIfPending(
       userId,
@@ -232,6 +275,20 @@ export async function refreshInterviewReportAttemptForPartialReport(
   }
 
   return refreshed;
+}
+
+async function fetchInterviewReportSourceRow(
+  userId: string,
+  attemptId: string,
+): Promise<ClientNarrativeKickGateRow | null> {
+  const { data, error } = await supabase
+    .from('interview_attempts')
+    .select(INTERVIEW_REPORT_ATTEMPT_SELECT)
+    .eq('id', attemptId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error || !data) return null;
+  return data as ClientNarrativeKickGateRow;
 }
 
 export async function loadInterviewReportAttempt(

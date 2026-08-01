@@ -8,8 +8,6 @@ import {
 /** Screen order per spec: Name -> Dealbreakers flow. No welcome screen. */
 export type OnboardingStep =
   | 'name'
-  | 'hobbies'
-  | 'hobbyDealbreaker'
   | 'ethnicity'
   | 'ethnicityAttraction'
   | 'attraction'
@@ -19,6 +17,8 @@ export type OnboardingStep =
   | 'location'
   | 'educationLevel'
   | 'heightWeight'
+  | 'hobbies'
+  | 'hobbyDealbreaker'
   | 'workout'
   | 'smoking'
   | 'partnerAlignmentTobacco'
@@ -42,7 +42,6 @@ export type OnboardingStep =
   | 'partnerSharesSexualInterests'
   | 'partnerMoodMismatch'
   | 'sexualFocus'
-  | 'datingPaceAfterExcitement'
   | 'recentDatingEarlyWeeks'
   | 'spaceForNewRelationship'
   | 'lifeDomains'
@@ -59,8 +58,6 @@ export type OnboardingStep =
 
 export const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'name',
-  'hobbies',
-  'hobbyDealbreaker',
   'attraction',
   'ethnicity',
   'ethnicityAttraction',
@@ -70,6 +67,8 @@ export const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'location',
   'educationLevel',
   'heightWeight',
+  'hobbies',
+  'hobbyDealbreaker',
   'workout',
   'smoking',
   'partnerAlignmentTobacco',
@@ -93,7 +92,6 @@ export const ONBOARDING_STEPS_ORDER: OnboardingStep[] = [
   'partnerSharesSexualInterests',
   'partnerMoodMismatch',
   'sexualFocus',
-  'datingPaceAfterExcitement',
   'recentDatingEarlyWeeks',
   ...LIFE_DOMAIN_REQUIRED_QUESTION_ONBOARDING_STEPS.map((s) => s.step),
   'spaceForNewRelationship',

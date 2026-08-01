@@ -1,12 +1,10 @@
-import { wrapForcedProbeWithAck } from '@features/aria/interviewAssistantReflection';
 import { userTurnSuppressesElongatingProbe } from '@features/aria/elongatingProbe';
-import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
-import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
+import { deliverPostClaudeForcedCanonicalProbe } from '@features/aria/deliverPostClaudeForcedCanonicalProbe';
+import { getCanonicalProbeText } from '@features/aria/interviewCanonicalProbeRegistry';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
-  PostClaudeInterviewMessage,
 } from '@features/aria/postClaudeAssistantTurnTypes';
 import {
   finishPostClaudeForcedConstructProbeGate,
@@ -15,7 +13,6 @@ import {
   type ForcedConstructProbeContext,
   type PostClaudeForcedConstructProbeGatesResult,
 } from '@features/aria/postClaudeForcedConstructProbeShared';
-import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { looksLikeScenarioCSophiePerspectiveQuestion } from '@features/aria/scenarioCPromptDetection';
 import { remoteLog } from '@utilities/remoteLog';
@@ -32,6 +29,7 @@ export async function runPostClaudeScenarioCSophieForcedProbeGate(
 ): Promise<PostClaudeForcedConstructProbeGatesResult | null> {
   const strippedText = draft.strippedText;
   const { recentAsstForAck, assistantTurnIsElongatingProbeOnly } = draft;
+  const sophieProbe = getCanonicalProbeText('s3_sophie_perspective');
 
   const elongatingOnlyDraftBlocksSophieInject =
     assistantTurnIsElongatingProbeOnly &&
@@ -52,32 +50,21 @@ export async function runPostClaudeScenarioCSophieForcedProbeGate(
     );
 
   if (
-    !shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE) ||
+    !shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, sophieProbe) ||
     streamAlreadySpokeSophie
   ) {
     deps.scenarioCSophiePerspectiveProbeFiredRef.current = true;
     if (streamAlreadySpokeSophie) {
-      const wrappedSophieProbe = wrapForcedProbeWithAck(
-        params.trimmed,
+      await deliverPostClaudeForcedCanonicalProbe({
+        deps,
+        params,
+        stagedMessages: params.messagesToUse,
+        probeId: 's3_sophie_perspective',
         strippedText,
-        SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
         recentAsstForAck,
-      );
-      if (shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, wrappedSophieProbe)) {
-        const liveTranscript = (deps.currentMessagesRef.current.length > 0
-          ? deps.currentMessagesRef.current
-          : params.messagesToUse) as PostClaudeInterviewMessage[];
-        commitDedupedAssistantTranscriptTurn(
-          liveTranscript,
-          params.messagesToUse,
-          wrappedSophieProbe,
-          {
-            scenarioNumber: deps.resolveAssistantScenarioNumber(wrappedSophieProbe, params.messagesToUse),
-            interviewMoment: deps.currentInterviewMomentRef.current,
-          },
-          (next) => deps.setMessages(next),
-        );
-      }
+        skipSpeak: true,
+        logTag: '[S3_SOPHIE_FORCED_SKIPPED_STREAM_ALREADY_SPOKE]',
+      });
       void remoteLog('[S3_SOPHIE_FORCED_SKIPPED_STREAM_ALREADY_SPOKE]', {
         interviewSessionId: deps.interviewSessionIdRef.current,
         deliveredThisStream:
@@ -101,35 +88,18 @@ export async function runPostClaudeScenarioCSophieForcedProbeGate(
     ? await stageAndSpeakForcedConstructProbeLeadIn(deps, params, leadInText, speakAssistantTurn)
     : params.messagesToUse;
 
-  const wrappedSophieProbe = wrapForcedProbeWithAck(
-    params.trimmed,
-    strippedText,
-    SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
-    recentAsstForAck,
-  );
-  const probeMsg: PostClaudeInterviewMessage = {
-    role: 'assistant',
-    content: wrappedSophieProbe,
-    scenarioNumber: deps.resolveAssistantScenarioNumber(wrappedSophieProbe, stagedMessages),
-  };
-  const liveTranscript = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : stagedMessages) as PostClaudeInterviewMessage[];
-  commitDedupedAssistantTranscriptTurn(
-    liveTranscript,
+  await deliverPostClaudeForcedCanonicalProbe({
+    deps,
+    params,
     stagedMessages,
-    wrappedSophieProbe,
-    {
-      scenarioNumber: probeMsg.scenarioNumber,
-      interviewMoment: deps.currentInterviewMomentRef.current,
-    },
-    (next) => deps.setMessages(next),
-  );
-  deps.scenarioCSophiePerspectiveProbeFiredRef.current = true;
-  await speakAssistantTurn(wrappedSophieProbe, {
-    ...ASSISTANT_INTERVIEW_SPEECH,
+    probeId: 's3_sophie_perspective',
+    strippedText,
+    recentAsstForAck,
+    speakAssistantTurn,
     forceSpeakDespiteParallelStream: true,
+    logTag: '[S3_SOPHIE_FORCED]',
   });
+
   void remoteLog('[S3_SOPHIE_FORCED]', {
     injectedSophiePerspective: true,
     strippedPreview: strippedText.slice(0, 220),

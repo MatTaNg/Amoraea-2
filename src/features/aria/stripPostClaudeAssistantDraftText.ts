@@ -91,6 +91,10 @@ import { stripStandalonePersonalDisclosureAckOutsidePersonalMoments } from '@fea
 import { computeMoment5InterviewCloseGate } from '@features/aria/interviewProgressSync';
 import { ensureScenario2BundleWhenOpeningWithoutVignette } from '@features/aria/interviewTransitionBundles';
 import { logPostClaudeAssistantDraftSanitizeChange } from '@features/aria/postClaudeAssistantDraftSanitizeLog';
+import {
+  shouldSkipBriefAckBeforeMoveForUserTurn,
+  stripBriefAckWhenUserTurnIsNonSubstantive,
+} from '@features/aria/interviewAcknowledgmentMoveGate';
 import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
@@ -167,12 +171,19 @@ export function stripPostClaudeAssistantDraftText(
   initialStrippedText: string,
 ): StripPostClaudeAssistantDraftResult {
   let strippedText = initialStrippedText;
-  strippedText = coerceMidScenarioRelationalReflectionToBriefAck(
-    strippedText,
-    params.messagesToUse.filter((m) => m.role === 'assistant') as PostClaudeInterviewMessage[],
-  );
+  const userTurn = (params.trimmed ?? '').trim();
+  const skipAckForUserTurn = shouldSkipBriefAckBeforeMoveForUserTurn(userTurn);
+  if (!skipAckForUserTurn) {
+    strippedText = coerceMidScenarioRelationalReflectionToBriefAck(
+      strippedText,
+      params.messagesToUse.filter((m) => m.role === 'assistant') as PostClaudeInterviewMessage[],
+    );
+  }
   strippedText = stripScenarioBoundaryContentReflection(strippedText);
   strippedText = stripFlatReflectionAcknowledgmentOpeners(strippedText);
+  if (skipAckForUserTurn) {
+    strippedText = stripBriefAckWhenUserTurnIsNonSubstantive(strippedText, userTurn);
+  }
   strippedText = stripGenericReflectionFillersFirstParagraph(strippedText);
   strippedText = stripStandalonePersonalDisclosureAckOutsidePersonalMoments(
     strippedText,
@@ -738,6 +749,14 @@ export function stripPostClaudeAssistantDraftText(
         interviewSessionId: deps.interviewSessionIdRef.current,
         beforePreview: beforeS3RepairReplay.slice(0, 220),
       });
+      if (skipS3RepairInject) {
+        strippedText = injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
+          strippedText,
+          params,
+          deps,
+          '[S3_REPAIR_SATISFIED_BUNDLE_INJECTED_AFTER_REPAIR_REPLAY_STRIP]',
+        );
+      }
     } else if (
       activeScenario === 3 &&
       looksLikeScenarioCRepairWithUserAnswerEcho(strippedText)

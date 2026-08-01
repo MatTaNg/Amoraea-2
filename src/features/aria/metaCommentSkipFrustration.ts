@@ -61,7 +61,8 @@ export function extractSalientReflectionClause(excerpt: string): string | null {
   const t = excerpt.trim().replace(/\s+/g, ' ');
   if (!t || wordCount(t) < 8) return null;
   const sentenceCut = t.match(/^[\s\S]{1,240}?[.!?](?:\s|$)/);
-  let clause = sentenceCut ? sentenceCut[0].trim() : t.split(/\s+/).slice(0, 14).join(' ');
+  if (!sentenceCut) return null;
+  let clause = sentenceCut[0].trim();
   clause = clause.replace(/\s+/g, ' ').trim();
   if (clause.length > 110) clause = `${clause.slice(0, 107).trim()}…`;
   return clause.length >= 12 ? clause : null;
@@ -69,7 +70,12 @@ export function extractSalientReflectionClause(excerpt: string): string | null {
 
 export function buildSkipRequestConfirmationSpeech(args: {
   priorSubstantiveNonMetaExcerpt: string | null | undefined;
+  /** Explicit skip asks should not mirror prior user words before the confirmation line. */
+  includePriorReflection?: boolean;
 }): string {
+  if (args.includePriorReflection === false) {
+    return SKIP_REQUEST_CONFIRMATION_PROMPT_LINE;
+  }
   const clause = extractSalientReflectionClause(args.priorSubstantiveNonMetaExcerpt ?? '');
   if (!clause) return SKIP_REQUEST_CONFIRMATION_PROMPT_LINE;
   return `${clause} ${SKIP_REQUEST_CONFIRMATION_PROMPT_LINE}`;

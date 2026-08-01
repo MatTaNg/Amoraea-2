@@ -64,6 +64,7 @@ export function createInterviewResetInterviewProgressMomentsSyncSlice(params: Sy
     moment5ClientScoringMetaRef: params.moment5ClientScoringMetaRef,
     deferredMoment4NarrativeRef: params.deferredMoment4NarrativeRef,
     lastUserTurnAudioDurationMsRef: params.lastUserTurnAudioDurationMsRef,
+    lastUserTurnMicStopTelemetryRef: params.lastUserTurnMicStopTelemetryRef,
     scenarioAContemptProbeAskedRef: params.scenarioAContemptProbeAskedRef,
     scenarioAContemptProbePlaybackConfirmedRef: params.scenarioAContemptProbePlaybackConfirmedRef,
     showScenarioCardCanonicalPlaybackConfirmedKindsRef:

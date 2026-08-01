@@ -50,6 +50,7 @@ import {
   scenarioCRepairConstructStillPending,
   scenarioCSophiePerspectiveProbeAlreadyDelivered,
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+  shouldSkipS2ToS3HandoffReplayAtStreamEnd,
 } from '@features/aria/scenarioCPromptDetection';
 import { sanitizeAssistantInterviewerCharacterNames } from '@/constants/interviewCharacterNames';
 import { ensureCanonicalIntroBriefingForTts } from '@features/aria/interviewPreambleBriefing';
@@ -83,6 +84,7 @@ import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenari
 import { isExactShowScenario3VignetteText } from '@features/aria/showScenarioCardCanonicalTts';
 import { advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard } from '@features/aria/interviewScenarioRefSync';
 import { buildScenario1To2BundleForInterview, buildScenario2To3BundleForInterview, scenarioHandoffBundleMissingNextSegmentVignette } from '@features/aria/interviewTransitionBundles';
+import { enrichScenarioBoundaryHandoffBundleWithDynamicLead } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { SCENARIO_2_TEXT, SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
 import { SCENARIO_2_OPENING, SCENARIO_3_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
 import {
@@ -246,7 +248,15 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       SCENARIO_2_TEXT,
       resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
     )}`;
-    const handoffText = stripControlTokens(advanceBundle ?? fallbackS1Bundle);
+    const handoffText = stripControlTokens(
+      await enrichScenarioBoundaryHandoffBundleWithDynamicLead({
+        bundleText: advanceBundle ?? fallbackS1Bundle,
+        firstName: params.participantFirstNameForSpoken,
+        messages: params.messagesToUse,
+        completedScenario: 1,
+        interviewSessionId: deps.interviewSessionIdRef.current,
+      }),
+    );
     const spokenSoFar = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
     let handoffToSpeak = handoffText;
     if (handoffToSpeak && scenarioHandoffBundleMissingNextSegmentVignette(handoffToSpeak, 1)) {
@@ -317,6 +327,19 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
     state.pendingS1RepairSatisfiedHandoff = false;
   }
   if (state.pendingS2RepairSatisfiedHandoff && !state.s2RepairSatisfiedHandoffSpokenThisStream) {
+    if (
+      shouldSkipS2ToS3HandoffReplayAtStreamEnd({
+        currentScenario: deps.currentScenarioRef.current,
+        messages: params.messagesToUse,
+      })
+    ) {
+      state.pendingS2RepairSatisfiedHandoff = false;
+      void remoteLog('[S2_S3_HANDOFF_SKIPPED_ALREADY_ON_S3]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        scenarioRef: deps.currentScenarioRef.current,
+        momentRef: deps.currentInterviewMomentRef.current,
+      });
+    } else {
     state.pendingS2RepairSatisfiedHandoff = false;
     const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
       '',
@@ -330,7 +353,15 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       SCENARIO_3_TEXT,
       resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 2),
     )}`;
-    const handoffText = stripControlTokens(advanceBundle ?? fallbackS2Bundle);
+    const handoffText = stripControlTokens(
+      await enrichScenarioBoundaryHandoffBundleWithDynamicLead({
+        bundleText: advanceBundle ?? fallbackS2Bundle,
+        firstName: params.participantFirstNameForSpoken,
+        messages: params.messagesToUse,
+        completedScenario: 2,
+        interviewSessionId: deps.interviewSessionIdRef.current,
+      }),
+    );
     const spokenSoFar = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
     let handoffToSpeak = handoffText;
     if (handoffToSpeak && scenarioHandoffBundleMissingNextSegmentVignette(handoffToSpeak, 2)) {
@@ -390,6 +421,7 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         ensureCompletedScenarioScored: deps.ensureCompletedScenarioScored,
       });
       }
+    }
     }
   } else if (state.pendingS2RepairSatisfiedHandoff) {
     state.pendingS2RepairSatisfiedHandoff = false;
@@ -737,10 +769,6 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
             releaseInterviewClosingSpeak(closingTtsSessionKey);
             tryAcquireInterviewClosingSpeak(closingTtsSessionKey);
           }
-        }
-        if (closingFlushLooksFinal) {
-          params.textToParallelStream.spokenStarted = true;
-          state.interviewClosingSpokenThisStream = true;
         }
         maybeQueueSentenceForTts(dedupedClosing, false, true);
       }

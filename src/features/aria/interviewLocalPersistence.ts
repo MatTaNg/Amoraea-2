@@ -90,6 +90,23 @@ export function getResumeWelcomePlaybackGeneration(): number {
   return resumeWelcomePlaybackGeneration;
 }
 
+/** Set when interview screen unmounts for navigation away — mount resume owns welcome playback. */
+let mountResumeOwnsWelcomePlayback = false;
+
+export function markMountResumeOwnsWelcomePlayback(): void {
+  mountResumeOwnsWelcomePlayback = true;
+}
+
+export function peekMountResumeOwnsWelcomePlayback(): boolean {
+  return mountResumeOwnsWelcomePlayback;
+}
+
+export function consumeMountResumeOwnsWelcomePlayback(): boolean {
+  const owns = mountResumeOwnsWelcomePlayback;
+  mountResumeOwnsWelcomePlayback = false;
+  return owns;
+}
+
 /** Set when interview audio (mic or TTS) is interrupted by app background — replay on foreground return. */
 let pendingBackgroundAudioInterrupt: 'recording' | 'tts' | null = null;
 
@@ -107,6 +124,21 @@ export function takeInterviewAudioInterruptedByBackground(): 'recording' | 'tts'
 
 export function resumeWelcomeSpokenKey(attemptId: string): string {
   return `${RESUME_WELCOME_SPOKEN_PREFIX}${attemptId}`;
+}
+
+/** Stable key for resume welcome TTS dedup — DB attempt id, else session attempt, else correlation id. */
+export function resolveResumeWelcomeStorageAttemptId(args: {
+  persistenceAttemptId?: string | null;
+  interviewSessionAttemptId?: string | null;
+  interviewSessionId?: string | null;
+}): string | null {
+  const persisted = args.persistenceAttemptId?.trim();
+  if (persisted) return persisted;
+  const sessionAttempt = args.interviewSessionAttemptId?.trim();
+  if (sessionAttempt) return sessionAttempt;
+  const sessionId = args.interviewSessionId?.trim();
+  if (sessionId) return sessionId;
+  return null;
 }
 
 const PREPARING_RESULTS_SESSION_PREFIX = 'amoraea_preparing_results_';

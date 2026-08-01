@@ -1,9 +1,24 @@
-import { describe, expect, it, jest } from '@jest/globals';
+import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import { runPreClaudeTurnOpeningPipeline } from '@features/aria/runPreClaudeTurnOpeningPipeline';
+import { fetchInterviewMetaCommentFromLlm } from '@features/aria/fetchInterviewMetaCommentFromLlm';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 
+jest.mock('@features/aria/fetchInterviewMetaCommentFromLlm', () => ({
+  ...jest.requireActual<typeof import('@features/aria/fetchInterviewMetaCommentFromLlm')>(
+    '@features/aria/fetchInterviewMetaCommentFromLlm',
+  ),
+  fetchInterviewMetaCommentFromLlm: jest.fn(),
+}));
+
+const mockedMetaCommentLlmFetch = jest.mocked(fetchInterviewMetaCommentFromLlm);
+
 describe('runPreClaudeTurnOpeningPipeline', () => {
+  beforeEach(() => {
+    mockedMetaCommentLlmFetch.mockReset();
+    mockedMetaCommentLlmFetch.mockResolvedValue(null);
+  });
+
   it('returns continue:true with participant name and skip meta for a normal turn', async () => {
     const deps = createMockPreClaudeDeps({
       interviewNameRef: { current: 'Alex' },

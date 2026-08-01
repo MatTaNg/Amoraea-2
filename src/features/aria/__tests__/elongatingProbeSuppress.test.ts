@@ -321,6 +321,12 @@ describe('suppressed elongating fallbacks', () => {
         true,
       ),
     ).toBeNull();
+    expect(
+      stripInterviewClosingStreamingEcho(
+        'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.',
+        true,
+      ),
+    ).toBeNull();
     expect(stripInterviewClosingStreamingEcho('How would you repair this?', true)).toBe(
       'How would you repair this?',
     );

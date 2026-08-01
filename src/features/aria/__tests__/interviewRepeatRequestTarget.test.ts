@@ -99,5 +99,12 @@ describe('interviewRepeatRequestTarget', () => {
         "That's a real read on it. And if you were James, how would you repair?",
       ),
     ).toBe('And if you were James, how would you repair?');
+    expect(
+      stripBriefInterviewAcknowledgmentPrefixForRepeat(
+        "You're right — my mistake. What could James have done differently so Sarah would feel appreciated?",
+      ),
+    ).toBe(
+      'What could James have done differently so Sarah would feel appreciated?',
+    );
   });
 });

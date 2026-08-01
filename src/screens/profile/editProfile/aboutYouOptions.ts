@@ -19,7 +19,6 @@ export const EDUCATION_LEVEL_CHOICES: ChoiceOption[] = [
 export const ABOUT_DRUGS_CHOICES: ChoiceOption[] = [
   { label: 'Never', value: 'Never' },
   { label: 'Sometimes', value: 'Sometimes' },
-  { label: 'Prefer not to say', value: 'Prefer not to say' },
 ];
 
 /** Values must stay aligned with `mapRelationshipStyleToUi` in onboarding (`ModalOnboardingFlow`). */

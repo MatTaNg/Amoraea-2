@@ -6,7 +6,6 @@ import { supabase } from '@data/supabase/client';
 import { USER_INTERVIEW_ROUTING_TABLE } from '@data/supabase/userInterviewRoutingSelect';
 import { isGreetingOnly } from '@features/aria/interviewLocalPersistence';
 import type { InterviewSessionStatus } from '@features/aria/hooks/useAriaInterviewSession';
-import { isInterviewResumeHandleActive } from '@features/aria/interviewResumeHandleCoordinator';
 import { runHandleResume } from '@features/aria/runHandleResume';
 import { runHydratePostClosingFromSaved } from '@features/aria/runHydratePostClosingFromSaved';
 import { runStartInterview } from '@features/aria/runStartInterview';
@@ -20,6 +19,7 @@ import {
   shouldResumeMidInterviewFromSaved,
 } from '@utilities/interviewResumeCursor';
 import { clearInterviewFromStorage, loadInterviewFromStorage } from '@utilities/storage/InterviewStorage';
+import { remoteLog } from '@utilities/remoteLog';
 
 export type InterviewSessionLifecycleEffectInputs = {
   userId: string;
@@ -156,14 +156,25 @@ export function useInterviewSessionLifecycle(
       }
 
       if (shouldResumeMidInterviewFromSaved(saved)) {
-        if (isInterviewResumeHandleActive(userId)) {
-          finishResumeHydration();
-          return;
-        }
+        if (cancelled) return;
         try {
+          void remoteLog('[REENTRY_RESUME] mount_hydration_start', {
+            userId,
+            messageCount: saved.messages.length,
+            resumeActiveScenario: saved.resumeActiveScenario ?? null,
+          });
           await handleResume(saved);
+          if (
+            !depsRef.current.hasResumedRef.current &&
+            depsRef.current.interviewStatusRef?.current !== 'in_progress'
+          ) {
+          }
+          void remoteLog('[REENTRY_RESUME] mount_hydration_complete', {
+            userId,
+            interviewStatus: depsRef.current.interviewStatusRef?.current ?? null,
+          });
           finishResumeHydration();
-        } catch {
+        } catch (err) {
           depsRef.current.resumeLoadingFlowActiveRef.current = false;
           depsRef.current.setResumeLoadingVisible?.(false);
           depsRef.current.hasResumedRef.current = false;
@@ -190,6 +201,12 @@ export function useInterviewSessionLifecycle(
       }
     };
   }, [userId, isAdmin, handleResume, depsRef]);
+
+  useEffect(() => {
+    if (interviewStatus !== 'in_progress') return;
+    if (status !== 'intro' && status !== 'starting_interview') return;
+    depsRef.current.setStatus('active');
+  }, [interviewStatus, status, depsRef]);
 
   useEffect(() => {
     if (!isInterviewAppRoute) return;

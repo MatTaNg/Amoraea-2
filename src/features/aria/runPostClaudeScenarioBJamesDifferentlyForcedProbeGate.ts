@@ -1,5 +1,5 @@
-import { wrapForcedProbeWithAck } from '@features/aria/interviewAssistantReflection';
 import { buildPostClaudeProgressRefsPayload } from '@features/aria/buildPostClaudeProgressRefsPayload';
+import { deliverPostClaudeForcedCanonicalProbe } from '@features/aria/deliverPostClaudeForcedCanonicalProbe';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type {
   PostClaudeAssistantTurnDeps,
@@ -17,8 +17,6 @@ import { detectScenarioFromResponse } from '@features/aria/scenarioNumberDetecti
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { remoteLog } from '@utilities/remoteLog';
-
-const FORCED_JAMES_DIFFERENTLY_PROBE = SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
 
 export async function runPostClaudeScenarioBJamesDifferentlyForcedProbeGate(
   deps: PostClaudeAssistantTurnDeps,
@@ -38,7 +36,7 @@ export async function runPostClaudeScenarioBJamesDifferentlyForcedProbeGate(
     return null;
   }
 
-  if (!shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, FORCED_JAMES_DIFFERENTLY_PROBE)) {
+  if (!shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL)) {
     void remoteLog('[S2_JAMES_DIFF_FORCED_SKIPPED_TRANSCRIPT_DEDUP]', {
       interviewSessionId: deps.interviewSessionIdRef.current,
     });
@@ -96,31 +94,17 @@ export async function runPostClaudeScenarioBJamesDifferentlyForcedProbeGate(
     sidedEntirelyWithJames: params.sidedEntirelyWithJames,
     skipped_leadin_tts_due_to_parallel_streaming: parallelStreamingPlaybackUsed && !!bLeadIn,
   });
-  const wrappedJamesProbe = wrapForcedProbeWithAck(
-    params.trimmed,
-    bLeadIn || strippedText,
-    FORCED_JAMES_DIFFERENTLY_PROBE,
-    recentAsstForAck,
-  );
-  const probeMsg: PostClaudeInterviewMessage = {
-    role: 'assistant',
-    content: wrappedJamesProbe,
-    scenarioNumber: deps.resolveAssistantScenarioNumber(wrappedJamesProbe, stagedMessages),
-  };
-  const liveAfterLeadIn = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : stagedMessages) as PostClaudeInterviewMessage[];
-  commitDedupedAssistantTranscriptTurn(
-    liveAfterLeadIn,
+
+  await deliverPostClaudeForcedCanonicalProbe({
+    deps,
+    params,
     stagedMessages,
-    wrappedJamesProbe,
-    {
-      scenarioNumber: probeMsg.scenarioNumber,
-      interviewMoment: deps.currentInterviewMomentRef.current,
-    },
-    (next) => deps.setMessages(next),
-  );
-  await deps.speakTextSafe(wrappedJamesProbe, ASSISTANT_INTERVIEW_SPEECH);
+    probeId: 's2_james_differently',
+    strippedText: bLeadIn || strippedText,
+    recentAsstForAck,
+    useSpeakTextSafe: true,
+    logTag: '[S2_JAMES_DIFF_FORCED_DELIVER]',
+  });
 
   return finishPostClaudeForcedConstructProbeGate(deps, {
     strippedText,

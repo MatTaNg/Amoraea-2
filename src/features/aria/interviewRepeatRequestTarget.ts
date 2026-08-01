@@ -134,13 +134,25 @@ export function peelRepeatRequestAcknowledgmentPrefix(text: string): {
 const REPEAT_LEADING_BRIEF_ACK_RE =
   /^(?:sure|got it|makes sense|that makes a lot of sense|i'?m with you|well done|okay|ok|alright|fair|noted|mm|yeah|i hear you|i see what you mean|yeah,?\s+i can see that|that'?s a real read(?: on it)?|good read|great read|nice work|that makes sense|you(?:'re| are) seeing that|thanks for sharing that|thank you for sharing(?: that)?)\b(?:\s*[—–\-:,.!…]+\s*|\s+)/i;
 
+/** Client-owned already-answered ownership lead — strip before resolving active assessable question. */
+const ALREADY_ANSWERED_OWNERSHIP_PREFIX_RE =
+  /^you'?re right\s*[—–-]\s*my mistake\.?\s*/i;
+
+const ALREADY_ANSWERED_REFLECTION_PREFIX_RE =
+  /^you'?re right\s*[—–-]\s*[^.!?]{8,200}[.!?]\s*my mistake\.?\s*/i;
+
+const MOVING_ON_BRIDGE_PREFIX_RE = /^moving on\.?\s+/i;
+
 export function stripBriefInterviewAcknowledgmentPrefixForRepeat(text: string): string {
   const raw = (text ?? '').trim();
   if (!raw) return raw;
   let t = raw.replace(/\s+/g, ' ').trim();
   let guard = 0;
   while (guard++ < 6) {
-    const next = t.replace(REPEAT_LEADING_BRIEF_ACK_RE, '').trim();
+    let next = t.replace(ALREADY_ANSWERED_OWNERSHIP_PREFIX_RE, '').trim();
+    next = next.replace(ALREADY_ANSWERED_REFLECTION_PREFIX_RE, '').trim();
+    next = next.replace(MOVING_ON_BRIDGE_PREFIX_RE, '').trim();
+    next = next.replace(REPEAT_LEADING_BRIEF_ACK_RE, '').trim();
     if (next === t) break;
     // Keep the original when stripping would leave nothing substantive.
     if (!next || next.length < 12) break;

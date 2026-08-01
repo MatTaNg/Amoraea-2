@@ -15,6 +15,7 @@ import {
   type ForcedConstructProbeContext,
   type PostClaudeForcedConstructProbeGatesResult,
 } from '@features/aria/postClaudeForcedConstructProbeShared';
+import type { PostClaudeAssistantDraftValidation } from '@features/aria/validatePostClaudeAssistantDraft';
 
 export type { PostClaudeForcedConstructProbeGatesResult } from '@features/aria/postClaudeForcedConstructProbeShared';
 
@@ -26,87 +27,103 @@ export async function runPostClaudeForcedConstructProbeGates(
   draft: ForcedConstructProbeContext,
   parallelStreamingPlaybackUsed: boolean,
   speakAssistantTurn: PostClaudeSpeakAssistantTurn,
+  draftValidation?: PostClaudeAssistantDraftValidation,
 ): Promise<PostClaudeForcedConstructProbeGatesResult> {
   const strippedText = draft.strippedText;
   const jamesState = evaluatePostClaudeScenarioBJamesDifferentlyProbeState(params, draft, text, strippedText);
+  const skipScenarioForcedProbes = draftValidation?.skipScenarioForcedProbes === true;
+  const skipMoment4ThresholdForced = draftValidation?.skipMoment4ThresholdForced === true;
 
-  const s1Contempt = await runPostClaudeScenarioAContemptForcedProbeGate(
-    deps,
-    params,
-    text,
-    draft,
-    parallelStreamingPlaybackUsed,
-    speakAssistantTurn,
-    jamesState,
-  );
-  if (s1Contempt) {
-    return s1Contempt;
+  if (skipScenarioForcedProbes && skipMoment4ThresholdForced) {
+    return {
+      handled: false,
+      strippedText,
+      scenarioBSkippedJamesIntermediate: jamesState.scenarioBSkippedJamesIntermediate,
+      needsScenarioBJamesDifferentlyInsert: jamesState.needsScenarioBJamesDifferentlyInsert,
+    };
   }
 
-  const s2Appreciation = await runPostClaudeScenarioBAppreciationForcedProbeGate(
-    deps,
-    params,
-    text,
-    draft,
-    speakAssistantTurn,
-    jamesState,
-  );
-  if (s2Appreciation) {
-    return s2Appreciation;
+  if (!skipScenarioForcedProbes) {
+    const s1Contempt = await runPostClaudeScenarioAContemptForcedProbeGate(
+      deps,
+      params,
+      text,
+      draft,
+      parallelStreamingPlaybackUsed,
+      speakAssistantTurn,
+      jamesState,
+    );
+    if (s1Contempt) {
+      return s1Contempt;
+    }
+
+    const s2Appreciation = await runPostClaudeScenarioBAppreciationForcedProbeGate(
+      deps,
+      params,
+      text,
+      draft,
+      speakAssistantTurn,
+      jamesState,
+    );
+    if (s2Appreciation) {
+      return s2Appreciation;
+    }
+
+    const jamesDifferently = await runPostClaudeScenarioBJamesDifferentlyForcedProbeGate(
+      deps,
+      params,
+      draft,
+      parallelStreamingPlaybackUsed,
+      jamesState,
+    );
+    if (jamesDifferently) {
+      return jamesDifferently;
+    }
+
+    const jamesRepair = await runPostClaudeScenarioBJamesRepairForcedProbeGate(
+      deps,
+      params,
+      draft,
+      speakAssistantTurn,
+      jamesState,
+    );
+    if (jamesRepair) {
+      return jamesRepair;
+    }
+
+    const s3Sophie = await runPostClaudeScenarioCSophieForcedProbeGate(
+      deps,
+      params,
+      draft,
+      speakAssistantTurn,
+      jamesState,
+    );
+    if (s3Sophie) {
+      return s3Sophie;
+    }
+
+    const s3Repair = await runPostClaudeScenarioCRepairForcedProbeGate(
+      deps,
+      params,
+      draft,
+      speakAssistantTurn,
+      jamesState,
+    );
+    if (s3Repair) {
+      return s3Repair;
+    }
   }
 
-  const jamesDifferently = await runPostClaudeScenarioBJamesDifferentlyForcedProbeGate(
-    deps,
-    params,
-    draft,
-    parallelStreamingPlaybackUsed,
-    jamesState,
-  );
-  if (jamesDifferently) {
-    return jamesDifferently;
-  }
-
-  const jamesRepair = await runPostClaudeScenarioBJamesRepairForcedProbeGate(
-    deps,
-    params,
-    draft,
-    speakAssistantTurn,
-    jamesState,
-  );
-  if (jamesRepair) {
-    return jamesRepair;
-  }
-
-  const s3Sophie = await runPostClaudeScenarioCSophieForcedProbeGate(
-    deps,
-    params,
-    draft,
-    speakAssistantTurn,
-    jamesState,
-  );
-  if (s3Sophie) {
-    return s3Sophie;
-  }
-
-  const s3Repair = await runPostClaudeScenarioCRepairForcedProbeGate(
-    deps,
-    params,
-    draft,
-    speakAssistantTurn,
-    jamesState,
-  );
-  if (s3Repair) {
-    return s3Repair;
-  }
-
-  const m4Threshold = await runPostClaudeMoment4ThresholdForcedProbeGate(
-    deps,
-    params,
-    text,
-    draft,
-    speakAssistantTurn,
-    jamesState,
-  );
+  const m4Threshold = skipMoment4ThresholdForced
+    ? null
+    : await runPostClaudeMoment4ThresholdForcedProbeGate(
+          deps,
+          params,
+          text,
+          draft,
+          speakAssistantTurn,
+          jamesState,
+        );
   if (m4Threshold) {
     return m4Threshold;
   }

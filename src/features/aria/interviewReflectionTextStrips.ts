@@ -72,7 +72,9 @@ export function stripFlatReflectionAcknowledgmentOpeners(text: string): string {
   if (isPreservedAckBeforeScenarioBJamesRepair(original)) return original;
   const MIN_REMAINDER = 14;
   const orderedPhrases = [
+    'That makes a lot of sense',
     'That makes sense',
+    "I'm with you",
     'That checks out',
     'That lands',
     'Absolutely',

@@ -1,6 +1,7 @@
 import type { TranscribeSafeDeps } from '@features/aria/transcribeSafeTypes';
 import type { AriaInterviewAudioRecorderDeps } from '@features/aria/hooks/useAriaInterviewAudioRecorder';
 import type { InterviewMicLifecycleDeps } from '@features/aria/hooks/interviewMicLifecycleTypes';
+import { flushInterviewProgressForNavigationAway } from '@features/aria/buildInterviewProgressSnapshotFromRefs';
 import type { HandleNativeOrWhisperMicPressDeps } from '@features/aria/handleNativeOrWhisperMicPressTypes';
 import type {
   AriaInterviewDepsRefs,
@@ -50,6 +51,7 @@ export function syncAriaInterviewMicPipelineDeps(
         lastVoiceTurnConfidenceRef: ctx.lastVoiceTurnConfidenceRef,
         turnAudioIndexRef: ctx.turnAudioIndexRef,
         lastUserTurnAudioDurationMsRef: ctx.lastUserTurnAudioDurationMsRef,
+        lastUserTurnMicStopTelemetryRef: ctx.lastUserTurnMicStopTelemetryRef,
         interviewNameRef: ctx.interviewNameRef,
         interviewNameReaskPendingRef: ctx.interviewNameReaskPendingRef,
         lastQuestionTextRef: ctx.lastQuestionTextRef,
@@ -119,6 +121,44 @@ export function syncAriaInterviewMicPipelineDeps(
         stopElevenLabsPlayback: ctx.stopElevenLabsPlayback,
         hasInterviewClosingSpeakInFlightForSession: ctx.hasInterviewClosingSpeakInFlightForSession,
         classifyInterviewQuestionType: ctx.classifyInterviewQuestionType,
+        interviewUserTurnEpochRef: ctx.interviewUserTurnEpochRef,
+        flushInterviewProgressForNavigationAway: () => {
+          flushInterviewProgressForNavigationAway({
+            userId: ctx.userId as string | undefined,
+            isAdmin: ctx.isAdmin as boolean | undefined,
+            interviewStatusRef: ctx.interviewStatusRef as InterviewMicLifecycleDeps['interviewStatusRef'],
+            interviewSessionAttemptIdRef:
+              ctx.interviewSessionAttemptIdRef as InterviewMicLifecycleDeps['interviewSessionAttemptIdRef'],
+            saveInterviewProgress: ctx.saveInterviewProgress as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['saveInterviewProgress'],
+            currentMessagesRef: ctx.currentMessagesRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['currentMessagesRef'],
+            scoredScenariosRef: ctx.scoredScenariosRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['scoredScenariosRef'],
+            scenarioScoresRef: ctx.scenarioScoresRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['scenarioScoresRef'],
+            currentScenarioRef: ctx.currentScenarioRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['currentScenarioRef'],
+            resumeActiveScenarioRef: ctx.resumeActiveScenarioRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['resumeActiveScenarioRef'],
+            lastQuestionTextRef: ctx.lastQuestionTextRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['lastQuestionTextRef'],
+            showScenarioCardCanonicalPlaybackConfirmedKindsRef:
+              ctx.showScenarioCardCanonicalPlaybackConfirmedKindsRef as Parameters<
+                typeof flushInterviewProgressForNavigationAway
+              >[0]['showScenarioCardCanonicalPlaybackConfirmedKindsRef'],
+            scenarioSkipConfirmedCountRef: ctx.scenarioSkipConfirmedCountRef as Parameters<
+              typeof flushInterviewProgressForNavigationAway
+            >[0]['scenarioSkipConfirmedCountRef'],
+          });
+        },
   } as InterviewMicLifecycleDeps;
 
   refs.handleNativeOrWhisperMicPressDepsRef.current = {

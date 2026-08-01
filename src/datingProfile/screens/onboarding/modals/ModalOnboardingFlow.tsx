@@ -1,6 +1,7 @@
-import React, { useState, useEffect, startTransition } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { useProfile } from '@/shared/hooks/useProfile';
 import { NameModal } from './NameModal';
@@ -48,6 +49,10 @@ import { ProfilePromptsOnboardingModal } from './ProfilePromptsOnboardingModal';
 import { saveEditProfilePrompts } from '@/data/repos/editProfileRepo';
 import type { ProfilePromptAnswer } from '@domain/models/Profile';
 import {
+  invalidateEditProfileQueries,
+  prefetchEditProfileQueries,
+} from '@/screens/profile/editProfile/editProfileQueries';
+import {
   workoutOptions,
   smokingOptions,
   drinkingOptions,
@@ -72,8 +77,8 @@ import {
 } from '@/screens/profile/editProfile/aboutYouOptions';
 import {
   SEX_DRIVE_OPTIONS,
-  DATING_PACE_AFTER_EXCITEMENT_OPTIONS,
   RECENT_DATING_EARLY_WEEKS_OPTIONS,
+  RECENT_DATING_EARLY_WEEKS_QUESTION,
   SPACE_FOR_NEW_RELATIONSHIP_OPTIONS,
   PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS,
   SEXUAL_FOCUS_OPTIONS,
@@ -174,10 +179,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   onExitToPostInterview,
 }) => {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { profile, loading: profileLoading } = useProfile();
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('name');
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({});
   const [loading, setLoading] = useState(true);
+  const [completingOnboarding, setCompletingOnboarding] = useState(false);
   const isInitialLoad = React.useRef(true);
   /** Prevents double step advances on rapid taps (saves run in the background). */
   const stepTransitionLockRef = React.useRef(false);
@@ -698,8 +705,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         if (newData.sexDrive !== undefined) (profileUpdates as any).sexDrive = newData.sexDrive;
         if (newData.sexInterestCategories !== undefined)
           (profileUpdates as any).sexInterestCategories = newData.sexInterestCategories;
-        if (newData.datingPaceAfterExcitement !== undefined)
-          (profileUpdates as any).datingPaceAfterExcitement = newData.datingPaceAfterExcitement;
         if (newData.recentDatingEarlyWeeks !== undefined)
           (profileUpdates as any).recentDatingEarlyWeeks = newData.recentDatingEarlyWeeks;
         if (newData.spaceForNewRelationship !== undefined)
@@ -780,11 +785,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     setOnboardingData(updatedData);
   }, [user?.id, currentStep]);
 
-  /** Fast path for auto-advance single-choice taps — ref only; persisted on step change. */
-  const setChoice = React.useCallback(
-    (patch: Partial<OnboardingData>) => updateData(patch, { refOnly: true }),
-    [updateData],
-  );
+  /** Fast path for auto-advance single-choice taps — updates UI immediately; persisted on step change. */
+  const setChoice = React.useCallback((patch: Partial<OnboardingData>) => {
+    const updatedData = { ...onboardingDataRef.current, ...patch };
+    onboardingDataRef.current = updatedData;
+    setOnboardingData(updatedData);
+  }, []);
 
   const goToPrevStep = () => {
     if (stepTransitionLockRef.current) return;
@@ -868,10 +874,8 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
     stepTransitionLockRef.current = true;
     try {
-      startTransition(() => {
-        setOnboardingData(latestData);
-        setCurrentStep(nextStep);
-      });
+      setOnboardingData(latestData);
+      setCurrentStep(nextStep);
       persistedStepRef.current = nextStep;
 
       if (!uid) return;
@@ -1023,8 +1027,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           if (latestData.sexDrive !== undefined) (profileUpdates as any).sexDrive = latestData.sexDrive;
           if (latestData.sexInterestCategories !== undefined)
             (profileUpdates as any).sexInterestCategories = latestData.sexInterestCategories;
-          if (latestData.datingPaceAfterExcitement !== undefined)
-            (profileUpdates as any).datingPaceAfterExcitement = latestData.datingPaceAfterExcitement;
           if (latestData.recentDatingEarlyWeeks !== undefined)
             (profileUpdates as any).recentDatingEarlyWeeks = latestData.recentDatingEarlyWeeks;
           if (latestData.spaceForNewRelationship !== undefined)
@@ -1124,18 +1126,25 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
   const handleComplete = () => {
     const uid = user?.id;
-    if (!uid) return;
+    if (!uid || completingOnboarding) return;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (profileSaveTimeoutRef.current) {
+      clearTimeout(profileSaveTimeoutRef.current);
+      profileSaveTimeoutRef.current = null;
+    }
 
     const latestData = onboardingDataRef.current;
-    console.log('Completing onboarding (persist in background), current data:', {
+    console.log('Completing onboarding:', {
       hasName: !!latestData.name,
-      nameValue: latestData.name,
-      hasGender: !!latestData.gender,
-      hasRelationshipStyle: !!latestData.relationshipStyle,
-      hasLocation: !!latestData.location,
-      allDataKeys: Object.keys(latestData),
+      hasArchetypes: normalizeArchetypesFromProfile(latestData.archetypes).length,
+      photoCount: latestData.photos?.length ?? 0,
     });
 
+    setCompletingOnboarding(true);
     void (async () => {
       try {
         const result = await modalOnboardingService.completeOnboarding(uid, latestData);
@@ -1144,26 +1153,29 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           try {
             const { profilesRepo } = await import('@/data/repos/profilesRepo');
             await profilesRepo.updateProfile(uid, { hasSeenOnboardingIntro: true });
-            console.log('Set hasSeenOnboardingIntro to true as fallback');
           } catch (fallbackError) {
             console.error('Failed to set hasSeenOnboardingIntro as fallback:', fallbackError);
           }
-        } else {
-          console.log('Onboarding completed successfully, hasSeenOnboardingIntro set to true');
         }
       } catch (error) {
         console.error('Error completing onboarding:', error);
         try {
           const { profilesRepo } = await import('@/data/repos/profilesRepo');
           await profilesRepo.updateProfile(uid, { hasSeenOnboardingIntro: true });
-          console.log('Set hasSeenOnboardingIntro to true on error');
         } catch (fallbackError) {
           console.error('Failed to set hasSeenOnboardingIntro on error:', fallbackError);
         }
+      } finally {
+        invalidateEditProfileQueries(queryClient, uid);
+        try {
+          await prefetchEditProfileQueries(queryClient, uid);
+        } catch (prefetchError) {
+          console.error('Failed to prefetch edit profile after onboarding:', prefetchError);
+        }
+        setCompletingOnboarding(false);
+        onComplete();
       }
     })();
-
-    onComplete();
   };
 
   if (loading) {
@@ -1384,10 +1396,14 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       {currentStep === 'heightWeight' && (
         <HeightWeightModal
-          height={onboardingData.height ?? ''}
-          weight={onboardingData.weight ?? ''}
-          onHeightChange={(height) => updateData({ height })}
-          onWeightChange={(weight) => updateData({ weight })}
+          heightCm={onboardingData.height_cm}
+          weightKg={onboardingData.weight_kg}
+          onHeightCmChange={(height_cm) =>
+            updateData({ height_cm, height: undefined })
+          }
+          onWeightKgChange={(weight_kg) =>
+            updateData({ weight_kg, weight: undefined })
+          }
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1692,20 +1708,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         />
       )}
 
-      {currentStep === 'datingPaceAfterExcitement' && (
-        <SingleChoiceModal
-          title="After the initial excitement of meeting someone, what pace feels most natural for you?"
-          options={DATING_PACE_AFTER_EXCITEMENT_OPTIONS}
-          value={onboardingData.datingPaceAfterExcitement || ''}
-          onValueChange={(v) => setChoice({ datingPaceAfterExcitement: v })}
-          onNext={goToNextStep}
-          onBack={goToPrevStep}
-        />
-      )}
-
       {currentStep === 'recentDatingEarlyWeeks' && (
         <SingleChoiceModal
-          title="Think about your most recent dating experience. In the first 2-3 weeks, what actually happened?"
+          title={RECENT_DATING_EARLY_WEEKS_QUESTION}
           options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
           value={onboardingData.recentDatingEarlyWeeks || ''}
           onValueChange={(v) => setChoice({ recentDatingEarlyWeeks: v })}
@@ -1829,7 +1834,18 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <ArchetypesOnboardingModal
           archetypes={normalizeArchetypesFromProfile(onboardingData.archetypes)}
           onArchetypesChange={(archetypes: ArchetypeId[]) => updateData({ archetypes })}
-          onNext={goToNextStep}
+          onNext={() => {
+            const latest = onboardingDataRef.current;
+            const archetypes = normalizeArchetypesFromProfile(latest.archetypes);
+            if (user?.id && isCompleteArchetypeSelection(archetypes.length)) {
+              void import('@/data/repos/profilesRepo').then(({ profilesRepo }) =>
+                profilesRepo.updateProfile(user.id, { archetypes }).catch((error) => {
+                  console.error('Failed to save archetypes on step advance:', error);
+                }),
+              );
+            }
+            goToNextStep();
+          }}
           onBack={goToPrevStep}
         />
       )}
@@ -1896,7 +1912,10 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       )}
 
       {currentStep === 'profileComplete' && (
-        <ProfileOnboardingCompleteModal onContinue={handleComplete} />
+        <ProfileOnboardingCompleteModal
+          onContinue={handleComplete}
+          continuing={completingOnboarding}
+        />
       )}
     </View>
     </SafeAreaView>

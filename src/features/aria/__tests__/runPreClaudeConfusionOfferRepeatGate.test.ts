@@ -16,7 +16,7 @@ describe('runPreClaudeConfusionOfferRepeatGate', () => {
     clearConfusionRepeatOfferPending();
   });
 
-  it('offers to repeat on content confusion', async () => {
+  it('defers content confusion to Claude when Phase 2 is enabled', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
       interviewSessionIdRef: { current: 'sess-1' },
@@ -34,11 +34,8 @@ describe('runPreClaudeConfusionOfferRepeatGate', () => {
       { type: 'confusion', confidence: 0.9 },
     );
 
-    expect(result).toEqual({ handled: true });
-    expect(speakTextSafe).toHaveBeenCalledWith(
-      CONFUSION_REPEAT_OFFER_LINE,
-      expect.objectContaining({ skipLastQuestionRef: true }),
-    );
+    expect(result).toEqual({ handled: false });
+    expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
   it('replays the scenario question after offer assent', async () => {

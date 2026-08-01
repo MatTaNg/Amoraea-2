@@ -3,8 +3,10 @@ import {
   IRRELEVANT_ANSWER_RETRY_LINE,
   isIrrelevantAnswerRetryAssistantLine,
   looksLikeCompleteShortUserReply,
+  looksLikeInterviewProcessQuestionRepeatRequest,
   looksLikeUnassessableScenarioAnswer,
 } from '@features/aria/interviewAnswerRelevance';
+import { looksLikePriorAnswerMetaComment } from '@features/aria/interviewPriorAnswerMetaDetection';
 import { looksLikeInterviewScoreStatusRequest } from '@features/aria/interviewScoreStatusRequest';
 import { isInterviewHardStopUserTurn } from '@features/aria/interviewMentalizingAndAnswerSignals';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
@@ -15,7 +17,10 @@ import {
   looksLikeFrustrationSkipConfirmationAffirmative,
   looksLikeSkipConfirmationAssistantPrompt,
 } from '@features/aria/metaCommentSkipFrustration';
+import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
+import { shouldBypassLegacyMetaInjectForClaude } from '@features/aria/shouldBypassLegacyMetaInjectForClaude';
+import { resolveHybridCutOffForInterviewTurn } from '@features/aria/resolveHybridCutOffForInterviewTurn';
 import {
   isScenarioAQ1Prompt,
   looksLikeScenarioAContemptProbeAssessableShortAnswer,
@@ -37,6 +42,14 @@ import {
 } from '@features/aria/moment4ProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 import { markQuestionDelivered } from '@utilities/sessionLogging';
+import { shouldDeferGatesForDedicatedMetaHandling } from '@features/aria/metaCommentDedicatedPostCommitDeferral';
+
+function shouldDeferIrrelevantAnswerRetryForDedicatedMetaHandling(
+  metaCommentClassification: MetaCommentClassification | null,
+  trimmed: string,
+): boolean {
+  return shouldDeferGatesForDedicatedMetaHandling(metaCommentClassification, trimmed);
+}
 
 function lastAssistantLooksLikeAssessableInterviewPrompt(lastAssistantContent: string): boolean {
   const t = (lastAssistantContent ?? '').trim();
@@ -66,11 +79,33 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
   trimmed: string,
   messagesToUse: MessageWithScenario[],
   lastAssistantContent: string,
+  metaCommentClassification: MetaCommentClassification | null = null,
 ): Promise<{ handled: boolean }> {
   if (!trimmed || isInterviewHardStopUserTurn(trimmed)) {
     return { handled: false };
   }
+  if (looksLikeInterviewProcessQuestionRepeatRequest(trimmed)) {
+    return { handled: false };
+  }
+  const telemetry = deps.lastUserTurnMicStopTelemetryRef?.current ?? null;
+  const questionPreviewForCutOff =
+    (deps.lastQuestionTextRef.current ?? '').trim() || (lastAssistantContent ?? '').trim();
+  const cutOffDetection = await resolveHybridCutOffForInterviewTurn({
+    transcriptText: trimmed,
+    activeQuestionPreview: questionPreviewForCutOff,
+    telemetry,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
+  if (
+    shouldBypassLegacyMetaInjectForClaude(trimmed, metaCommentClassification, telemetry) &&
+    !cutOffDetection.isCutOff
+  ) {
+    return { handled: false };
+  }
   if (looksLikeInterviewScoreStatusRequest(trimmed)) {
+    return { handled: false };
+  }
+  if (shouldDeferIrrelevantAnswerRetryForDedicatedMetaHandling(metaCommentClassification, trimmed)) {
     return { handled: false };
   }
   // Skip acceptance already queued the next beat for the model / client delivery.
@@ -125,10 +160,14 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
     looksLikeMoment4ThresholdQuestion(questionToKeep) ||
     looksLikeMoment4ThresholdQuestion(lastAssistantContent);
   if (thresholdQuestion) {
-    if (!looksLikeUnassessableMoment4ThresholdAnswer(trimmed)) {
+    if (!looksLikeUnassessableMoment4ThresholdAnswer(trimmed) && !cutOffDetection.isCutOff) {
       return { handled: false };
     }
-  } else if (!looksLikeUnassessableScenarioAnswer(trimmed)) {
+  } else if (!looksLikeUnassessableScenarioAnswer(trimmed) && !cutOffDetection.isCutOff) {
+    return { handled: false };
+  }
+
+  if (looksLikePriorAnswerMetaComment(trimmed)) {
     return { handled: false };
   }
 
@@ -140,6 +179,7 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
     preview: trimmed.slice(0, 80),
     questionPreview: questionToKeep.slice(0, 80),
     scenarioNumber,
+    cutOffSource: cutOffDetection.source,
   });
 
   const liveTranscript = (deps.currentMessagesRef.current.length > 0

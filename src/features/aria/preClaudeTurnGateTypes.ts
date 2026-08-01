@@ -7,6 +7,7 @@ import type { InterviewTranscriptRow, VoiceState, InterviewSessionStatus } from 
 import type { InterviewProgressRefs } from '@features/aria/interviewProgressSync';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
+import type { UserTurnMicStopTelemetry } from '@features/aria/interviewCutOffDetectionTypes';
 import type { ParallelStreamingTtsState } from '@features/aria/interviewParallelTtsBatch';
 
 export type PreClaudeTurnGateParams = {
@@ -225,6 +226,7 @@ export type PreClaudeTurnGateDeps = {
   scenarioSkipConfirmedCountRef: MutableRefObject<number>;
   scenarioSkipPenaltySumRef: MutableRefObject<number>;
   lastUserTurnAudioDurationMsRef: MutableRefObject<number | null>;
+  lastUserTurnMicStopTelemetryRef: MutableRefObject<UserTurnMicStopTelemetry | null>;
   lastVoiceTurnConfidenceRef: MutableRefObject<number | null>;
   lastVoiceTurnLanguageRef: MutableRefObject<string | null>;
   responseTimingsRef: MutableRefObject<unknown[]>;

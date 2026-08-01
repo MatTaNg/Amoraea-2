@@ -30,8 +30,6 @@ export function textContainsScenarioBVignetteBody(text: string): boolean {
 
     /sarah has been feeling underappreciated/.test(t) ||
 
-    /\bsarah and james\b/.test(t) ||
-
     (/\bsarah\b/.test(t) &&
 
       /\bjames\b/.test(t) &&
@@ -195,6 +193,8 @@ export function looksLikeNonCanonicalScenarioCVignetteFiction(text: string): boo
     /have been together for/.test(t) ||
 
     /dating for (?:a few|\d+|eight|six|two|three|four|five|seven|nine|ten)/.test(t) ||
+
+    /(?:hard week|work stress|not sleeping well|generally feeling low)/.test(t) ||
 
     /sophie has been/.test(t) ||
 

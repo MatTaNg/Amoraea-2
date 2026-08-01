@@ -32,7 +32,6 @@ export const EDIT_PROFILE_TRACKED_DRAFT_KEYS = [
   'politics',
   'religion',
   'sexDrive',
-  'datingPaceAfterExcitement',
   'recentDatingEarlyWeeks',
   'spaceForNewRelationship',
   'partnerMoodMismatchResponse',
@@ -48,7 +47,7 @@ export type EditProfileFormSnapshot = {
   attractedUi: string[];
   sexInterestSelected: string[];
   lifeDomainsState: OnboardingLifeDomainValues;
-  weightLbsStr: string;
+  weightKgPick: number | undefined;
   heightCmPick: number | undefined;
   typologyValues: TypologyPickerValue;
   matchPrefs: MatchPreferences;
@@ -98,7 +97,7 @@ export function buildEditProfileFormSnapshot(
     attractedUi: [...input.attractedUi],
     sexInterestSelected: [...input.sexInterestSelected],
     lifeDomainsState: { ...input.lifeDomainsState },
-    weightLbsStr: input.weightLbsStr,
+    weightKgPick: input.weightKgPick,
     heightCmPick: input.heightCmPick,
     typologyValues: { ...input.typologyValues },
     matchPrefs: { ...input.matchPrefs },

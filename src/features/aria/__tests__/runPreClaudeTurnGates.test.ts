@@ -63,6 +63,47 @@ const baseSkipMeta = {
   suppressForcedConstructProbesForMetaFrustration: false,
 };
 
+const mockResolvedOrchestrator = {
+  decision: {
+    source: 'heuristic_v1' as const,
+    userIntent: 'substantive_answer' as const,
+    activeQuestionPreview: 'preview',
+    satisfiedProbeIds: [] as const,
+    pendingProbeId: null,
+    activeConstructEngaged: true,
+    action: { kind: 'delegate_claude' as const },
+    reason: 'test',
+  },
+  heuristic: {
+    source: 'heuristic_v1' as const,
+    userIntent: 'substantive_answer' as const,
+    activeQuestionPreview: 'preview',
+    satisfiedProbeIds: [] as const,
+    pendingProbeId: null,
+    activeConstructEngaged: true,
+    action: { kind: 'delegate_claude' as const },
+    reason: 'test',
+  },
+  resolution: 'heuristic' as const,
+};
+
+function lateInterceptPass(overrides: Record<string, unknown> = {}) {
+  return {
+    handled: false as const,
+    isPersonalOpening: false,
+    lastAssistantContent: 'What is going on between these two?',
+    lastInterviewerContent: 'What is going on between these two?',
+    shouldForceMoment4ThresholdProbe: false,
+    moment4ThresholdHintInAnswer: false,
+    moment5CombinedUserText: baseParams.trimmed,
+    constructProbeFlags: {},
+    constructSatisfactionResolvedByProbe: {},
+    resolvedOrchestrator: mockResolvedOrchestrator,
+    orchestratorSkippedProbeId: null,
+    ...overrides,
+  };
+}
+
 describe('runPreClaudeTurnGates', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -111,16 +152,7 @@ describe('runPreClaudeTurnGates', () => {
       userScenarioTag: 1,
     });
     jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
-    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
-      handled: false,
-      isPersonalOpening: false,
-      lastAssistantContent: 'What is going on between these two?',
-      lastInterviewerContent: 'What is going on between these two?',
-      shouldForceMoment4ThresholdProbe: false,
-      moment4ThresholdHintInAnswer: false,
-      moment5CombinedUserText: baseParams.trimmed,
-      constructProbeFlags: {},
-    });
+    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue(lateInterceptPass());
     jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: true });
 
     const result = await runPreClaudeTurnGates(createMockPreClaudeDeps(), baseParams);
@@ -203,6 +235,7 @@ describe('runPreClaudeTurnGates', () => {
       moment4ThresholdHintInAnswer: false,
       moment5CombinedUserText: baseParams.trimmed,
       constructProbeFlags: {},
+      constructSatisfactionResolvedByProbe: {},
     });
     jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
 
@@ -228,16 +261,7 @@ describe('runPreClaudeTurnGates', () => {
       userScenarioTag: 1,
     });
     jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
-    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
-      handled: false,
-      isPersonalOpening: false,
-      lastAssistantContent: 'What is going on between these two?',
-      lastInterviewerContent: 'What is going on between these two?',
-      shouldForceMoment4ThresholdProbe: false,
-      moment4ThresholdHintInAnswer: false,
-      moment5CombinedUserText: baseParams.trimmed,
-      constructProbeFlags: {},
-    });
+    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue(lateInterceptPass());
     jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
     jest.mocked(assertPreClaudeAnthropicConfigured).mockReturnValue(false);
 
@@ -263,16 +287,9 @@ describe('runPreClaudeTurnGates', () => {
       userScenarioTag: 1,
     });
     jest.mocked(runPreClaudePostCommitIntroGatesOnly).mockResolvedValue({ handled: false });
-    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue({
-      handled: false,
-      isPersonalOpening: false,
-      lastAssistantContent: 'What is going on between these two?',
-      lastInterviewerContent: 'What is going on between these two?',
-      shouldForceMoment4ThresholdProbe: false,
-      moment4ThresholdHintInAnswer: false,
-      moment5CombinedUserText: baseParams.trimmed,
-      constructProbeFlags: { shouldForceScenarioAContemptProbe: false },
-    });
+    jest.mocked(runPreClaudeLateInterceptGates).mockResolvedValue(
+      lateInterceptPass({ constructProbeFlags: { shouldForceScenarioAContemptProbe: false } }),
+    );
     jest.mocked(runPreClaudePostCommitHandoffAndSkipGates).mockResolvedValue({ handled: false });
     jest.mocked(assertPreClaudeAnthropicConfigured).mockReturnValue(true);
 

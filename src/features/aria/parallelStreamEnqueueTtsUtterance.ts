@@ -43,6 +43,7 @@ import {
 } from '@features/aria/moment4ProbeLogic';
 import { isIncompleteScenarioAContemptProbeLeadSentence } from '@features/aria/scenarioAContemptProbeLogic';
 import { resolveAssessableQuestionTextForResponseTiming } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
+import { maybePersistScenarioOpeningDeliveredAfterQuestionDelivered } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import {
   coerceScenarioARepairQuestionForTts,
   looksLikeScenarioARepairQuestion,
@@ -488,6 +489,53 @@ export function createParallelStreamEnqueueTtsUtterance(
                   },
                   platform: rtd.platform,
                 });
+                const sn = deps.currentScenarioRef.current;
+                if (sn === 1 || sn === 2 || sn === 3) {
+                  void maybePersistScenarioOpeningDeliveredAfterQuestionDelivered({
+                    userId: deps.userId,
+                    deliveredQuestionText: questionTextForLog,
+                    currentScenario: sn,
+                    sessionAttemptId: deps.interviewSessionAttemptIdRef?.current ?? null,
+                    resumeActiveScenario: deps.resumeActiveScenarioRef?.current ?? sn,
+                  });
+                }
+              } else if (deps.userId) {
+                const cleanedForLog = stripControlTokens(spokenForTts).trim();
+                const laterConstructProbe =
+                  looksLikeScenarioBRepairAsJamesQuestion(cleanedForLog) ||
+                  looksLikeScenarioBJamesDifferentlyQuestion(cleanedForLog) ||
+                  looksLikeScenarioARepairQuestion(cleanedForLog) ||
+                  looksLikeScenarioARepairStreamFragment(cleanedForLog);
+                if (laterConstructProbe) {
+                  const rtd = getSessionLogRuntime();
+                  const questionTextForLog = resolveAssessableQuestionTextForResponseTiming(
+                    cleanedForLog,
+                  ).slice(0, 2000);
+                  writeSessionLog({
+                    userId: deps.userId,
+                    attemptId: rtd.attemptId,
+                    eventType: 'question_delivered',
+                    eventData: {
+                      moment_number: deps.currentInterviewMomentRef.current,
+                      scenario_number: deps.currentScenarioRef.current,
+                      question_text: questionTextForLog,
+                      delivered_at: new Date().toISOString(),
+                      tts_pipeline: 'parallel_streaming',
+                      parallel_stream_continuation: true,
+                    },
+                    platform: rtd.platform,
+                  });
+                  const sn = deps.currentScenarioRef.current;
+                  if (sn === 1 || sn === 2 || sn === 3) {
+                    void maybePersistScenarioOpeningDeliveredAfterQuestionDelivered({
+                      userId: deps.userId,
+                      deliveredQuestionText: questionTextForLog,
+                      currentScenario: sn,
+                      sessionAttemptId: deps.interviewSessionAttemptIdRef?.current ?? null,
+                      resumeActiveScenario: deps.resumeActiveScenarioRef?.current ?? sn,
+                    });
+                  }
+                }
               }
             },
           });

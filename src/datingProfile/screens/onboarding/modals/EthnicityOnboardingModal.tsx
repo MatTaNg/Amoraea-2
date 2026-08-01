@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import type { ChoiceOption } from '@/shared/components/profileFields/SingleChoiceOptionList';
-import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './EthnicityOnboardingModal.styled';
 
@@ -27,7 +26,7 @@ export const EthnicityOnboardingModal: React.FC<EthnicityOnboardingModalProps> =
   const onHeritageSelect = useCallback(
     (value: string) => {
       onEthnicityChange(value);
-      deferAfterPaint(onNext);
+      onNext();
     },
     [onEthnicityChange, onNext],
   );

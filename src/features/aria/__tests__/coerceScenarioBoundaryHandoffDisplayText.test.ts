@@ -313,6 +313,64 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).not.toMatch(/if you were ryan|how would you repair/i);
   });
 
+  it('keeps gentle S2 redirect during in-progress Scenario B instead of replaying S1→S2 boundary', () => {
+    const gentleRedirect =
+      "Makes sense. That sounds like it might be from the next scenario — for now I'm asking about Sarah and James. What do you think is going on between them?";
+    const messages = [
+      {
+        role: 'assistant',
+        content:
+          "Good work — that's the end of this scenario. Here's the next situation. Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. What do you think is going on here?",
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: "Daniel's an avoidant, and anytime there's anything that triggers him, he runs away.",
+        scenarioNumber: 2,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(
+      gentleRedirect,
+      'Matt',
+      messages,
+      2,
+      2,
+      { situation2PlaybackConfirmed: true },
+    );
+    expect(out).toBe(gentleRedirect);
+    expect(out).not.toMatch(/that's the end of this scenario/i);
+  });
+
+  it('redirects repeated S1→S2 boundary to active Scenario B Q1 when user already engaged S2', () => {
+    const repeatedHandoff =
+      "Good work — that's the end of this scenario. Here's the next situation. Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait.";
+    const messages = [
+      {
+        role: 'assistant',
+        content:
+          "Good work — that's the end of this scenario. Here's the next situation. Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. What do you think is going on here?",
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content:
+          "Again, there's nothing really to comment on, she gets a job offer, he asks her questions, she tears up — so far there's no question.",
+        scenarioNumber: 2,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(
+      repeatedHandoff,
+      'Matt',
+      messages,
+      2,
+      2,
+      { situation2PlaybackConfirmed: true },
+    );
+    expect(out).toBe('What do you think is going on here?');
+    expect(out).not.toMatch(/that's the end of this scenario/i);
+    expect(out).not.toMatch(/Sarah has been job hunting for four months/i);
+  });
+
   it('coerces S1→S2 when model streams client segment-close + canned reflection without Sarah vignette', () => {
     const modelCanned =
       "That's a wrap on that one. Nice work, Matt — You focused on putting concrete limits on calls during dates so the same interruption does not repeat. We've got two more situations to get through.";
@@ -518,5 +576,55 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(split.beforeModal).toMatch(WRAP_LEAD_ANCHOR);
     expect(split.beforeModal).not.toMatch(/You (focused on|named|framed)|Nice work, Matt/i);
     expect(split.afterModal).toMatch(/really hard time with|held a grudge/i);
+  });
+
+  it('does not coerce Claude S2 redirect into S1→S2 boundary when Situation 2 already delivered', () => {
+    const claudeRedirect =
+      'That makes a lot of sense. Just say whatever comes to mind — what do you think is going on between Sarah and James?';
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content:
+          "Good work — that's the end of this scenario. Here's the next situation. Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' What do you think is going on here?",
+      },
+      { role: 'user' as const, content: 'Give a question.' },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(claudeRedirect, 'Matt', messages, 2, 2, {
+      situation2PlaybackConfirmed: true,
+    });
+    expect(out).toBe(claudeRedirect);
+    expect(out).not.toMatch(/Good work — that's the end of this scenario/i);
+    expect(out).not.toMatch(/Sarah has been job hunting for four months/i);
+  });
+
+  it('suppresses S1→S2 handoff when dev jump already in S2 and user gave process-meta turns only', () => {
+    const s1Handoff =
+      "Good work — that's the end of this scenario. Here's the next situation.\n\nSarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' What do you think is going on here?";
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content:
+          "Sarah has been job hunting for four months. She gets an offer and calls James from the street, too excited to wait. James is on a deadline, says 'that's amazing, let's celebrate tonight.' What do you think is going on here?",
+        scenarioNumber: 2,
+      },
+      { role: 'user' as const, content: 'Give a question.', scenarioNumber: 2 },
+      {
+        role: 'assistant' as const,
+        content: 'What do you think is going on here?',
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user' as const,
+        content:
+          "Again, there's nothing really to comment on. She gets a job offer, he asks a question, she tears up, am I supposed to be making assumptions as to why she's tearing up? So far there's no new questions.",
+        scenarioNumber: 2,
+      },
+    ];
+    const out = coerceScenarioBoundaryHandoffDisplayText(s1Handoff, 'Matt', messages, 2, 2, {
+      situation2PlaybackConfirmed: true,
+    });
+    expect(out).toMatch(/what do you think is going on here/i);
+    expect(out).not.toMatch(/Good work — that's the end of this scenario/i);
+    expect(out).not.toMatch(/Here's the next situation/i);
   });
 });

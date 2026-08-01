@@ -12,10 +12,27 @@ import { looksLikeBriefStreamAckOnly } from '@features/aria/interviewSpokenTextH
 import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
 import {
   isExactShowScenario2VignetteText,
+  isExactShowScenario3VignetteText,
   isShowScenarioCardCanonicalPlaybackConfirmed,
   mergeShowScenarioCardTransitionPrefixWithSpoken,
+  streamAlreadySpokeScenarioBoundaryClosingLead,
   type ShowScenarioCardCanonicalPlaybackConfirmedKinds,
 } from '@features/aria/showScenarioCardCanonicalTts';
+
+function streamContainsScenarioCOpeningBody(streamSpokeText: string): boolean {
+  const stream = (streamSpokeText ?? '').trim();
+  if (!stream) return false;
+  if (isExactShowScenario3VignetteText(stream) || textContainsScenarioCVignetteBody(stream)) {
+    return true;
+  }
+  const streamLower = stream.toLowerCase();
+  return (
+    /\bsophie and daniel\b/.test(streamLower) &&
+    (/same argument/.test(streamLower) ||
+      /we need to finish this/.test(streamLower) ||
+      /i didn'?t know what to say/.test(streamLower))
+  );
+}
 
 function isBriefAckOnlyTransitionLead(text: string): boolean {
   const t = (text ?? '').trim();
@@ -75,6 +92,14 @@ export function prepareEmotionTransitionBeforeModalForTts(
     ctx.scenarioJustCompleted === 2 &&
     isShowScenarioCardCanonicalPlaybackConfirmed(ctx.playbackConfirmedKinds, 'situation_3')
   ) {
+    const stream = ctx.streamSpokeText.trim();
+    if (
+      stream &&
+      streamAlreadySpokeScenarioBoundaryClosingLead(stream, 2) &&
+      streamContainsScenarioCOpeningBody(stream)
+    ) {
+      return '';
+    }
     return tryKeepUnspokenBoundaryLead();
   }
 

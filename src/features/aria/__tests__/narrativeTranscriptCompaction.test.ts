@@ -1,5 +1,6 @@
 import {
   compactTranscriptForNarrativePrompt,
+  isTransientNarrativeGenerationErrorMessage,
   isWorkerResourceLimitError,
   shouldAutoCompactTranscriptForNarrative,
 } from '../narrativeTranscriptCompaction';
@@ -32,5 +33,15 @@ describe('narrativeTranscriptCompaction', () => {
     expect(isWorkerResourceLimitError(546, '{"code":"WORKER_RESOURCE_LIMIT"}')).toBe(true);
     expect(isWorkerResourceLimitError(500, 'WORKER_RESOURCE_LIMIT')).toBe(true);
     expect(isWorkerResourceLimitError(429, 'rate limit')).toBe(false);
+  });
+
+  it('detects transient narrative generation error messages', () => {
+    expect(
+      isTransientNarrativeGenerationErrorMessage(
+        'AI reasoning request failed: [http] 546 {"code":"WORKER_RESOURCE_LIMIT"}',
+      ),
+    ).toBe(true);
+    expect(isTransientNarrativeGenerationErrorMessage('HTTP 429 rate limit')).toBe(true);
+    expect(isTransientNarrativeGenerationErrorMessage('invalid JSON from model')).toBe(false);
   });
 });

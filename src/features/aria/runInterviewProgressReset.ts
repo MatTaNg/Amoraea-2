@@ -41,6 +41,7 @@ export function runResetInterviewProgressRefs(deps: ResetInterviewProgressRefsDe
   deps.moment5ClientScoringMetaRef.current = null;
   deps.deferredMoment4NarrativeRef.current = null;
   deps.lastUserTurnAudioDurationMsRef.current = null;
+  deps.lastUserTurnMicStopTelemetryRef.current = null;
   deps.resetScenarioCClientGatesOnly();
   deps.scenarioAContemptProbeAskedRef.current = false;
   deps.scenarioAContemptProbePlaybackConfirmedRef.current = false;

@@ -124,3 +124,14 @@ export function shouldAutoCompactTranscriptForNarrative(
 export function isWorkerResourceLimitError(status: number, errText: string): boolean {
   return status === 546 || /WORKER_RESOURCE_LIMIT/i.test(errText);
 }
+
+/** Transient edge / network failures — keep reasoning_pending for a later retry. */
+export function isTransientNarrativeGenerationErrorMessage(message: string): boolean {
+  const m = message ?? '';
+  if (/WORKER_RESOURCE_LIMIT/i.test(m) || /\b546\b/.test(m)) return true;
+  if (/\b429\b/.test(m) || /rate limit/i.test(m)) return true;
+  if (/timeout|timed out|aborterror|failed to fetch|network request failed|load failed/i.test(m)) {
+    return true;
+  }
+  return false;
+}

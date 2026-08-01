@@ -481,4 +481,63 @@ describe('runPreClaudeConfusionRepeatReplayGates', () => {
     const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
     expect(spoken).not.toMatch(/Sarah has been job hunting/i);
   });
+
+  it('replays the active question for process meta asks like "Give a question." without Claude', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const question = 'What do you think is going on here?';
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef: { current: question },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: question, scenarioNumber: 2 },
+      { role: 'user', content: 'Give a question.', scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      { type: 'confusion', confidence: 0.95 },
+      messagesToUse,
+      question,
+      2,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      `Sure. ${question}`,
+      expect.objectContaining({
+        allowDuplicateConsecutiveTts: true,
+        skipScenarioAContemptProbeSessionDedup: true,
+      }),
+    );
+  });
+
+  it('skips verbatim replay for substantive confusion so Claude can address it', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const confused =
+      "Again, there's nothing really to comment on, she gets a job offer, he asks her a question, she tears up. Am I supposed to be making assumptions as to why she's tearing up? So far there's no question.";
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+      lastQuestionTextRef: { current: 'What do you think is going on here?' },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: 'What do you think is going on here?', scenarioNumber: 2 },
+      { role: 'user', content: confused, scenarioNumber: 2 },
+    ];
+
+    const result = await runPreClaudeConfusionRepeatReplayGates(
+      deps,
+      REPEAT_REQUEST_META,
+      messagesToUse,
+      'What do you think is going on here?',
+      2,
+    );
+
+    expect(result).toEqual({ handled: false });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
 });

@@ -1,27 +1,18 @@
-import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
+import { deliverPostClaudeForcedMoment4ThresholdProbe } from '@features/aria/deliverPostClaudeForcedMoment4ThresholdProbe';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
-  PostClaudeInterviewMessage,
 } from '@features/aria/postClaudeAssistantTurnTypes';
 import {
-  evaluateMoment4RelationshipType,
-  buildMoment4ThresholdProbeWithReflection,
   isIncompleteMoment4ThresholdLeadSentence,
   looksLikeMoment4ThresholdParaphraseInProgress,
   looksLikeMoment4ThresholdQuestion,
-  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
 } from '@features/aria/moment4ProbeLogic';
 import {
-  extractLeadingReflectionFromMoment4ThresholdProbe,
-  registerDeliveredReflection,
-} from '@features/aria/deliveredReflectionRegistry';
-import {
   isAnsweringMoment4SpecificityFollowUp,
-  looksLikeMoment4SpecificityCorrectionAck,
   looksLikeMoment4GrudgeElaborationFollowUp,
-  resolveMoment4GrudgeAnswerForThresholdReflection,
+  looksLikeMoment4SpecificityCorrectionAck,
 } from '@features/aria/moment4SpecificityFollowUp';
 import {
   finishPostClaudeForcedConstructProbeGate,
@@ -29,10 +20,6 @@ import {
   type ForcedConstructProbeContext,
   type PostClaudeForcedConstructProbeGatesResult,
 } from '@features/aria/postClaudeForcedConstructProbeShared';
-import { applyMoment4ThresholdReferenceCard } from '@features/aria/interviewReferenceCardResumeHelpers';
-import { remoteLog } from '@utilities/remoteLog';
-
-const FORCED_M4_THRESHOLD_PROBE = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
 
 export async function runPostClaudeMoment4ThresholdForcedProbeGate(
   deps: PostClaudeAssistantTurnDeps,
@@ -85,40 +72,13 @@ export async function runPostClaudeMoment4ThresholdForcedProbeGate(
       speakAssistantTurn,
     );
   }
-  const grudgeAnswerForReflection = resolveMoment4GrudgeAnswerForThresholdReflection(
-    params.messagesToUse,
-    params.trimmed,
-  );
-  const thresholdProbeText = buildMoment4ThresholdProbeWithReflection(grudgeAnswerForReflection, {
-    deliveredRegistry: deps.deliveredReflectionRegistryRef.current,
-    moment4Transcript: params.messagesToUse,
-  });
-  const combinedMsg: PostClaudeInterviewMessage = {
-    role: 'assistant',
-    content: thresholdProbeText,
-    scenarioNumber: deps.resolveAssistantScenarioNumber(thresholdProbeText, stagedMessages),
-  };
-  stagedMessages = [...stagedMessages, combinedMsg];
-  deps.setMessages(stagedMessages);
-  applyMoment4ThresholdReferenceCard(deps);
-  await speakAssistantTurn(thresholdProbeText, {
-    ...ASSISTANT_INTERVIEW_SPEECH,
-    forceSpeakDespiteParallelStream: true,
-  });
-  const deliveredReflection = extractLeadingReflectionFromMoment4ThresholdProbe(thresholdProbeText);
-  if (deliveredReflection) {
-    registerDeliveredReflection(deps.deliveredReflectionRegistryRef, 'm4_grudge_to_threshold', deliveredReflection, {
-      interviewSessionId: deps.interviewSessionIdRef.current,
-      source: 'post_claude_m4_threshold_forced_probe',
-    });
-  }
-  deps.moment4ThresholdProbeAskedRef.current = true;
-  const relationshipEval = evaluateMoment4RelationshipType(params.trimmed);
-  void remoteLog('[M4_THRESHOLD_FORCED]', {
-    injectedCommitmentFollowUp: true,
-    moment4CommitmentFollowUpConditionMet: true,
-    relationshipTypeDiagnosticOnly: relationshipEval.relationshipType,
-    moment4ThresholdHintInAnswer: params.moment4ThresholdHintInAnswer,
+
+  await deliverPostClaudeForcedMoment4ThresholdProbe({
+    deps,
+    params,
+    stagedMessages,
+    speakAssistantTurn,
+    logTag: '[M4_THRESHOLD_FORCED]',
   });
 
   return finishPostClaudeForcedConstructProbeGate(deps, {

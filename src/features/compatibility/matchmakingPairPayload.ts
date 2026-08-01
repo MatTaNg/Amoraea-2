@@ -161,7 +161,6 @@ export type MatchmakingProfileSnapshot = {
   relationshipWithCannabis?: string | null;
   sexDrive?: string | null;
   sexInterestCategories?: string[];
-  datingPaceAfterExcitement?: string | null;
   recentDatingEarlyWeeks?: string | null;
   spaceForNewRelationship?: string | null;
   bio?: string | null;

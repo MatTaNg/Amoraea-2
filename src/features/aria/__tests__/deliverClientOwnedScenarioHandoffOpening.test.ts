@@ -145,6 +145,38 @@ describe('shouldDeliverClientOwnedScenario3Opening', () => {
     expect(shouldDeliverClientOwnedScenario3Opening(deps, s2RepairMessages)).toBe(true);
   });
 
+  it('is true after skip-decline re-ask and a substantive James repair answer', () => {
+    const deps = createMockPreClaudeDeps({
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+    });
+    const messages = [
+      ...s2RepairMessages.slice(0, -1),
+      {
+        role: 'assistant' as const,
+        content: 'Are you sure you want to skip this one? We can, but it may affect your score.',
+        scenarioNumber: 2,
+        interviewMoment: 2,
+      },
+      { role: 'user' as const, content: 'No.', scenarioNumber: 2, interviewMoment: 2 },
+      {
+        role: 'assistant' as const,
+        content:
+          "Great, let's stay on this one then. Just try your best. You've got this. And if you were James, how would you repair?",
+        scenarioNumber: 2,
+        interviewMoment: 2,
+      },
+      {
+        role: 'user' as const,
+        content:
+          'I will sit down, have a genuine conversation, and ask how he would improve the relationship and better show appreciation going forward.',
+        scenarioNumber: 2,
+        interviewMoment: 2,
+      },
+    ];
+    expect(shouldDeliverClientOwnedScenario3Opening(deps, messages)).toBe(true);
+  });
+
   it('is false once situation_3 playback is already confirmed', () => {
     const deps = createMockPreClaudeDeps({
       currentScenarioRef: { current: 2 },

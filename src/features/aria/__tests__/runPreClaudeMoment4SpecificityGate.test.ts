@@ -153,6 +153,32 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
   });
 
+  it('does not inject M4 threshold when orchestrator owns threshold delivery', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      currentScenarioRef: { current: 3 },
+      moment4ClientSpecificityProbeInjectedRef: { current: false },
+      speakTextSafe,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: UNNAMED_CLOSE_FRIEND_GRUDGE },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      UNNAMED_CLOSE_FRIEND_GRUDGE,
+      messagesToUse,
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+      true,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
   it('does not inject M4 specificity follow-up when grudge answer names close friend with event', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
@@ -337,6 +363,68 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(false);
     expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('injects specificity follow-up on re-answer even when resume ref marked resolved', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      currentScenarioRef: { current: 3 },
+      moment4ClientSpecificityProbeInjectedRef: { current: false },
+      moment4PostGrudgeSpecificityResolvedRef: { current: true },
+      speakTextSafe,
+      setMessages,
+    });
+    const vagueRetry = VAGUE_GRUDGE_WITHOUT_NAMED_PERSON;
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: UNNAMED_CLOSE_FRIEND_GRUDGE },
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: vagueRetry },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      vagueRetry,
+      messagesToUse,
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+    );
+
+    expect(result.handled).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
+    expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(false);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT,
+      expect.any(Object),
+    );
+  });
+
+  it('does not fire specificity probe when user claims they already answered', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      currentScenarioRef: { current: 3 },
+      moment4ClientSpecificityProbeInjectedRef: { current: false },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_4_GRUDGE_QUESTION_TEXT },
+      { role: 'user', content: 'I thought I answered this already.' },
+    ];
+
+    const result = await runPreClaudeMoment4SpecificityGate(
+      deps,
+      'I thought I answered this already.',
+      messagesToUse,
+      MOMENT_4_GRUDGE_QUESTION_TEXT,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(setMessages).not.toHaveBeenCalled();
   });
 
   it('does not pre-inject M4 threshold when user asks to go back after specificity follow-up', async () => {

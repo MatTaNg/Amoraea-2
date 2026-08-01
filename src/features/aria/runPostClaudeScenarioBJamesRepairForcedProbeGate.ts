@@ -1,10 +1,9 @@
-import { wrapForcedProbeWithAck } from '@features/aria/interviewAssistantReflection';
 import { extractLeadingBriefScenarioAck } from '@features/aria/interviewReflectionAckVariation';
-import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
+import { deliverPostClaudeForcedCanonicalProbe } from '@features/aria/deliverPostClaudeForcedCanonicalProbe';
+import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
-  PostClaudeInterviewMessage,
 } from '@features/aria/postClaudeAssistantTurnTypes';
 import {
   finishPostClaudeForcedConstructProbeGate,
@@ -19,9 +18,7 @@ import {
   looksLikeScenarioBQ1Question,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
-import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import { shouldDeliverScenarioFollowUpQuestion } from '@features/aria/scenarioFollowUpTranscriptGuard';
-import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import { remoteLog } from '@utilities/remoteLog';
 
 export async function runPostClaudeScenarioBJamesRepairForcedProbeGate(
@@ -82,35 +79,20 @@ export async function runPostClaudeScenarioBJamesRepairForcedProbeGate(
   const repairProbeText = leadAck
     ? `${leadAck}. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`
     : SCENARIO_B_JAMES_REPAIR_CANONICAL;
-  const wrappedRepair = wrapForcedProbeWithAck(
-    params.trimmed,
-    strippedText,
-    repairProbeText,
-    recentAsstForAck,
-  );
-  const repairMsg: PostClaudeInterviewMessage = {
-    role: 'assistant',
-    content: wrappedRepair,
-    scenarioNumber: deps.resolveAssistantScenarioNumber(wrappedRepair, stagedMessages),
-  };
-  const liveTranscript = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : stagedMessages) as PostClaudeInterviewMessage[];
-  commitDedupedAssistantTranscriptTurn(
-    liveTranscript,
+
+  await deliverPostClaudeForcedCanonicalProbe({
+    deps,
+    params,
     stagedMessages,
-    wrappedRepair,
-    {
-      scenarioNumber: repairMsg.scenarioNumber,
-      interviewMoment: deps.currentInterviewMomentRef.current,
-    },
-    (next) => deps.setMessages(next),
-  );
-  await speakAssistantTurn(wrappedRepair, {
-    ...ASSISTANT_INTERVIEW_SPEECH,
+    probeId: 's2_james_repair',
+    strippedText,
+    recentAsstForAck,
+    speakAssistantTurn,
+    probeTextOverride: repairProbeText,
     forceSpeakDespiteParallelStream: true,
+    logTag: '[S2_JAMES_REPAIR_FORCED]',
   });
-  deps.s2RepairProbeDeliveredRef.current = true;
+
   void remoteLog('[S2_JAMES_REPAIR_FORCED]', {
     injectedRepairQ3: true,
     strippedPreview: strippedText.slice(0, 220),
@@ -122,4 +104,3 @@ export async function runPostClaudeScenarioBJamesRepairForcedProbeGate(
     needsScenarioBJamesDifferentlyInsert: false,
   });
 }
-

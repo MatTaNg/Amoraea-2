@@ -241,9 +241,11 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                 <Text style={styles.questionText}>How did you hear about us?</Text>
                 {(
                   [
-                    { value: 'Facebook group', label: 'Facebook group' },
                     { value: 'Friend', label: 'Friend' },
-                    { value: 'One of our events', label: 'One of our events' },
+                    { value: 'Instagram', label: 'Instagram' },
+                    { value: 'Tiktok', label: 'Tiktok' },
+                    { value: 'Facebook', label: 'Facebook' },
+                    { value: 'Podcast', label: 'Podcast' },
                     { value: 'Other', label: 'Other' },
                   ] as const
                 ).map((option) => (

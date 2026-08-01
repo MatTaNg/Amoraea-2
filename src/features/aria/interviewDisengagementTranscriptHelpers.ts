@@ -43,6 +43,7 @@ import {
   looksLikeScenarioCSophieReceiveMisparaphraseQuestion,
 } from './scenarioCPromptDetection';
 import { looksLikeIntroBriefingSpeech } from './interviewPreambleBriefing';
+import { SHOW_SCENARIO_1_OPENING_EXACT } from './interviewShowScenarioExactCopy';
 import {
   GO_BACK_REQUEST_DECLINE_LINE,
   INABILITY_INVITATION_ROTATING_LINES,
@@ -65,6 +66,7 @@ import {
 import { CONFUSION_REPEAT_OFFER_LINE } from './confusionRepeatOfferState';
 import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestration';
 import { looksLikeBriefStreamAckOnly } from './interviewSpokenTextHeuristics';
+import { looksLikeCheckingInClientOwnedAckAssistantLine } from './metaCommentPatternScoring';
 import { stripControlTokens } from './interviewControlTokens';
 import {
   looksLikeMoment4GrudgePrompt,
@@ -218,6 +220,7 @@ export function isNonRepeatableAssistantLineForVerbatimReplay(content: string): 
   // Sophie / construct probes are the current question — allow verbatim repeat.
   if (looksLikeScenarioCSophiePerspectiveQuestion(content)) return false;
   if (isClientAudioRecoveryAssistantLine(content)) return true;
+  if (looksLikeCheckingInClientOwnedAckAssistantLine(content)) return true;
   if (looksLikeNonQuestionScenarioTransitionLine(content)) return true;
   if (looksLikeScenarioTransitionBridgeAssistantLine(content)) return true;
   // Bridge-only skip-accept line (no trailing question) — never verbatim-repeat.
@@ -513,6 +516,33 @@ export function findLastMoment4RepeatableQuestionText(
   return null;
 }
 
+/** Resume/repeat: replay S1 Q1 when opening was delivered but the user has not answered yet. */
+export function resolveScenarioAOpeningQuestionIfStillPending(
+  messages: Array<{
+    role: string;
+    content?: string | null;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>,
+): string | null {
+  let lastOpeningIndex = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role !== 'assistant' || m.isWelcomeBack || m.isScoreCard) continue;
+    const raw = (m.content ?? '').trim();
+    if (!raw) continue;
+    if (isScenarioAQ1Prompt(raw) || isFullScenarioVignetteIntroAssistantLine(raw)) {
+      lastOpeningIndex = i;
+    }
+  }
+  if (lastOpeningIndex < 0) return null;
+  const userAnsweredAfterOpening = messages
+    .slice(lastOpeningIndex + 1)
+    .some((m) => m.role === 'user' && (m.content ?? '').trim().length > 0);
+  if (userAnsweredAfterOpening) return null;
+  return SHOW_SCENARIO_1_OPENING_EXACT;
+}
+
 /** Last real scenario/interview question to re-read on repeat-request — skips client elongating probes. */
 export function findLastRepeatableInterviewQuestionText(
   messages: Array<{
@@ -538,6 +568,12 @@ export function findLastRepeatableInterviewQuestionText(
   }
 
   const activeScenario = inferActiveScenarioForRepeat(messages, options?.activeScenario);
+  if (activeScenario === 1) {
+    const pendingOpening = resolveScenarioAOpeningQuestionIfStillPending(messages);
+    if (pendingOpening) {
+      return finalizeRepeatableInterviewQuestionText(messages, pendingOpening, activeScenario);
+    }
+  }
   if (hasMoment5PrimaryQuestion) {
     for (let i = messages.length - 1; i >= 0; i--) {
       const m = messages[i];

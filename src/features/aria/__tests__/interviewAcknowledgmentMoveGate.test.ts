@@ -3,6 +3,7 @@ import { describe, expect, it } from '@jest/globals';
 import {
   ensureAcknowledgmentBeforeMove,
   prependBriefAckIfMissingBeforeMove,
+  stripBriefAckWhenUserTurnIsNonSubstantive,
 } from '../interviewAcknowledgmentMoveGate';
 import { chooseBriefScenarioAck } from '../interviewReflectionAckVariation';
 
@@ -38,8 +39,36 @@ describe('prependBriefAckIfMissingBeforeMove', () => {
 
   it('does not skip ack when user answer only shares common filler words with the next question', () => {
     const draft = 'How would you repair this relationship if you were Ryan?';
-    const out = prependBriefAckIfMissingBeforeMove(draft, 'I would own my part.', []);
+    const out = prependBriefAckIfMissingBeforeMove(
+      draft,
+      'I would apologize and listen to how Emma feels.',
+      [],
+    );
     expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.|I'm with you\.)/);
+  });
+
+  it('does not prepend ack for off-topic non-English replies', () => {
+    const draft = 'I only work in English for now — just say whatever comes to mind.';
+    const out = prependBriefAckIfMissingBeforeMove(draft, 'Hablo Espanol', []);
+    expect(out).toBe(draft);
+  });
+});
+
+describe('stripBriefAckWhenUserTurnIsNonSubstantive', () => {
+  it('strips leading ack when user turn did not answer the question', () => {
+    const draft =
+      'That makes a lot of sense. I only work in English for now — just say whatever comes to mind.';
+    const out = stripBriefAckWhenUserTurnIsNonSubstantive(draft, 'Hablo Espanol');
+    expect(out).toBe('I only work in English for now — just say whatever comes to mind.');
+  });
+
+  it('preserves ack when user gave a substantive answer', () => {
+    const draft = "That makes a lot of sense. What if you were Ryan — how would you repair this?";
+    const out = stripBriefAckWhenUserTurnIsNonSubstantive(
+      draft,
+      'I would apologize and listen to how Emma feels.',
+    );
+    expect(out).toBe(draft);
   });
 });
 

@@ -24,13 +24,15 @@ import {
   composeShowScenarioCardTtsWithTransitionPrefix,
   detectShowScenarioCardKind,
   extractShowScenarioCardTransitionPrefix,
-  resolveClientScenarioBoundaryPrefixForCanonicalTts,
+  resolveClientScenarioBoundaryPrefixForCanonicalTtsAsync,
   resolveCanonicalShowScenarioCardTransitionSpeakDecision,
   streamAlreadySpokeScenarioBoundaryClosingLead,
   isShowScenarioCardCanonicalPlaybackConfirmed,
   resolveShowScenarioCardKindForInterview,
+  isShowScenarioCardKindAllowedForInterviewProgress,
   shouldSkipPersonalMomentCanonicalReplay,
   shouldSkipSituation1CanonicalReplay,
+  shouldSkipSituation3CanonicalReplay,
   shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered,
   streamSpokenTextAlreadyMatchesCanonicalCard,
   completedScenarioForShowScenarioCardKind,
@@ -79,6 +81,21 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         interviewScenario: deps.currentScenarioRef.current,
       }) ?? detectShowScenarioCardKind(fullStream);
     if (!kind) return;
+    if (
+      !isShowScenarioCardKindAllowedForInterviewProgress({
+        kind,
+        interviewScenario: deps.currentScenarioRef.current,
+        interviewMoment: deps.currentInterviewMomentRef.current,
+        fullStream,
+      })
+    ) {
+      void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        kind,
+        reason: 'kind_not_allowed_for_interview_progress',
+      });
+      return;
+    }
 
     if (
       kind === 'moment_4' &&
@@ -115,6 +132,24 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         kind,
         reason: 's2_james_repair_incomplete',
       });
+      return;
+    }
+
+    if (
+      kind === 'situation_3' &&
+      shouldSkipSituation3CanonicalReplay({
+        currentScenario: deps.currentScenarioRef.current,
+        messages: params.messagesToUse,
+        playbackConfirmedKinds:
+          deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current ?? {},
+      })
+    ) {
+      void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        kind,
+        reason: 's3_already_in_progress',
+      });
+      state.showScenarioCardCanonicalSpokenThisStream = true;
       return;
     }
 
@@ -242,11 +277,12 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
 
     const canonicalBody = buildLockedShowScenarioCardTtsText(kind) ?? buildCanonicalShowScenarioCardTtsBody(kind);
     const prefix = extractShowScenarioCardTransitionPrefix(fullStream, kind);
-    const effectivePrefix = resolveClientScenarioBoundaryPrefixForCanonicalTts({
+    const effectivePrefix = await resolveClientScenarioBoundaryPrefixForCanonicalTtsAsync({
       kind,
       messages: params.messagesToUse,
       firstName: params.participantFirstNameForSpoken,
       extractedPrefix: prefix,
+      interviewSessionId: deps.interviewSessionIdRef.current,
     });
     const spokenLiveAfterCancelGate = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
     const { transitionAlreadySpoken, spokenSoFarForCompose } =

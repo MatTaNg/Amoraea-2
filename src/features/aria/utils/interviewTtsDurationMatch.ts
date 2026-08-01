@@ -21,3 +21,13 @@ export function isTtsPlaybackPrematureCutoff(actualMs: number, expectedMs: numbe
   if (expectedMs < TTS_PREMATURE_CUTOFF_MIN_EXPECTED_MS || expectedMs <= 0) return false;
   return actualMs / expectedMs < TTS_PREMATURE_CUTOFF_RATIO;
 }
+
+/** Playback ran to completion (not truncated / not cut off early) — used for scenario-opening resume checkpoints. */
+export function isTtsPlaybackCompleteForScenarioOpeningCheckpoint(
+  actualMs: number,
+  expectedMs: number,
+  audioPlaybackTruncated: boolean,
+): boolean {
+  if (audioPlaybackTruncated) return false;
+  return !isTtsPlaybackPrematureCutoff(actualMs, expectedMs);
+}

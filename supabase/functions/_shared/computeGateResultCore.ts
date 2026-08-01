@@ -6,12 +6,9 @@ import {
   DISCLOSURE_UNDER_MODIFIER,
   EGO_DEVELOPMENT_LEVEL_MODIFIERS,
   EGO_DEVELOPMENT_REVIEW_LEVEL,
-  EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX,
-  EMOTION_RECOGNITION_MODIFIER_BELOW_FLOOR,
-  EMOTION_RECOGNITION_MODIFIER_BELOW_REVIEW,
-  EMOTION_RECOGNITION_MODIFIER_PERFECT,
-  EMOTION_RECOGNITION_PERFECT_MIN_SCORE,
-  EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX,
+  EMOTION_RECOGNITION_CORRECT_COUNT_MODIFIERS,
+  EMOTION_RECOGNITION_REVIEW_MAX_EXCLUSIVE_CORRECT_COUNT,
+  emotionRecognitionDepthSignalModifierFromCorrectCount,
   MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS,
   MENTALIZING_OVERCERTAINTY_REVIEW_MIN_COUNT,
 } from '../../../src/config/scoring/depthSignalModifiers.ts';
@@ -45,7 +42,7 @@ import {
   mentalizingRepairFloorTriggered,
   type ScenarioPillarLow,
 } from './mentalizingRepairScenarioFloor.ts';
-import { resolveEmotionRecognitionRawScoreForGate } from './emotionRecognitionScoring.ts';
+import { resolveEmotionRecognitionCorrectCountForGate } from './emotionRecognitionScoring.ts';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist.ts';
 import { orderGateFailCodes } from './gateFailReasonsNormalize.ts';
 
@@ -316,9 +313,9 @@ function formatFloorBreachFailReason(
   return `floor_breach: ${parts.join(', ')}`;
 }
 
-function resolveEmotionRecognitionRawScore(options: ComputeGateResultOptions | undefined): number | null {
+function resolveEmotionRecognitionCorrectCount(options: ComputeGateResultOptions | undefined): 0 | 1 | 2 | 3 | null {
   if (!options) return null;
-  return resolveEmotionRecognitionRawScoreForGate({
+  return resolveEmotionRecognitionCorrectCountForGate({
     emotionRecognitionRawScore: options.emotionRecognitionRawScore,
     emotionRecognitionCorrectCount: options.emotionRecognitionCorrectCount,
     emotionRecognitionResponses: options.emotionRecognitionResponses,
@@ -520,15 +517,9 @@ export function computeGateResultCore(
     depthSignalModifier += MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS[overcertaintyCapped];
   }
 
-  const _erScore = resolveEmotionRecognitionRawScore(options);
-  if (_erScore !== null) {
-    if (_erScore < EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX) {
-      depthSignalModifier += EMOTION_RECOGNITION_MODIFIER_BELOW_FLOOR;
-    } else if (_erScore < EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX) {
-      depthSignalModifier += EMOTION_RECOGNITION_MODIFIER_BELOW_REVIEW;
-    } else if (_erScore >= EMOTION_RECOGNITION_PERFECT_MIN_SCORE) {
-      depthSignalModifier += EMOTION_RECOGNITION_MODIFIER_PERFECT;
-    }
+  const _erCorrectCount = resolveEmotionRecognitionCorrectCount(options);
+  if (_erCorrectCount !== null) {
+    depthSignalModifier += emotionRecognitionDepthSignalModifierFromCorrectCount(_erCorrectCount);
   }
 
   const _disclosure = options?.disclosureCalibration ?? null;
@@ -538,7 +529,10 @@ export function computeGateResultCore(
 
   if (_defenseCount === DEFENSE_PATTERN_REVIEW_MIN_COUNT) reviewFlags.push('defense_pattern_review');
 
-  if (_erScore !== null && _erScore < EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX) {
+  if (
+    _erCorrectCount !== null &&
+    _erCorrectCount < EMOTION_RECOGNITION_REVIEW_MAX_EXCLUSIVE_CORRECT_COUNT
+  ) {
     reviewFlags.push('emotion_recognition_review');
   }
 
@@ -585,7 +579,7 @@ export function computeGateResultCore(
       'm5:',
       m5n,
       'er:',
-      _erScore,
+      _erCorrectCount,
       'overcertainty:',
       _overcertaintyCount,
       'disclosure:',

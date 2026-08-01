@@ -12,12 +12,6 @@ import {
   runPreClaudePostCommitIntroGates,
 } from '@features/aria/runPreClaudePostCommitIntroGates';
 import {
-  runPreClaudeGoBackRequestInjectGate,
-} from '@features/aria/runPreClaudeGoBackRequestInjectGate';
-import {
-  runPreClaudeScoreRequestInjectGate,
-} from '@features/aria/runPreClaudeScoreRequestInjectGate';
-import {
   runPreClaudeTurnSkipInjectionGates,
 } from '@features/aria/runPreClaudeTurnSkipInjectionGates';
 
@@ -72,16 +66,6 @@ export async function runPreClaudePostCommitHandoffAndSkipGates(
 
   const postClosingCompletion = await runPreClaudePostClosingCompletionGate(deps, trimmed, messagesToUse);
   if (postClosingCompletion.handled) {
-    return { handled: true };
-  }
-
-  const scoreRequest = await runPreClaudeScoreRequestInjectGate(deps, trimmed, messagesToUse);
-  if (scoreRequest?.haltTurn) {
-    return { handled: true };
-  }
-
-  const goBackRequest = await runPreClaudeGoBackRequestInjectGate(deps, trimmed, messagesToUse);
-  if (goBackRequest?.haltTurn) {
     return { handled: true };
   }
 

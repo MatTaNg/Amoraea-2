@@ -1,4 +1,6 @@
 import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
+import { looksLikeCheckingInSufficiencyAsk } from './metaCommentPatternScoring';
+import { looksLikePriorAnswerMetaComment } from './interviewPriorAnswerMetaDetection';
 
 /**
  * Detect answers that cannot be scored against the current interview question
@@ -71,6 +73,10 @@ export function isIrrelevantAnswerRetryAssistantLine(text: string | null | undef
 const INTERVIEWER_IDENTITY_OR_OFF_TOPIC_ASK_RE =
   /\b(?:are you|you'?re)\b.{0,48}\b(?:an?\s+)?(?:alien|ai|a\.?i\.?|robot|bot|human|real|chatgpt|computer|machine|person)\b|\bwho (?:are|made|built|created|programmed) you\b|\b(?:what are you|are you even real)\b|\b(?:where do you live|how old are you)\b/i;
 
+/** User asks for the question, clarification, or other interview-process meta — not a mic-stop cut-off. */
+const INTERVIEW_PROCESS_META_RE =
+  /\b(?:give(?:\s+me)?\s+(?:a\s+)?question|ask(?:\s+me)?\s+(?:a\s+)?question|what(?:'s|\s+is)\s+the\s+question|where(?:'s|\s+is)\s+the\s+question|do\s+you\s+have\s+(?:a\s+)?question|can\s+you\s+(?:ask|repeat|clarify)|repeat\s+(?:the\s+)?question|what\s+(?:am\s+i|are\s+we)\s+(?:supposed\s+to|meant\s+to)\s+(?:answer|respond)|what\s+should\s+i\s+(?:say|answer)|is\s+there\s+(?:a\s+)?question|so\s+far\s+there'?s\s+no\s+question)\b/i;
+
 /** Shared scenario / relationship vocabulary that indicates an assessable attempt. */
 const ASSESSABLE_ENGAGEMENT_RE =
   /\b(?:emma|ryan|sarah|james|sophie|daniel|matt|partner|relationship|scenario|situation|contempt|disdain|dismiss(?:ive|ing)?|repair|apolog(?:y|ize|ise)|feel(?:ing|s)?|felt|emotion(?:al)?|angry|hurt|validat(?:e|ion)|listen|understand|empath(?:y|ize|ise)|need(?:ed|s)?|want(?:ed|s)?|wrong|right|both|sides?|mean|rude|respect|disrespect|defensive|attack|blame|accountab(?:le|ility)|perspective|point of view|fight(?:ing)?|argu(?:e|ing|ment)|communicat(?:e|ion|ing)|tone|sarcas(?:m|tic)|eye[\s-]?roll|scoff|bid|comfort|celebration|logistics|frustrated|disappointed|condescending|contemptuous|resentful|exasperated|annoyed|annoying|bitter|upset|lonely|painful|invalidated|exhausting|draining|abandoned|unheard)\b/i;
@@ -83,6 +89,7 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return true;
   const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
+  const wordCount = low.split(/\s+/).filter(Boolean).length;
   // Bare assent variants — not treated as cut-offs here.
   if (
     /^(yes|yeah|yep|yup|sure|ok|okay|no|nope|nah)([.,!\s]+|$)/i.test(low) &&
@@ -137,8 +144,27 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
   ) {
     return true;
   }
+  // "If I'm right" / "If I am right" — conditional setup cut off before the payoff clause.
+  if (
+    /^if\s+i(?:'m|\s+am)\s+right\b/i.test(low) &&
+    wordCount <= 12 &&
+    !/\b(?:then|because|so|would|could|should|apolog|listen|repair|talk|tell|ask|feel|frustrated|angry|hurt|upset|contempt|dismiss|care\s+about)\b.{4,}/i.test(
+      low,
+    ) &&
+    !/\bcare\s+about\b/i.test(low)
+  ) {
+    return true;
+  }
+  // Trailing "and I …" with dangling modal / intensifier — e.g. "If I'm right and I really".
+  if (
+    wordCount <= 15 &&
+    /\band\s+i\s+(?:really(?:\s+(?:care|think|feel|want|need|do|did|would|could|should|might|will|can|am|was|were|have|had|guess|suppose|believe))?\s*|just|would|could|should|might|will|can|am|was|were|have|had|do|did|want|wanted|need|needed|think|thought|feel|felt|guess|suppose|was|were)\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
   // Trailing conjunction / thin preposition — utterance stopped before the clause finished.
-  const wordCount = low.split(/\s+/).filter(Boolean).length;
   if (
     wordCount <= 15 &&
     /\b(and|but|or|so|because|then|that|than|to|for|with|about|like|just|of|if|when|on|upon|at|in|from|into|by)\s*[.,;:!?…—–-]*$/i.test(
@@ -205,8 +231,11 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
 export function looksLikeMicStopCutOffExemptFromMetaComment(text: string): boolean {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t || !looksLikeIncompleteCutOffUserAnswer(t)) return false;
+  if (looksLikeInterviewProcessMetaComment(t)) return false;
+  if (looksLikeInterviewProcessQuestionRepeatRequest(t)) return false;
+  if (looksLikeGrammaticallyCompleteShortUtterance(t)) return false;
   const low = t.toLowerCase().replace(/[\u201c\u201d\u2018\u2019]/g, "'");
-  if (/\?\s*$/.test(low) && /\b(?:mean|what|how|why|skip|move on|next question)\b/.test(low)) {
+  if (/\?\s*$/.test(low) && /\b(?:mean|what|how|why|skip|move on|next question|question)\b/.test(low)) {
     return false;
   }
   if (/^can we move on\b/i.test(low)) return false;
@@ -220,6 +249,95 @@ export function looksLikeInterviewerIdentityOrOffTopicAsk(text: string): boolean
   const t = text.replace(/\s+/g, ' ').trim();
   if (!t) return false;
   return INTERVIEWER_IDENTITY_OR_OFF_TOPIC_ASK_RE.test(t);
+}
+
+/**
+ * User is asking about the interview process (e.g. "Give a question", "Do you have a question?")
+ * — a complete meta turn, not a mic-stop cut-off or scorable scenario answer.
+ */
+export function looksLikeInterviewProcessMetaComment(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  const wc = t.split(/\s+/).filter(Boolean).length;
+  if (/\b(?:next question|what'?s next|move on to the next|can we move on)\b/i.test(t)) {
+    return false;
+  }
+  // Long turns that summarize the vignette and ask what to infer are content confusion — not a
+  // bare "give me the question" process ask (those should reach Claude, not verbatim replay).
+  if (
+    wc > 18 &&
+    (hasMinimalAssessableScenarioContent(t) ||
+      /\b(?:supposed to|meant to|making assumptions|nothing (?:really )?to comment|am i supposed)\b/i.test(
+        t,
+      ))
+  ) {
+    return false;
+  }
+  if (/\bso far there'?s no question\b/i.test(t) && wc > 12) {
+    return false;
+  }
+  if (INTERVIEW_PROCESS_META_RE.test(t)) return true;
+  if (
+    /\?\s*$/.test(t) &&
+    /\b(?:question|ask|repeat|clarify|what do you want|what should i)\b/i.test(t) &&
+    !hasMinimalAssessableScenarioContent(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/** Bare ask to hear/repeat the current interview question (not long substantive confusion). */
+const INTERVIEW_PROCESS_QUESTION_REPEAT_RE =
+  /\b(?:give(?:\s+me)?\s+(?:a\s+)?(?:the\s+)?question|ask(?:\s+me)?\s+(?:a\s+)?(?:the\s+)?question|what(?:'s|\s+is)\s+the\s+question|where(?:'s|\s+is)\s+the\s+question|do\s+you\s+have\s+(?:a\s+)?question|repeat\s+(?:the\s+)?question|is\s+there\s+(?:a\s+)?question|so\s+far\s+there'?s\s+no\s+question)\b/i;
+
+/** Mic-stop prefix before Whisper completes "question" — e.g. "Give a ques-". */
+const INTERVIEW_PROCESS_QUESTION_REPEAT_CUTOFF_RE =
+  /^(?:give(?:\s+me)?\s+(?:a\s+)?(?:the\s+)?ques|ask(?:\s+me)?\s+(?:a\s+)?(?:the\s+)?ques|what(?:'s|\s+is)\s+the\s+ques|repeat\s+(?:the\s+)?ques|do\s+you\s+have\s+(?:a\s+)?ques)\b/i;
+
+/**
+ * User is asking to hear or repeat the active interview question — client-owned verbatim replay,
+ * not Claude meta + parallel-stream duplicate delivery.
+ */
+export function looksLikeInterviewProcessQuestionRepeatRequest(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  const wc = t.split(/\s+/).filter(Boolean).length;
+  if (
+    wc > 18 &&
+    (hasMinimalAssessableScenarioContent(t) ||
+      /\b(?:supposed to|meant to|making assumptions|nothing (?:really )?to comment|am i supposed)\b/i.test(
+        t,
+      ))
+  ) {
+    return false;
+  }
+  if (/\bso far there'?s no question\b/i.test(t) && wc > 12) {
+    return false;
+  }
+  if (INTERVIEW_PROCESS_QUESTION_REPEAT_RE.test(t)) return true;
+  if (INTERVIEW_PROCESS_QUESTION_REPEAT_CUTOFF_RE.test(t)) return true;
+  if (
+    wc <= 8 &&
+    /\bcan\s+you\s+(?:ask|repeat)\b/i.test(t) &&
+    !hasMinimalAssessableScenarioContent(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Short reply that ends as a complete sentence (terminal punctuation, no dangling grammar).
+ * Used to avoid treating intentional brief meta/process turns as mic-stop cut-offs.
+ */
+export function looksLikeGrammaticallyCompleteShortUtterance(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (!/[.!?]\s*$/.test(t)) return false;
+  if (looksLikeIncompleteCutOffUserAnswer(t)) return false;
+  const wordCount = t.split(/\s+/).filter(Boolean).length;
+  return wordCount > 0 && wordCount <= 15;
 }
 
 export function hasMinimalAssessableScenarioContent(text: string): boolean {
@@ -264,6 +382,10 @@ export function looksLikeUnassessableScenarioAnswer(userText: string): boolean {
   if (!t) return true;
   if (looksLikeCompleteShortUserReply(t)) return false;
   if (looksLikeInterviewScoreStatusRequest(t)) return false;
+  if (looksLikeInterviewProcessMetaComment(t)) return false;
+  if (looksLikeInterviewProcessQuestionRepeatRequest(t)) return false;
+  if (looksLikeCheckingInSufficiencyAsk(t)) return true;
+  if (looksLikePriorAnswerMetaComment(t)) return true;
   if (looksLikeInterviewerIdentityOrOffTopicAsk(t)) return true;
   // Cut-offs can include a character name ("Ryan") without any scorable content — still unassessable.
   if (looksLikeIncompleteCutOffUserAnswer(t)) return true;
@@ -278,6 +400,7 @@ export function looksLikeUnassessableScenarioAnswer(userText: string): boolean {
   }
 
   if (words.length <= 8 && !hasMinimalAssessableScenarioContent(t)) {
+    if (looksLikeGrammaticallyCompleteShortUtterance(t)) return false;
     return true;
   }
 

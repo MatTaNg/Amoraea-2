@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { RELATIONSHIP_STYLE_CHOICES } from '@/screens/profile/editProfile/aboutYouOptions';
-import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './RelationshipStyleModal.styled';
 
@@ -36,7 +35,7 @@ export const RelationshipStyleModal: React.FC<RelationshipStyleModalProps> = ({
             value={relationshipStyle}
             onSelect={(v) => {
               onRelationshipStyleChange(v);
-              deferAfterPaint(onNext);
+              onNext();
             }}
             variant="onboarding"
           />

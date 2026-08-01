@@ -49,6 +49,31 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     ).toBe(true);
   });
 
+  it('allows repair delivery when repair text is in transcript but user has not answered yet', () => {
+    const msgs = [
+      contemptAssistant,
+      { role: 'user', content: "It's very condescending. She's very frustrated at Ryan." },
+      repairAssistant,
+    ];
+    expect(transcriptContainsScenarioARepairQuestion(msgs)).toBe(true);
+    expect(scenarioOneFollowUpFlagsFromTranscript(msgs).repairQuestionAsked).toBe(false);
+    expect(
+      shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
+    ).toBe(true);
+    expect(
+      shouldAllowScenarioARepairAfterContemptAnswer({
+        currentScenario: 1,
+        currentMoment: 1,
+        scenarioAContemptProbeAsked: true,
+        scenarioARepairQuestionAsked: true,
+        replyingToScenarioAQ1: false,
+        specificEmmaLineAlreadyAddressed: false,
+        shouldForceScenarioAContemptProbe: false,
+        messagesToUse: msgs,
+      }),
+    ).toBe(true);
+  });
+
   it('detects repair question and blocks duplicate repair delivery after user answered', () => {
     const msgs = [
       { role: 'user', content: 'x' },

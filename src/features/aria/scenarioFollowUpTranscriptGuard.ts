@@ -15,6 +15,7 @@ import {
 import {
   findLastUserWithPriorAssistantContent,
   findLastUserWithPriorScenarioARepairContext,
+  scenarioARepairAnswerAlreadySatisfiedInTranscript,
   userAnswerIncludesExplicitScenarioARepairAsRyan,
   userAnswerSatisfiesScenarioARepairPrompt,
 } from './interviewRepairRefusalDetection';
@@ -165,8 +166,9 @@ export function isScenarioARepairFollowUpCompleteInTranscript(
       j += 1;
     }
     const next = filtered[j];
+    // Repair text in transcript without a user answer is not complete (TTS may have stopped at "Got it.").
     if (!next) {
-      return paragraphs.length === 1 && looksLikeScenarioARepairQuestionLoose(content.trim());
+      return false;
     }
     if (next.role === 'user') return true;
     return false;
@@ -253,7 +255,11 @@ export function scenarioFollowUpAlreadyInTranscript(
     return transcriptContainsScenarioAContemptProbe(msgs);
   }
   if (looksLikeScenarioARepairQuestion(t)) {
-    return isScenarioARepairFollowUpCompleteInTranscript(msgs);
+    if (!transcriptContainsScenarioARepairQuestion(msgs)) {
+      return false;
+    }
+    // Phantom repair lines in transcript must not block spoken delivery until the user answers repair.
+    return scenarioARepairAnswerAlreadySatisfiedInTranscript(msgs);
   }
   if (looksLikeScenarioBFullAppreciationProbeQuestion(t)) {
     return transcriptContainsScenarioBAppreciationProbe(msgs);

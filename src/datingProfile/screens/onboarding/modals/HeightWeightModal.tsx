@@ -1,31 +1,33 @@
 import React from 'react';
-import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
+import { ONBOARDING_STEP_SCREEN_EDGES } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
-import { HeightSlider } from '@/shared/components/HeightSlider';
-import { WeightInput } from '@/shared/components/WeightInput';
+import {
+  HeightWeightInputFields,
+  isHeightWeightInputComplete,
+} from '@/shared/components/HeightWeightInputFields';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './HeightWeightModal.styled';
 
 interface HeightWeightModalProps {
-  height: string;
-  weight: string;
-  onHeightChange: (height: string) => void;
-  onWeightChange: (weight: string) => void;
+  heightCm?: number;
+  weightKg?: number;
+  onHeightCmChange: (heightCm: number | undefined) => void;
+  onWeightKgChange: (weightKg: number | undefined) => void;
   onNext: () => void;
   onBack: () => void;
 }
 
 export const HeightWeightModal: React.FC<HeightWeightModalProps> = ({
-  height,
-  weight,
-  onHeightChange,
-  onWeightChange,
+  heightCm,
+  weightKg,
+  onHeightCmChange,
+  onWeightKgChange,
   onNext,
   onBack,
 }) => {
-  const canContinue = !!(height?.trim() && weight?.trim());
+  const canContinue = isHeightWeightInputComplete(heightCm, weightKg);
 
   return (
     <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
@@ -37,32 +39,20 @@ export const HeightWeightModal: React.FC<HeightWeightModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.note}>
-          This is only used to calculate BMI. Your height, weight, and BMI will not be communicated to your potential matches.
+            This is only used to calculate BMI. Your height, weight, and BMI will not be
+            communicated to your potential matches.
           </Text>
-          <HeightSlider
-            label="Height (cm)"
-            value={height || ''}
-            onChange={onHeightChange}
-            defaultUnit="cm"
-            allowUnitSwitch={false}
-          />
-          <WeightInput
-            label="Weight (lbs)"
-            value={weight || ''}
-            onChange={onWeightChange}
-            defaultUnit="lbs"
-            allowUnitSwitch={false}
+          <HeightWeightInputFields
+            heightCm={heightCm}
+            weightKg={weightKg}
+            onHeightCmChange={onHeightCmChange}
+            onWeightKgChange={onWeightKgChange}
           />
         </View>
       </ScrollView>
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
         <View style={styles.buttonRow}>
-          <Button
-            title="Back"
-            variant="outline"
-            onPress={onBack}
-            style={styles.backButton}
-          />
+          <Button title="Back" variant="outline" onPress={onBack} style={styles.backButton} />
           <Button
             title="Next"
             onPress={onNext}

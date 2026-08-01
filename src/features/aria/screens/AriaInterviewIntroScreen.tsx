@@ -34,6 +34,7 @@ export function AriaInterviewIntroScreen({
   preInterviewConsentAge,
   preInterviewConsentData,
   preInterviewReady,
+  sessionPrepPending,
   interviewStartInFlight,
   interviewAttemptBootstrap,
   userId,
@@ -51,6 +52,7 @@ export function AriaInterviewIntroScreen({
   preInterviewConsentAge: boolean;
   preInterviewConsentData: boolean;
   preInterviewReady: boolean;
+  sessionPrepPending?: boolean;
   interviewStartInFlight: boolean;
   interviewAttemptBootstrap: 'idle' | 'loading' | 'ready' | 'failed';
   userId: string;
@@ -189,7 +191,7 @@ export function AriaInterviewIntroScreen({
           title={
             interviewStartInFlight
               ? 'Starting…'
-              : interviewAttemptBootstrap === 'loading' && userId && !isAdmin
+              : sessionPrepPending
                 ? 'Preparing session…'
                 : interviewAttemptBootstrap === 'failed' && userId && !isAdmin
                   ? 'Session unavailable'

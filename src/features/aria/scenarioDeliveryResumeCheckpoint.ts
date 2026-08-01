@@ -5,12 +5,13 @@ import {
 } from '@features/aria/showScenarioCardCanonicalTts';
 import { buildScenarioResumeReplaySpokenBody } from '@features/aria/interviewScenarioVignetteCopy';
 import { messageAnchorsScenarioIntro } from '@features/aria/scenarioNumberDetection';
+import { isScenarioAQ1Prompt } from '@features/aria/scenarioAContemptProbeCoverage';
 import {
   isScenarioCQ1Prompt,
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCSophiePerspectiveQuestion,
 } from '@features/aria/scenarioCPromptDetection';
-import { firstAssistantIndexForScenarioIntro } from '@utilities/interviewResumeCursor';
+import { isTtsPlaybackCompleteForScenarioOpeningCheckpoint } from '@features/aria/utils/interviewTtsDurationMatch';
 import {
   loadInterviewFromStorage,
   mergeInterviewStoragePayload,
@@ -44,6 +45,19 @@ function assistantContentLooksLikeScenarioOpeningQuestion(
     if (isScenarioCRepairAssistantPrompt(c)) return true;
   }
   return false;
+}
+
+function lastAssistantIndexForScenarioIntro(
+  msgs: ReadonlyArray<ScenarioTaggedTranscriptTurn>,
+  scenario: ScenarioOpeningDeliveredFor,
+): number {
+  let lastIdx = -1;
+  for (let i = 0; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== 'assistant') continue;
+    if (messageAnchorsScenarioIntro(m.content ?? '') === scenario) lastIdx = i;
+  }
+  return lastIdx;
 }
 
 function transcriptHasScenarioOpeningMarkerBeforeIndex(
@@ -104,11 +118,19 @@ function transcriptHasUserTurnAfterScenarioIntroAnchor(
   }>,
   scenario: ScenarioOpeningDeliveredFor,
 ): boolean {
-  const introIdx = firstAssistantIndexForScenarioIntro(msgs, scenario);
+  const introIdx = lastAssistantIndexForScenarioIntro(msgs, scenario);
   if (introIdx < 0) return false;
   for (let i = introIdx + 1; i < msgs.length; i++) {
     const m = msgs[i];
     if (m.role !== 'user' || m.isWelcomeBack) continue;
+    const c = (m.content ?? '').trim();
+    if (!c || READINESS_ASSENT.test(c)) continue;
+    if (
+      isLikelyPreScenarioNameCapture(c) &&
+      !transcriptHasScenarioOpeningMarkerBeforeIndex(msgs, scenario, i)
+    ) {
+      continue;
+    }
     return true;
   }
   return false;
@@ -143,30 +165,163 @@ export function mergeScenarioOpeningDeliveredFromPlaybackConfirmed(
   return merged;
 }
 
-/** True when the user already heard this scenario's first assessable question. */
-export function transcriptHasScenarioOpeningQuestionDelivered(
+/**
+ * Opening question committed in transcript after the vignette anchor (separate assistant turn).
+ * Distinguishes post-delivery close (Q1 line present) from mid-vignette interrupt (vignette only).
+ */
+/** Persisted lastQuestionText proves the user already heard this scenario's first assessable question. */
+export function lastQuestionTextIndicatesScenarioOpeningDelivered(
+  lastQuestionText: string | null | undefined,
+  scenario: ScenarioOpeningDeliveredFor,
+): boolean {
+  const q = (lastQuestionText ?? '').trim();
+  if (!q) return false;
+  return assistantContentLooksLikeScenarioOpeningQuestion(q, scenario);
+}
+
+export function transcriptHasCommittedScenarioOpeningQuestionAfterIntro(
   msgs: ReadonlyArray<ScenarioTaggedTranscriptTurn>,
   scenario: ScenarioOpeningDeliveredFor,
-  persistedOpeningDeliveredFor?: ReadonlyArray<ScenarioOpeningDeliveredFor> | null,
 ): boolean {
-  if (persistedOpeningDeliveredFor?.includes(scenario)) return true;
+  const introIdx = lastAssistantIndexForScenarioIntro(msgs, scenario);
+  if (introIdx < 0) return false;
+  for (let i = introIdx + 1; i < msgs.length; i++) {
+    const m = msgs[i];
+    if (m.role !== 'assistant') continue;
+    const c = (m.content ?? '').trim();
+    if (!c) continue;
+    if (messageAnchorsScenarioIntro(c) === scenario) continue;
+    if (scenario === 1 && isScenarioAQ1Prompt(c)) return true;
+    if (scenario === 2 && /\bwhat do you think is going on here\b/i.test(c)) return true;
+    if (scenario === 3) {
+      if (isScenarioCQ1Prompt(c)) return true;
+      if (looksLikeScenarioCSophiePerspectiveQuestion(c)) return true;
+      if (isScenarioCRepairAssistantPrompt(c)) return true;
+    }
+  }
+  return false;
+}
+
+/** User answered or Q1 committed after vignette — not inferred from welcome / lastQuestionText alone. */
+function transcriptHasStrongScenarioOpeningDeliveryEvidence(
+  msgs: ReadonlyArray<ScenarioTaggedTranscriptTurn>,
+  scenario: ScenarioOpeningDeliveredFor,
+): boolean {
+  if (transcriptHasCommittedScenarioOpeningQuestionAfterIntro(msgs, scenario)) return true;
   if (transcriptHasUserTurnAfterScenarioIntroAnchor(msgs, scenario)) return true;
   if (transcriptHasAssessableUserParticipationInScenario(msgs, scenario)) return true;
   return false;
 }
 
+/** True when the user already heard this scenario's first assessable question. */
+export function transcriptHasScenarioOpeningQuestionDelivered(
+  msgs: ReadonlyArray<ScenarioTaggedTranscriptTurn>,
+  scenario: ScenarioOpeningDeliveredFor,
+  persistedOpeningDeliveredFor?: ReadonlyArray<ScenarioOpeningDeliveredFor> | null,
+  lastQuestionText?: string | null,
+): boolean {
+  if (transcriptHasStrongScenarioOpeningDeliveryEvidence(msgs, scenario)) return true;
+
+  const hasVignetteAnchor = lastAssistantIndexForScenarioIntro(msgs, scenario) >= 0;
+  if (!hasVignetteAnchor) {
+    if (persistedOpeningDeliveredFor?.includes(scenario)) return true;
+    if (lastQuestionTextIndicatesScenarioOpeningDelivered(lastQuestionText, scenario)) return true;
+    return false;
+  }
+
+  // Vignette is in transcript but the user has not answered yet: do not treat welcome-back /
+  // lastQuestionText alone as proof they heard the opening (e.g. Android back mid scenario card).
+  if (persistedOpeningDeliveredFor?.includes(scenario)) return true;
+  return false;
+}
+
+export type NavigationAwayAudioInterrupt = 'recording' | 'tts';
+
+/**
+ * Resume routing: user heard the scenario opening before exit when playback was confirmed,
+ * transcript proves it, or they closed idle / while recording after question_delivered saved
+ * the opening prompt — but not when navigation away interrupted scenario-card TTS.
+ */
+export function resumeScenarioOpeningWasHeardBeforeExit(params: {
+  transcriptMessages: ReadonlyArray<ScenarioTaggedTranscriptTurn>;
+  scenario: ScenarioOpeningDeliveredFor;
+  persistedOpeningDeliveredFor?: ReadonlyArray<ScenarioOpeningDeliveredFor> | null;
+  lastQuestionText?: string | null;
+  navigationAwayAudioInterrupt?: NavigationAwayAudioInterrupt | null;
+}): boolean {
+  if (
+    transcriptHasScenarioOpeningQuestionDelivered(
+      params.transcriptMessages,
+      params.scenario,
+      params.persistedOpeningDeliveredFor,
+      params.lastQuestionText,
+    )
+  ) {
+    return true;
+  }
+  if (params.navigationAwayAudioInterrupt === 'tts') return false;
+  if (lastAssistantIndexForScenarioIntro(params.transcriptMessages, params.scenario) < 0) {
+    return false;
+  }
+  return lastQuestionTextIndicatesScenarioOpeningDelivered(params.lastQuestionText, params.scenario);
+}
+
 /** Persist scenario opening delivered after speakTextSafe confirms canonical scenario playback. */
+/** Persist opening-question checkpoint when question_delivered fires (covers vignette-only transcript). */
+export async function maybePersistScenarioOpeningDeliveredAfterQuestionDelivered(args: {
+  userId: string;
+  deliveredQuestionText: string;
+  currentScenario: 1 | 2 | 3;
+  sessionAttemptId?: string | null;
+  resumeActiveScenario?: 1 | 2 | 3 | null;
+}): Promise<void> {
+  if (
+    !lastQuestionTextIndicatesScenarioOpeningDelivered(
+      args.deliveredQuestionText,
+      args.currentScenario,
+    )
+  ) {
+    return;
+  }
+  await persistScenarioOpeningDeliveredAfterPlayback({
+    userId: args.userId,
+    kind:
+      args.currentScenario === 1
+        ? 'situation_1'
+        : args.currentScenario === 2
+          ? 'situation_2'
+          : 'situation_3',
+    lastQuestionText: args.deliveredQuestionText,
+    sessionAttemptId: args.sessionAttemptId ?? null,
+    currentScenario: args.currentScenario,
+    resumeActiveScenario: args.resumeActiveScenario ?? args.currentScenario,
+  });
+}
+
 export function maybePersistScenarioOpeningDeliveredAfterSpeakTextSafePlayback(args: {
   userId: string;
   text: string;
   audioPlaybackTruncated: boolean;
   durationMatch: boolean;
+  actualDurationMs?: number | null;
+  expectedDurationMs?: number | null;
   lastQuestionText?: string | null;
   sessionAttemptId?: string | null;
   currentScenario?: 1 | 2 | 3 | null;
   resumeActiveScenario?: 1 | 2 | 3 | null;
 }): Promise<void> {
-  if (args.audioPlaybackTruncated || !args.durationMatch) return Promise.resolve();
+  const playbackCompleteForOpeningCheckpoint =
+    typeof args.actualDurationMs === 'number' &&
+    typeof args.expectedDurationMs === 'number' &&
+    Number.isFinite(args.actualDurationMs) &&
+    Number.isFinite(args.expectedDurationMs)
+      ? isTtsPlaybackCompleteForScenarioOpeningCheckpoint(
+          args.actualDurationMs,
+          args.expectedDurationMs,
+          args.audioPlaybackTruncated,
+        )
+      : !args.audioPlaybackTruncated && args.durationMatch;
+  if (!playbackCompleteForOpeningCheckpoint) return Promise.resolve();
   const kind = isShowScenarioCardCanonicalDeliveryText(args.text);
   if (kind !== 'situation_1' && kind !== 'situation_2' && kind !== 'situation_3') return Promise.resolve();
   return persistScenarioOpeningDeliveredAfterPlayback({
@@ -198,16 +353,20 @@ export function resolveScenarioResumeIntroBodyForReplay(params: {
   scenario: ScenarioOpeningDeliveredFor;
   transcriptMessages: ReadonlyArray<{ role: string; content?: string | null }>;
   persistedOpeningDeliveredFor?: ReadonlyArray<ScenarioOpeningDeliveredFor> | null;
+  lastQuestionText?: string | null;
+  navigationAwayAudioInterrupt?: NavigationAwayAudioInterrupt | null;
   forceFullScenarioRestart?: boolean;
 }): string | null {
   if (params.forceFullScenarioRestart) {
     return buildScenarioResumeReplaySpokenBody(params.scenario);
   }
-  const openingDelivered = transcriptHasScenarioOpeningQuestionDelivered(
-    params.transcriptMessages,
-    params.scenario,
-    params.persistedOpeningDeliveredFor,
-  );
+  const openingDelivered = resumeScenarioOpeningWasHeardBeforeExit({
+    transcriptMessages: params.transcriptMessages,
+    scenario: params.scenario,
+    persistedOpeningDeliveredFor: params.persistedOpeningDeliveredFor,
+    lastQuestionText: params.lastQuestionText,
+    navigationAwayAudioInterrupt: params.navigationAwayAudioInterrupt,
+  });
   if (openingDelivered) return null;
   return buildScenarioResumeReplaySpokenBody(params.scenario);
 }

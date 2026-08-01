@@ -8,9 +8,7 @@ import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/int
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import {
   SCENARIO_2_OPENING,
-  SCENARIO_2_TEXT,
   SCENARIO_3_OPENING,
-  SCENARIO_3_TEXT,
 } from '@features/aria/interviewScenarioVignetteCopy';
 import { splitScenarioTransitionForEmotionModal } from '@features/aria/emotionRecognitionInterview';
 import {
@@ -19,9 +17,8 @@ import {
 } from '@features/aria/interviewShowScenarioExactCopy';
 import { advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard } from '@features/aria/interviewScenarioRefSync';
 import {
-  buildScenario1To2BundleForInterview,
-  buildScenario2To3BundleForInterview,
-} from '@features/aria/interviewTransitionBundles';
+  buildScenarioFictionHandoffBundleWithDynamicLead,
+} from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { SHOW_SCENARIO_CARD_CANONICAL_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { scenarioBMinimumEngagementForHandoff } from '@features/aria/scenarioBProbeLogic';
@@ -204,7 +201,12 @@ export async function deliverClientOwnedScenario2OpeningAfterS1Repair(
     (deps.interviewNameRef.current ?? '').trim() || participantFirstNameForSpoken.trim() || '';
   const userCorpus = resolveScenarioUserTextForBoundaryReflection(messagesToUse, 1);
   const displayText = sanitizeAssistantInterviewerCharacterNames(
-    buildScenario1To2BundleForInterview(firstName, SCENARIO_2_TEXT, userCorpus),
+    await buildScenarioFictionHandoffBundleWithDynamicLead({
+      completedScenario: 1,
+      firstName,
+      lastUserAnswer: userCorpus,
+      interviewSessionId: deps.interviewSessionIdRef.current,
+    }),
   );
 
   const aiMsg: MessageWithScenario = {
@@ -274,7 +276,12 @@ export async function deliverClientOwnedScenario3OpeningAfterS2Repair(
     (deps.interviewNameRef.current ?? '').trim() || participantFirstNameForSpoken.trim() || '';
   const userCorpus = resolveScenarioUserTextForBoundaryReflection(messagesToUse, 2);
   const displayText = sanitizeAssistantInterviewerCharacterNames(
-    buildScenario2To3BundleForInterview(firstName, SCENARIO_3_TEXT, userCorpus),
+    await buildScenarioFictionHandoffBundleWithDynamicLead({
+      completedScenario: 2,
+      firstName,
+      lastUserAnswer: userCorpus,
+      interviewSessionId: deps.interviewSessionIdRef.current,
+    }),
   );
 
   const aiMsg: MessageWithScenario = {

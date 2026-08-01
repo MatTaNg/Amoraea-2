@@ -61,6 +61,8 @@ import {
   scenarioCSophiePerspectiveAnsweredInTranscript,
   shouldSuppressScenarioCRepairReplay,
   shouldSuppressScenarioCQ1UntilVignetteSetup,
+  shouldDeferS2ToS3HandoffForSuppressedS3Q1,
+  shouldSkipS2ToS3HandoffReplayAtStreamEnd,
 } from '../scenarioCPromptDetection';
 import { SHOW_SCENARIO_3_VIGNETTE_EXACT } from '../interviewShowScenarioExactCopy';
 import { SKIP_REQUEST_CONFIRMATION_PROMPT_LINE } from '../metaCommentSkipFrustration';
@@ -144,6 +146,48 @@ describe('scenarioC repair Q2 skip', () => {
         fullStreamText: scenarioCQ1,
         spokenCompleteText: '',
         messages: [{ role: 'assistant', content: SHOW_SCENARIO_3_VIGNETTE_EXACT }],
+      }),
+    ).toBe(false);
+  });
+
+  it('shouldDeferS2ToS3HandoffForSuppressedS3Q1 is false when S3 is already active', () => {
+    expect(
+      shouldDeferS2ToS3HandoffForSuppressedS3Q1({
+        currentScenario: 3,
+        effectiveActiveScenario: 3,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferS2ToS3HandoffForSuppressedS3Q1({
+        currentScenario: 2,
+        effectiveActiveScenario: 3,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDeferS2ToS3HandoffForSuppressedS3Q1({
+        currentScenario: 2,
+        effectiveActiveScenario: 2,
+      }),
+    ).toBe(true);
+  });
+
+  it('shouldSkipS2ToS3HandoffReplayAtStreamEnd when S3 vignette already delivered', () => {
+    expect(
+      shouldSkipS2ToS3HandoffReplayAtStreamEnd({
+        currentScenario: 3,
+        messages: [],
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipS2ToS3HandoffReplayAtStreamEnd({
+        currentScenario: 2,
+        messages: [{ role: 'assistant', content: SHOW_SCENARIO_3_VIGNETTE_EXACT }],
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipS2ToS3HandoffReplayAtStreamEnd({
+        currentScenario: 2,
+        messages: [],
       }),
     ).toBe(false);
   });
@@ -364,6 +408,19 @@ describe('scenarioC repair Q2 skip', () => {
       scenarioCRepairConstructStillPending([
         { role: 'assistant', content: sophieWithAck },
         { role: 'user', content: "She's probably annoyed." },
+      ]),
+    ).toBe(true);
+  });
+
+  it('scenarioCRepairConstructStillPending is true when Sophie probe was delivered but not yet answered', () => {
+    expect(
+      scenarioCRepairConstructStillPending([
+        { role: 'assistant', content: scenarioCQ1 },
+        { role: 'user', content: 'Daniel felt at a loss about what to say next.' },
+        {
+          role: 'assistant',
+          content: 'What do you think this pattern of leaving has been like for Sophie over time?',
+        },
       ]),
     ).toBe(true);
   });
@@ -963,6 +1020,22 @@ describe('scenarioC repair echo and Sophie replay guards', () => {
     ];
     expect(scenarioCSophiePerspectiveAnsweredInTranscript(messages)).toBe(true);
     expect(resolveScenarioCNextProbeAfterSatisfiedQ1(messages)).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+  });
+
+  it('resolveScenarioCNextProbeAfterSatisfiedQ1 returns Sophie probe after Q1 interpretation only', () => {
+    const q1InterpretationAnswer =
+      "Because we don't know the basis of the argument, only the behavior shown, I would say that the reason he's leaving is to avoid uncomfortable questions and he's in an emotional state and doesn't know how to communicate which is why he didn't know what to say.";
+    const messages = [
+      {
+        role: 'assistant',
+        content:
+          "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?",
+        scenarioNumber: 3,
+      },
+      { role: 'user', content: q1InterpretationAnswer, scenarioNumber: 3 },
+    ];
+    expect(scenarioCQ1InterpretationSatisfiedInTranscript(messages)).toBe(true);
+    expect(resolveScenarioCNextProbeAfterSatisfiedQ1(messages)).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
   });
 
   it('shouldSuppressScenarioCRepairReplay when repair already delivered', () => {

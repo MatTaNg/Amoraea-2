@@ -70,6 +70,12 @@ describe('situation2ExactModalPrompt', () => {
     expect(resolveSituation2ExactModalPrompt([], SCENARIO_B_JAMES_REPAIR_CANONICAL)).toBe(
       SCENARIO_B_JAMES_REPAIR_CANONICAL,
     );
+    expect(
+      resolveSituation2ExactModalPrompt(
+        [],
+        'How do you think James could repair this with Sarah now?',
+      ),
+    ).toBe(SCENARIO_B_JAMES_REPAIR_CANONICAL);
   });
 
   it('stays on repair after cut-off retry even when delivery ref only has jamesDifferentlyAsked', () => {

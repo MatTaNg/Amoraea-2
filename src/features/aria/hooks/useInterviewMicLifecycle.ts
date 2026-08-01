@@ -3,9 +3,18 @@ import { AppState, Platform } from 'react-native';
 
 import { setRecordingPlaybackTransitionTelemetryHook } from '@features/aria/utils/audioModeHelpers';
 import { runRecoverInterviewMicAfterForeground } from '@features/aria/runRecoverInterviewMicAfterForeground';
-import { runReplayLastQuestionAfterBackgroundInterrupt } from '@features/aria/runReplayLastQuestionAfterBackgroundInterrupt';
-import { markInterviewAudioInterruptedByBackground, takeInterviewAudioInterruptedByBackground, bumpResumeWelcomePlaybackGeneration } from '@features/aria/interviewLocalPersistence';
+import {
+  runReplayLastQuestionAfterBackgroundInterrupt,
+  runReplayWelcomeAfterInterviewReentry,
+  shouldOfferWelcomeOnReentry,
+} from '@features/aria/runReplayLastQuestionAfterBackgroundInterrupt';
+import { markInterviewAudioInterruptedByBackground, markMountResumeOwnsWelcomePlayback, peekMountResumeOwnsWelcomePlayback, consumeMountResumeOwnsWelcomePlayback, takeInterviewAudioInterruptedByBackground, bumpResumeWelcomePlaybackGeneration } from '@features/aria/interviewLocalPersistence';
+import { clearInterviewResumeHandle } from '@features/aria/interviewResumeHandleCoordinator';
+import { flushInterviewProgressForNavigationAway as runFlushInterviewProgressForNavigationAway } from '@features/aria/buildInterviewProgressSnapshotFromRefs';
 import { recoverInterviewAudioSession } from '@features/aria/utils/recoverInterviewAudioSession';
+
+/** Android back often emits inactive→active before blur; skip stale AppState reentry in that window. */
+const RAPID_APPSTATE_CYCLE_MS = 1500;
 import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audioModeHelpers';
 import { getLateStartThresholdMs } from '@features/aria/config/audioInterviewConfig';
 import { remoteLog } from '@utilities/remoteLog';
@@ -38,6 +47,8 @@ export function useInterviewMicLifecycle(
   const stopInterviewAudioForNavigationRef = useRef<() => void>(() => {});
   const hardStopInterviewAudioForNavigationRef = useRef<() => void>(() => {});
   const navSessionBlurRef = useRef(false);
+  const appBackgroundedDuringInterviewRef = useRef(false);
+  const appInactiveAtMsRef = useRef<number | null>(null);
 
   audioRecorderRefForLeave.current = depsRef.current.audioRecorder;
   stopInterviewAudioForNavigationRef.current = () => {
@@ -45,12 +56,19 @@ export function useInterviewMicLifecycle(
   };
   hardStopInterviewAudioForNavigationRef.current = () => {
     const deps = depsRef.current;
+    if (deps.interviewStatusRef.current === 'in_progress') {
+      markMountResumeOwnsWelcomePlayback();
+    }
     const isRecording = audioRecorderRefForLeave.current.isRecording;
     const ttsActive =
       getSessionLogRuntime().ttsPlaybackActive ||
       deps.voiceState === 'speaking' ||
       deps.voiceState === 'processing';
     deps.interruptAllInterviewTtsOutput();
+    if (deps.parallelStreamingTtsRef?.current) {
+      deps.parallelStreamingTtsRef.current.cancelRequested = true;
+      (deps.parallelStreamingTtsRef.current as { active?: boolean }).active = false;
+    }
     void deps.stopElevenLabsPlayback();
     deps.setVoiceState('idle');
     try {
@@ -138,14 +156,23 @@ export function useInterviewMicLifecycle(
       if (next === 'background' || next === 'inactive') {
         const deps = depsRef.current;
         if (deps.interviewStatusRef.current !== 'in_progress') return;
+        appInactiveAtMsRef.current = Date.now();
+        markMountResumeOwnsWelcomePlayback();
+        appBackgroundedDuringInterviewRef.current = true;
         const isRecording = audioRecorderRefForLeave.current.isRecording;
         const ttsActive =
           getSessionLogRuntime().ttsPlaybackActive ||
           deps.voiceState === 'speaking' ||
           deps.voiceState === 'processing';
-        if (!isRecording && !ttsActive) return;
-        const interruptKind = isRecording ? 'recording' : 'tts';
-        markInterviewAudioInterruptedByBackground(interruptKind);
+        const interruptKind = isRecording ? 'recording' : ttsActive ? 'tts' : null;
+        if (interruptKind) {
+          markInterviewAudioInterruptedByBackground(interruptKind);
+        }
+        // Always checkpoint — user may kill the app while idle after hearing the scenario.
+        deps.flushInterviewProgressForNavigationAway?.();
+        if (!isRecording && !ttsActive) {
+          return;
+        }
         if (ttsActive) {
           deps.ttsSpeakGenerationRef.current += 1;
           if (deps.resumeOfferWelcomeTtsRef?.current) {
@@ -176,10 +203,35 @@ export function useInterviewMicLifecycle(
       if (depsRef.current.interviewStatusRef.current !== 'in_progress') return;
       void (async () => {
         const deps = depsRef.current;
+        const msSinceInactive =
+          appInactiveAtMsRef.current != null ? Date.now() - appInactiveAtMsRef.current : null;
+        appInactiveAtMsRef.current = null;
+        const navFocused =
+          typeof (deps.navigation as { isFocused?: () => boolean }).isFocused === 'function'
+            ? (deps.navigation as { isFocused: () => boolean }).isFocused()
+            : true;
         const interrupted = takeInterviewAudioInterruptedByBackground();
+        const wasBackgrounded = appBackgroundedDuringInterviewRef.current;
+        appBackgroundedDuringInterviewRef.current = false;
         await runRecoverInterviewMicAfterForeground(deps);
-        if (interrupted) {
-          await runReplayLastQuestionAfterBackgroundInterrupt(deps, interrupted);
+        const mountResumeOwns = peekMountResumeOwnsWelcomePlayback();
+        if (
+          mountResumeOwns &&
+          msSinceInactive != null &&
+          msSinceInactive < RAPID_APPSTATE_CYCLE_MS
+        ) {
+          return;
+        }
+        if (mountResumeOwns) {
+          consumeMountResumeOwnsWelcomePlayback();
+        }
+        if (!navFocused || peekMountResumeOwnsWelcomePlayback()) return;
+        if (interrupted || wasBackgrounded) {
+          await runReplayWelcomeAfterInterviewReentry(
+            deps,
+            interrupted ? 'foreground_after_tts_interrupt' : 'foreground_after_app_background_idle',
+            interrupted,
+          );
         }
       })();
     });
@@ -194,9 +246,16 @@ export function useInterviewMicLifecycle(
       stopInterviewAudioForNavigationRef.current();
     };
 
-    const unsubBlur = navigation.addListener('blur', stopInterviewAudio);
+    const unsubBlur = navigation.addListener('blur', () => {
+      stopInterviewAudioForNavigationRef.current();
+    });
     const unsubBeforeRemove = navigation.addListener('beforeRemove', () => {
+      const deps = depsRef.current;
+      if (deps.interviewStatusRef.current === 'in_progress') {
+        markMountResumeOwnsWelcomePlayback();
+      }
       hardStopInterviewAudioForNavigationRef.current();
+      deps.flushInterviewProgressForNavigationAway?.();
     });
 
     return () => {
@@ -223,9 +282,25 @@ export function useInterviewMicLifecycle(
           interviewSessionId: sessionIdRef?.current,
         });
       }
+      /** Android hardware back may unmount without beforeRemove — checkpoint progress first. */
+      if (deps.interviewStatusRef.current === 'in_progress') {
+        markMountResumeOwnsWelcomePlayback();
+      }
       if (!preserveClosingTts) {
         stopInterviewAudio();
       }
+      deps.flushInterviewProgressForNavigationAway?.();
+      if (deps.interviewStatusRef.current === 'in_progress') {
+        takeInterviewAudioInterruptedByBackground();
+      }
+      /** Drop coalesced resume so a remount hydrates from storage instead of skipping to intro. */
+      clearInterviewResumeHandle(deps.userId);
+      /** Invalidate any in-flight resume from this unmounted instance before it can commit UI state. */
+      if (deps.interviewUserTurnEpochRef) {
+        const prevEpoch = deps.interviewUserTurnEpochRef.current;
+        deps.interviewUserTurnEpochRef.current += 1;
+      }
+      bumpResumeWelcomePlaybackGeneration();
     };
   }, [navigation, depsRef]);
 
@@ -236,13 +311,20 @@ export function useInterviewMicLifecycle(
       if (
         Platform.OS !== 'web' &&
         navSessionBlurRef.current &&
-        deps.interviewStatusRef.current === 'in_progress'
+        deps.interviewStatusRef.current === 'in_progress' &&
+        !deps.resumeLoadingFlowActiveRef?.current &&
+        !peekMountResumeOwnsWelcomePlayback()
       ) {
         void (async () => {
           const interrupted = takeInterviewAudioInterruptedByBackground();
           await runRecoverInterviewMicAfterForeground(deps);
-          if (interrupted) {
-            await runReplayLastQuestionAfterBackgroundInterrupt(deps, interrupted);
+          if (peekMountResumeOwnsWelcomePlayback()) return;
+          if (interrupted || shouldOfferWelcomeOnReentry(deps)) {
+            await runReplayWelcomeAfterInterviewReentry(
+              deps,
+              interrupted ? 'foreground_after_tts_interrupt' : 'navigation_return_idle',
+              interrupted,
+            );
           }
         })();
       }
@@ -260,6 +342,7 @@ export function useInterviewMicLifecycle(
     const unsubBlurNav = navigation.addListener('blur', () => {
       const deps = depsRef.current;
       if (!deps.userId || deps.interviewStatusRef.current !== 'in_progress') return;
+      markMountResumeOwnsWelcomePlayback();
       navSessionBlurRef.current = true;
       const r = getSessionLogRuntime();
       writeSessionLog({

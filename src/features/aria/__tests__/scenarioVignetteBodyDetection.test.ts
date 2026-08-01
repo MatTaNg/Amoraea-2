@@ -39,6 +39,11 @@ describe('scenarioVignetteBodyDetection', () => {
         "What could James have done differently to make Sarah feel more appreciated?",
       ),
     ).toBe(false);
+    expect(
+      textContainsScenarioBVignetteBody(
+        'That makes a lot of sense. Just say whatever comes to mind — what do you think is going on between Sarah and James?',
+      ),
+    ).toBe(false);
   });
 
   it('detects Situation 3 Sophie/Daniel vignette markers', () => {
@@ -85,8 +90,13 @@ describe('scenarioVignetteBodyDetection', () => {
     ).toBe(true);
     expect(
       looksLikeNonCanonicalScenarioCVignetteFiction(
-        'When they got home Sophie said "I guess I just don\'t belong anywhere." Daniel said "don\'t say that, it\'s not true." Sophie went quiet and went to bed early.',
+        "She's having a hard week — work stress, not sleeping well, generally feeling low. Daniel notices she seems off and asks what's wrong. Sophie",
       ),
     ).toBe(true);
+    expect(
+      looksLikeNonCanonicalScenarioCVignetteFiction(
+        'When Daniel comes back and says "I didn\'t know what to say" — what do you make of that?',
+      ),
+    ).toBe(false);
   });
 });

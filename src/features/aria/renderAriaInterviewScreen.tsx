@@ -79,7 +79,10 @@ export function renderAriaInterviewScreen(scope: AriaInterviewScreenRenderScope)
   const { layout, handoff, ...activeShellRest } = activeShell;
   const inputDisabled =
     layout.status === 'scoring' || layout.status === 'results' || layout.emotionModalVisible;
-  const isInterviewerView = layout.status === 'active' && !layout.isAdmin;
+  /** Router skips intro when lifecycle is in_progress but session status can lag one frame — still show mic UI. */
+  const isInterviewerView =
+    !layout.isAdmin &&
+    (layout.status === 'active' || router.routing.interviewStatus === 'in_progress');
   const routeOnComplete = handoff.route.params?.onComplete;
 
   return (

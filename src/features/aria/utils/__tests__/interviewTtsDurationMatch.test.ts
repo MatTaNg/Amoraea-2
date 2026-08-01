@@ -1,5 +1,6 @@
 import {
   isTtsDurationMatchWithinOverrunTolerance,
+  isTtsPlaybackCompleteForScenarioOpeningCheckpoint,
   isTtsPlaybackPrematureCutoff,
 } from '../interviewTtsDurationMatch';
 
@@ -32,5 +33,16 @@ describe('isTtsPlaybackPrematureCutoff', () => {
 
   it('does not flag adequate playback', () => {
     expect(isTtsPlaybackPrematureCutoff(72_000, 79_560)).toBe(false);
+  });
+});
+
+describe('isTtsPlaybackCompleteForScenarioOpeningCheckpoint', () => {
+  it('treats slightly-over-estimate S1 scenario playback as complete (resume checkpoint)', () => {
+    expect(isTtsPlaybackCompleteForScenarioOpeningCheckpoint(18_781, 16_958, false)).toBe(true);
+  });
+
+  it('rejects truncated or prematurely cut off playback', () => {
+    expect(isTtsPlaybackCompleteForScenarioOpeningCheckpoint(18_781, 16_958, true)).toBe(false);
+    expect(isTtsPlaybackCompleteForScenarioOpeningCheckpoint(3_000, 16_958, false)).toBe(false);
   });
 });

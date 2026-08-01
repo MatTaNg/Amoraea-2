@@ -1,8 +1,11 @@
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassificationTypes';
+import { INTERVIEW_TURN_ORCHESTRATOR_PHASE2_ENABLED } from '@features/aria/interviewTurnOrchestratorConfig';
 
 export function buildMetaCommentHandlingSuffix(args: {
   classification: MetaCommentClassification;
   repeatedFrustrationInMoment: boolean;
+  /** Active assessable question — used for Phase 2 redirect suffixes. */
+  activeQuestionText?: string;
   /** First frustration signal only — whether a prior user turn in this scenario had substantive content (client-computed). */
   hadPriorSubstantiveAnswerInMoment?: boolean;
   /**
@@ -201,6 +204,25 @@ After you finish reading the question, **stop** and wait for their mic reply.
   }
 
   if (t === 'confusion') {
+    if (INTERVIEW_TURN_ORCHESTRATOR_PHASE2_ENABLED) {
+      const activeQ = (args.activeQuestionText ?? '').trim().slice(0, 500);
+      const activeBlock = activeQ
+        ? `\n**Active question (essential core only when re-asking):**\n"${activeQ}"\n`
+        : '';
+      return `
+─────────────────────────────────────────
+META-COMMENT (PHASE 2): CONFUSION ABOUT THE QUESTION
+─────────────────────────────────────────
+${noElongating}
+They are confused about what you're asking — **not** an explicit "repeat what you said" ask.
+
+**Your single spoken turn must:**
+1) Briefly clarify what you are asking for in plain language (one or two sentences — no vignette replay).
+2) End by re-asking the **essential core** of the active question (shortened).
+${activeBlock}
+Do **not** use the canned "want me to repeat the question?" offer alone. Do **not** fire an elongating probe.
+`;
+    }
     return `
 ─────────────────────────────────────────
 META-COMMENT (CLIENT): CONFUSION ABOUT THE QUESTION
@@ -258,6 +280,23 @@ They want confirmation their answer registered — treat this as **answer accept
   }
 
   // ambiguous_short
+  if (INTERVIEW_TURN_ORCHESTRATOR_PHASE2_ENABLED) {
+    const activeQ = (args.activeQuestionText ?? '').trim().slice(0, 500);
+    const activeBlock = activeQ
+      ? `\n**Active question (essential core when re-asking):**\n"${activeQ}"\n`
+      : '';
+    return `
+─────────────────────────────────────────
+META-COMMENT (PHASE 2): AMBIGUOUS / VERY SHORT
+─────────────────────────────────────────
+${noElongating}
+Their message was very short and not clearly an answer. **No** evaluative praise.
+
+Invite them naturally ("Just say whatever comes to mind" or equivalent), then **re-ask the essential core** of the active question in the **same turn** — shortened, no vignette replay.
+${activeBlock}
+Do **not** leave silence waiting for them to guess. Do **not** fire an elongating probe.
+`;
+  }
   return `
 ─────────────────────────────────────────
 META-COMMENT (CLIENT): AMBIGUOUS / VERY SHORT

@@ -3,8 +3,12 @@ import type { InterviewMicLifecycleDeps } from '@features/aria/hooks/interviewMi
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import {
   bumpResumeWelcomePlaybackGeneration,
+  clearResumeWelcomeSpokenForHydration,
+  getResumeWelcomePlaybackGeneration,
   markResumeWelcomeSpoken,
+  peekMountResumeOwnsWelcomePlayback,
   releaseResumeWelcomePlaybackLock,
+  resolveResumeWelcomeStorageAttemptId,
   wasResumeWelcomeSpoken,
 } from '@features/aria/interviewLocalPersistence';
 import { flushResumeDeferredUserSpeechWhenUnblocked } from '@features/aria/resumeDeferredUserSpeech';
@@ -12,6 +16,7 @@ import { markNativePlaybackBridgeBeforeNextTts } from '@features/aria/utils/audi
 import {
   buildResumeWelcomeMessage,
   resumeWelcomeMessageEmbedsLastQuestion,
+  shouldOfferResumeWelcomeTts,
 } from '@utilities/interviewResumeCursor';
 
 const replaySpeakOpts = {
@@ -61,6 +66,14 @@ function resolveWelcomeBackText(deps: InterviewMicLifecycleDeps): string | null 
   return welcomeBack;
 }
 
+export function shouldOfferWelcomeOnReentry(deps: InterviewMicLifecycleDeps): boolean {
+  if (deps.resumeOfferWelcomeTtsRef?.current) return true;
+  return shouldOfferResumeWelcomeTts({
+    mode: deps.resumeInPersonalPartRef?.current ? 'resume_post_scenarios' : 'replay_incomplete',
+    transcriptMessages: deps.currentMessagesRef?.current ?? [],
+  });
+}
+
 function finishForegroundReplayPlaybackWindow(deps: InterviewMicLifecycleDeps): void {
   releaseResumeWelcomePlaybackLock(deps.interviewSessionAttemptIdRef.current);
   void flushResumeDeferredUserSpeechWhenUnblocked({
@@ -76,24 +89,39 @@ function finishForegroundReplayPlaybackWindow(deps: InterviewMicLifecycleDeps): 
 async function replayWelcomeAndLastQuestionAfterForegroundInterrupt(
   deps: InterviewMicLifecycleDeps,
   bridgeReason: string,
-  options: { skipWelcomeIfAlreadySpoken: boolean },
+  options: { skipWelcomeIfAlreadySpoken: boolean; forceClearWelcomeSpoken?: boolean },
 ): Promise<boolean> {
   const welcomeBack = resolveWelcomeBackText(deps);
   if (!welcomeBack) return false;
 
+  const playbackGeneration = getResumeWelcomePlaybackGeneration();
+  const isForegroundReplayStale = (): boolean =>
+    getResumeWelcomePlaybackGeneration() !== playbackGeneration ||
+    peekMountResumeOwnsWelcomePlayback() ||
+    deps.resumeLoadingFlowActiveRef.current;
+
   markNativePlaybackBridgeBeforeNextTts(bridgeReason);
-  const attemptId = deps.interviewSessionAttemptIdRef.current;
+  const welcomeAttemptId = resolveResumeWelcomeStorageAttemptId({
+    interviewSessionAttemptId: deps.interviewSessionAttemptIdRef.current,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
+  if (options.forceClearWelcomeSpoken && welcomeAttemptId) {
+    await clearResumeWelcomeSpokenForHydration(welcomeAttemptId);
+  }
   const welcomeAlreadySpoken =
-    options.skipWelcomeIfAlreadySpoken && attemptId
-      ? await wasResumeWelcomeSpoken(attemptId)
+    options.skipWelcomeIfAlreadySpoken && welcomeAttemptId
+      ? await wasResumeWelcomeSpoken(welcomeAttemptId)
       : false;
 
   try {
     if (!welcomeAlreadySpoken) {
+      if (isForegroundReplayStale()) return false;
       await deps.speakTextSafe!(welcomeBack, welcomeSpeakOpts);
-      if (options.skipWelcomeIfAlreadySpoken && attemptId) {
-        await markResumeWelcomeSpoken(attemptId);
+      if (isForegroundReplayStale()) return false;
+      if (welcomeAttemptId) {
+        await markResumeWelcomeSpoken(welcomeAttemptId);
       }
+    } else {
     }
 
     if (!resumeWelcomeMessageEmbedsLastQuestion(welcomeBack)) {
@@ -108,6 +136,7 @@ async function replayWelcomeAndLastQuestionAfterForegroundInterrupt(
           },
         )?.trim() || deps.lastQuestionTextRef.current?.trim();
       if (last) {
+        if (isForegroundReplayStale()) return false;
         await deps.speakTextSafe!(stripControlTokens(last), replaySpeakOpts);
       }
     }
@@ -118,46 +147,49 @@ async function replayWelcomeAndLastQuestionAfterForegroundInterrupt(
   return true;
 }
 
+/** Welcome + last question when returning mid-interview without full resume hydration. */
+export async function runReplayWelcomeAfterInterviewReentry(
+  deps: InterviewMicLifecycleDeps,
+  bridgeReason: string,
+  interrupted: 'recording' | 'tts' | null,
+): Promise<void> {
+  if (deps.resumeLoadingFlowActiveRef.current) return;
+  if (deps.interviewStatusRef.current !== 'in_progress') return;
+  if (!deps.speakTextSafe) return;
+  if (peekMountResumeOwnsWelcomePlayback()) {
+    return;
+  }
+
+  bumpResumeWelcomePlaybackGeneration();
+
+  const shouldOfferWelcome = shouldOfferWelcomeOnReentry(deps);
+
+  if (interrupted === 'recording') {
+    await replayWelcomeAndLastQuestionAfterForegroundInterrupt(deps, bridgeReason, {
+      skipWelcomeIfAlreadySpoken: false,
+    });
+    return;
+  }
+
+  if (interrupted || shouldOfferWelcome) {
+    const replayed = await replayWelcomeAndLastQuestionAfterForegroundInterrupt(deps, bridgeReason, {
+      skipWelcomeIfAlreadySpoken: !shouldOfferWelcome && interrupted === 'tts',
+      forceClearWelcomeSpoken: shouldOfferWelcome,
+    });
+    if (replayed && shouldOfferWelcome) {
+      deps.resumeOfferWelcomeTtsRef!.current = false;
+    }
+  }
+}
+
 /** After background interrupted mic/TTS, replay welcome and/or last question so the user can continue. */
 export async function runReplayLastQuestionAfterBackgroundInterrupt(
   deps: InterviewMicLifecycleDeps,
   kind: 'recording' | 'tts',
 ): Promise<void> {
-  if (deps.resumeLoadingFlowActiveRef.current) return;
-  if (deps.interviewStatusRef.current !== 'in_progress') return;
-  if (!deps.speakTextSafe) return;
-
-  bumpResumeWelcomePlaybackGeneration();
-
-  const bridgeReason =
-    kind === 'recording'
-      ? 'foreground_after_recording_interrupt'
-      : 'foreground_after_tts_interrupt';
-
-  if (kind === 'recording') {
-    const replayed = await replayWelcomeAndLastQuestionAfterForegroundInterrupt(deps, bridgeReason, {
-      skipWelcomeIfAlreadySpoken: false,
-    });
-    if (replayed) return;
-  }
-
-  if (deps.resumeOfferWelcomeTtsRef?.current && kind === 'tts') {
-    const replayed = await replayWelcomeAndLastQuestionAfterForegroundInterrupt(deps, bridgeReason, {
-      skipWelcomeIfAlreadySpoken: true,
-    });
-    if (replayed) {
-      deps.resumeOfferWelcomeTtsRef.current = false;
-    }
-    return;
-  }
-
-  const last = deps.lastQuestionTextRef.current?.trim();
-  if (!last) return;
-
-  markNativePlaybackBridgeBeforeNextTts(bridgeReason);
-  try {
-    await deps.speakTextSafe(stripControlTokens(last), replaySpeakOpts);
-  } finally {
-    finishForegroundReplayPlaybackWindow(deps);
-  }
+  await runReplayWelcomeAfterInterviewReentry(
+    deps,
+    kind === 'recording' ? 'foreground_after_recording_interrupt' : 'foreground_after_tts_interrupt',
+    kind,
+  );
 }

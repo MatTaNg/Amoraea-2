@@ -80,7 +80,11 @@ describe('runPreClaudeTurnSkipInjectionGates', () => {
     expect(deps.inabilityCountByMomentRef.current[2]).toBe(0);
     expect(speakTextSafe).toHaveBeenCalledWith(
       expect.stringMatching(/stay on this one/i),
-      expect.any(Object),
+      expect.objectContaining({
+        skipLastQuestionRef: true,
+        skipQuestionDeliveredTelemetry: true,
+        allowDuplicateConsecutiveTts: true,
+      }),
     );
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([

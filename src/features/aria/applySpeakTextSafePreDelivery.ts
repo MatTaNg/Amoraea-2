@@ -20,6 +20,7 @@ import {
 import {
   coerceScenarioARepairQuestionForTts,
   looksLikeScenarioARepairQuestion,
+  repairAssistantDraftAfterDanglingRepeatLead,
 } from '@features/aria/scenarioARepairQuestionHelpers';
 import {
   looksLikeScenarioBRepairAsJamesQuestion,
@@ -186,6 +187,7 @@ export function applySpeakTextSafePreDelivery(
         if (text !== beforeContemptCoerce) {
         }
         const beforeRepairCoerce = text;
+        text = repairAssistantDraftAfterDanglingRepeatLead(text);
         text = coerceScenarioARepairQuestionForTts(text);
         if (text !== beforeRepairCoerce) {
         }

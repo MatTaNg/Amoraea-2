@@ -1,5 +1,10 @@
 import { isApprovedElongatingProbeOnly } from './elongatingProbe';
-import { looksLikeInterviewerIdentityOrOffTopicAsk } from './interviewAnswerRelevance';
+import {
+  looksLikeInterviewerIdentityOrOffTopicAsk,
+  looksLikeUnassessableScenarioAnswer,
+} from './interviewAnswerRelevance';
+import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
+import { stripBriefInterviewAcknowledgmentPrefixForRepeat } from './interviewRepeatRequestTarget';
 import { chooseBriefScenarioAck } from './interviewReflectionAckVariation';
 import { enrichPersonalMomentClosingForTts } from './personalMomentClosingEnrichment';
 import {
@@ -224,6 +229,28 @@ export function wrapForcedProbeWithAck(
   return probeQuestion.trim();
 }
 
+/** Off-topic, unclear, empty, or meta turns must not receive a brief ack before the redirect. */
+export function shouldSkipBriefAckBeforeMoveForUserTurn(userTurn: string): boolean {
+  const t = (userTurn ?? '').trim();
+  if (!t) return true;
+  if (looksLikeInterviewerIdentityOrOffTopicAsk(t)) return true;
+  if (looksLikeInterviewScoreStatusRequest(t)) return true;
+  return looksLikeUnassessableScenarioAnswer(t);
+}
+
+/** Strip model- or client-prepended brief acks when the user did not substantively answer. */
+export function stripBriefAckWhenUserTurnIsNonSubstantive(
+  assistantDraft: string,
+  userTurn: string,
+): string {
+  if (!shouldSkipBriefAckBeforeMoveForUserTurn(userTurn)) return assistantDraft;
+  const before = (assistantDraft ?? '').trim();
+  const after = stripBriefInterviewAcknowledgmentPrefixForRepeat(before);
+  if (after !== before) {
+  }
+  return after;
+}
+
 /**
  * Prepend a brief acknowledgment when the model skipped registering the user's answer.
  * Used for post-claude display and the first streaming TTS sentence of each turn.
@@ -239,8 +266,7 @@ export function prependBriefAckIfMissingBeforeMove(
   if (!draft) return draft;
   if (isApprovedElongatingProbeOnly(draft)) return draft;
   if (/^\[(INTERVIEW_COMPLETE|STAGE_[123]_COMPLETE)/i.test(draft)) return draft;
-  // Identity / interviewer off-topic asks must not get a "Got it" receipt before the response.
-  if (looksLikeInterviewerIdentityOrOffTopicAsk(userTurn)) return draft;
+  if (shouldSkipBriefAckBeforeMoveForUserTurn(userTurn)) return draft;
 
   const parts = draft.split(/\n\n/);
   let first = parts[0] ?? '';

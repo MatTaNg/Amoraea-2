@@ -23,7 +23,6 @@ export const INTIMACY_SEX_FREQUENCY_PICKER_OPTIONS: Array<{ label: string; value
   { label: "6–7 times per week", value: "6–7 times per week" },
   { label: "Daily or more", value: "Daily or more" },
   { label: "It varies — depends on the relationship", value: "It varies — depends on the relationship" },
-  { label: "Prefer not to say", value: "Prefer not to say" },
 ];
 
 // Relationships / Intimacy / Sex / Family questions
@@ -252,7 +251,6 @@ export const SPIRITUALITY_WEEKLY_HOURS_PICKER_OPTIONS: Array<{ label: string; va
   { label: "8–15 hours", value: "8–15 hours" },
   { label: "More than 15 hours", value: "More than 15 hours" },
   { label: "It varies a lot week to week", value: "It varies a lot week to week" },
-  { label: "Prefer not to say", value: "Prefer not to say" },
 ];
 
 // Spirituality / Religion questions
@@ -313,7 +311,6 @@ export const HEALTH_CHRONIC_ILLNESS_PICKER_OPTIONS: Array<{ label: string; value
     label: "Yes — but I prefer to keep this private initially",
     value: "Yes — but I prefer to keep this private initially",
   },
-  { label: "Prefer not to say", value: "Prefer not to say" },
 ];
 
 /** Family domain — pets in the household (dropdown). */

@@ -90,4 +90,23 @@ describe('runPostClaudeInterviewCompleteTokenGate', () => {
     expect(setPendingScoringSyncAttemptId).toHaveBeenCalledWith('attempt-abc');
     expect(deps.persistInterviewAttemptSessionLifecycle).toHaveBeenCalledWith('attempt-abc', 'completed');
   });
+
+  it('forces closing TTS when parallel stream marked spoken but closing was never delivered', async () => {
+    const deps = createMockPostClaudeDeps({
+      interviewSessionAttemptIdRef: mockRef('attempt-closing-miss'),
+    });
+    const params = createMockPostClaudeParams({
+      textToParallelStream: { full: '', spokenStarted: true, closingSpoken: false },
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const closing =
+      'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt. [INTERVIEW_COMPLETE]';
+
+    await runPostClaudeInterviewCompleteTokenGate(deps, params, closing, speak);
+
+    expect(speak).toHaveBeenCalledWith(
+      expect.stringMatching(/thank you for being so open with me/i),
+      expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
+    );
+  });
 });

@@ -62,7 +62,7 @@ const editProfileSchema = z.object({
   attractedTo: z.array(z.enum(['Men', 'Women', 'Non-binary'])).min(1, 'Select at least one'),
   heightCentimeters: z.number().int().min(100).max(250),
   occupation: z.string().min(1).max(200),
-  weight: z.enum(['100_120', '121_140', '141_160', '161_180', '181_200', '200_plus', 'prefer_not']).optional().nullable(),
+  weight: z.enum(['100_120', '121_140', '141_160', '161_180', '181_200', '200_plus']).optional().nullable(),
 });
 
 type EditProfileFormData = z.infer<typeof editProfileSchema>;

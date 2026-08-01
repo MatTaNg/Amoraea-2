@@ -2,8 +2,11 @@ import {
   hasMinimalAssessableScenarioContent,
   isIrrelevantAnswerRetryAssistantLine,
   IRRELEVANT_ANSWER_RETRY_LINE,
+  looksLikeGrammaticallyCompleteShortUtterance,
   looksLikeIncompleteCutOffUserAnswer,
   looksLikeInterviewerIdentityOrOffTopicAsk,
+  looksLikeInterviewProcessMetaComment,
+  looksLikeInterviewProcessQuestionRepeatRequest,
   looksLikeUnassessableScenarioAnswer,
 } from '@features/aria/interviewAnswerRelevance';
 
@@ -38,6 +41,10 @@ describe('interviewAnswerRelevance', () => {
 
   it('flags mid-sentence cut-offs even when a character name is present', () => {
     expect(looksLikeIncompleteCutOffUserAnswer('If I were Ryan, I would')).toBe(true);
+    expect(looksLikeIncompleteCutOffUserAnswer("If I'm right and I really")).toBe(true);
+    expect(looksLikeIncompleteCutOffUserAnswer("If I'm right and I really care about her")).toBe(
+      false,
+    );
     expect(looksLikeIncompleteCutOffUserAnswer('If I were Ryan I would')).toBe(true);
     expect(looksLikeIncompleteCutOffUserAnswer('If I were Ryan')).toBe(true);
     expect(looksLikeIncompleteCutOffUserAnswer('Emma is')).toBe(true);
@@ -175,5 +182,32 @@ describe('interviewAnswerRelevance', () => {
         'I would apologize to Sophie and ask how she feels about him leaving.',
       ),
     ).toBe(false);
+  });
+
+  it('does not treat interview-process question requests as cut-offs or unassessable retries', () => {
+    expect(looksLikeInterviewProcessMetaComment('Give a question.')).toBe(true);
+    expect(looksLikeInterviewProcessMetaComment('Do you have a question?')).toBe(true);
+    expect(looksLikeInterviewProcessMetaComment('What is the question?')).toBe(true);
+    expect(looksLikeInterviewProcessQuestionRepeatRequest('Give a question.')).toBe(true);
+    expect(looksLikeInterviewProcessQuestionRepeatRequest('Give a ques-')).toBe(true);
+    expect(looksLikeInterviewProcessQuestionRepeatRequest('Can you ask?')).toBe(true);
+    expect(looksLikeUnassessableScenarioAnswer('Give a question.')).toBe(false);
+    expect(looksLikeUnassessableScenarioAnswer('Give a ques-')).toBe(false);
+    expect(looksLikeUnassessableScenarioAnswer('Do you have a question?')).toBe(false);
+    expect(looksLikeIncompleteCutOffUserAnswer('Give a question.')).toBe(false);
+    expect(looksLikeGrammaticallyCompleteShortUtterance('Give a question.')).toBe(true);
+  });
+
+  it('does not treat long substantive confusion as a short process-meta repeat ask', () => {
+    const confused =
+      "Again, there's nothing really to comment on, she gets a job offer, he asks her a question, she tears up. Am I supposed to be making assumptions as to why she's tearing up? So far there's no question.";
+    expect(looksLikeInterviewProcessMetaComment(confused)).toBe(false);
+  });
+
+  it('still flags incomplete short fragments without terminal punctuation', () => {
+    expect(looksLikeGrammaticallyCompleteShortUtterance('pizza')).toBe(false);
+    expect(looksLikeGrammaticallyCompleteShortUtterance('If I were Ryan, I would')).toBe(false);
+    expect(looksLikeUnassessableScenarioAnswer('pizza')).toBe(true);
+    expect(looksLikeUnassessableScenarioAnswer('If I were Ryan, I would')).toBe(true);
   });
 });

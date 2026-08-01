@@ -131,7 +131,6 @@ export const SEX_FREQUENCY_OPTIONS: CompatibilityOption<CompatibilityFormData['s
   { value: '2_3_week', label: '2-3 times per week' },
   { value: 'several_week', label: 'Several times per week' },
   { value: 'daily', label: 'Daily' },
-  { value: 'prefer_not', label: 'Prefer not to say' },
 ];
 
 export const WEIGHT_OPTIONS: CompatibilityOption<CompatibilityFormData['weight']>[] = [
@@ -141,7 +140,6 @@ export const WEIGHT_OPTIONS: CompatibilityOption<CompatibilityFormData['weight']
   { value: '161_180', label: '161-180 lbs' },
   { value: '181_200', label: '181-200 lbs' },
   { value: '200_plus', label: '200+ lbs' },
-  { value: 'prefer_not', label: 'Prefer not to say' },
 ];
 
 export const HAS_PETS_OPTIONS: CompatibilityOption<CompatibilityFormData['hasPets']>[] = [
@@ -254,7 +252,6 @@ export const RELIGIOUS_IDENTITY_OPTIONS: CompatibilityOption<
   { value: 'spiritual_not_religious', label: 'Spiritual but not religious' },
   { value: 'atheist_agnostic', label: 'Atheist/Agnostic' },
   { value: 'other', label: 'Other' },
-  { value: 'prefer_not_say', label: 'Prefer not to say' },
 ];
 
 export const FAITH_PRACTICE_LEVEL_OPTIONS: CompatibilityOption<
@@ -270,8 +267,8 @@ export const FAITH_PRACTICE_LEVEL_OPTIONS: CompatibilityOption<
 export const KIDS_VALUES = ['0', '1', '2', '3', '4', '5_plus'] as const;
 export const WORK_HOURS_VALUES = ['0_20', '21_30', '31_40', '41_50', '51_60', '60_plus'] as const;
 export const HOURS_PER_WEEK_VALUES = ['0_5', '6_10', '11_15', '16_20', '21_30', '31_plus'] as const;
-export const SEX_FREQ_VALUES = ['rarely', 'once_week', '2_3_week', 'several_week', 'daily', 'prefer_not'] as const;
-export const WEIGHT_VALUES = ['100_120', '121_140', '141_160', '161_180', '181_200', '200_plus', 'prefer_not'] as const;
+export const SEX_FREQ_VALUES = ['rarely', 'once_week', '2_3_week', 'several_week', 'daily'] as const;
+export const WEIGHT_VALUES = ['100_120', '121_140', '141_160', '161_180', '181_200', '200_plus'] as const;
 
 // ─── Single source of truth: sections and questions ───────────────────────
 

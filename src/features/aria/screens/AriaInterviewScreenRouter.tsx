@@ -177,10 +177,16 @@ export function AriaInterviewScreenRouter(
   }
 
   if (props.status === 'intro') {
+    /** Active shell owns in-progress UI; session status may still be intro for a frame after resume/start. */
     if (props.interviewStatus === 'in_progress') {
       return null;
     }
-    const attemptReady = !props.userId || props.isAdmin || props.interviewAttemptBootstrap === 'ready';
+    const sessionPrepPending =
+      Boolean(props.userId) &&
+      !props.isAdmin &&
+      (props.interviewAttemptBootstrap === 'idle' || props.interviewAttemptBootstrap === 'loading');
+    const attemptReady =
+      !props.userId || props.isAdmin || props.interviewAttemptBootstrap !== 'failed';
     const preInterviewReady =
       props.preInterviewConsentAge &&
       props.preInterviewConsentData &&
@@ -196,6 +202,7 @@ export function AriaInterviewScreenRouter(
         preInterviewConsentAge={props.preInterviewConsentAge}
         preInterviewConsentData={props.preInterviewConsentData}
         preInterviewReady={preInterviewReady}
+        sessionPrepPending={sessionPrepPending}
         interviewStartInFlight={props.interviewStartInFlight}
         interviewAttemptBootstrap={props.interviewAttemptBootstrap}
         userId={props.userId}
@@ -205,6 +212,13 @@ export function AriaInterviewScreenRouter(
         onToggleConsentAge={() => props.setPreInterviewConsentAge((v) => !v)}
         onToggleConsentData={() => props.setPreInterviewConsentData((v) => !v)}
         onBeginInterview={() => {
+          if (__DEV__) {
+            console.log('[START] Begin interview pressed', {
+              preInterviewReady,
+              interviewAttemptBootstrap: props.interviewAttemptBootstrap,
+              interviewStartInFlight: props.interviewStartInFlight,
+            });
+          }
           void props.startInterview({ fromUserGesture: true });
         }}
       />

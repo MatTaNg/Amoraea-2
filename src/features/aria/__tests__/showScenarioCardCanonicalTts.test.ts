@@ -4,6 +4,7 @@ import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5Pro
 import { SCENARIO_2_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
 import { SCENARIO_1_VIGNETTE } from '@features/aria/interviewScenarioVignetteCopy';
 import { SCENARIO_1_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
+import { SHOW_SCENARIO_3_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import {
   buildCanonicalShowScenarioCardTtsBody,
   buildCanonicalShowScenarioCardTtsFromStream,
@@ -15,6 +16,7 @@ import {
   shouldArmShowScenarioCardStreamMute,
   shouldSkipPersonalMomentCanonicalReplay,
   shouldSkipSituation1CanonicalReplay,
+  shouldSkipSituation3CanonicalReplay,
   shouldSuppressParallelStreamNonExactShowScenarioCardSpeech,
   shouldTreatShowScenarioCardCanonicalAsAlreadyDelivered,
   composeShowScenarioCardTtsWithTransitionPrefix,
@@ -218,6 +220,55 @@ describe('showScenarioCardCanonicalTts', () => {
     ).toBe(true);
   });
 
+  it('does not arm stream mute for wrong-scenario confusion redirect during Scenario 2', () => {
+    const redirect =
+      "Fair point — I'm looking for your read on what's happening emotionally between Emma and Ryan. Why do you think she's tearing up?";
+    expect(
+      resolveShowScenarioCardKindForInterview({
+        fullStream: redirect,
+        interviewMoment: 2,
+        interviewScenario: 2,
+      }),
+    ).toBeNull();
+    expect(
+      shouldArmShowScenarioCardStreamMute({
+        sentence:
+          "Fair point — I'm looking for your read on what's happening emotionally between Emma and Ryan.",
+        fullStream: redirect,
+        messagesToUse: [],
+        streamShowScenarioCardMuteActive: false,
+        showScenarioCardCanonicalSpokenThisStream: false,
+        streamContemptProbeMuteActive: false,
+        interviewMoment: 2,
+        interviewScenario: 2,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not arm stream mute for mid-scenario Sarah mention without boundary handoff', () => {
+    const redirect =
+      "Fair enough — I'm looking for your read on what's happening between Sarah and James emotionally. What do you think is going on here?";
+    expect(
+      resolveShowScenarioCardKindForInterview({
+        fullStream: redirect,
+        interviewMoment: 2,
+        interviewScenario: 2,
+      }),
+    ).toBeNull();
+    expect(
+      shouldArmShowScenarioCardStreamMute({
+        sentence: redirect,
+        fullStream: redirect,
+        messagesToUse: [],
+        streamShowScenarioCardMuteActive: false,
+        showScenarioCardCanonicalSpokenThisStream: false,
+        streamContemptProbeMuteActive: false,
+        interviewMoment: 2,
+        interviewScenario: 2,
+      }),
+    ).toBe(false);
+  });
+
   it('suppresses parallel stream when Scenario 1 includes Ryan repair before canonical card', () => {
     expect(
       shouldSuppressParallelStreamNonExactShowScenarioCardSpeech({
@@ -266,6 +317,30 @@ describe('showScenarioCardCanonicalTts', () => {
         delivery: { contemptProbeAsked: true, repairQuestionAsked: false },
       }),
     ).toBe(true);
+  });
+
+  it('skips Situation 3 canonical replay when Sophie/Daniel vignette is already in transcript', () => {
+    expect(
+      shouldSkipSituation3CanonicalReplay({
+        currentScenario: 3,
+        messages: [{ role: 'assistant', content: SHOW_SCENARIO_3_VIGNETTE_EXACT }],
+        playbackConfirmedKinds: {},
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSituation3CanonicalReplay({
+        currentScenario: 2,
+        messages: [],
+        playbackConfirmedKinds: { situation_3: true },
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipSituation3CanonicalReplay({
+        currentScenario: 2,
+        messages: [],
+        playbackConfirmedKinds: {},
+      }),
+    ).toBe(false);
   });
 
   it('suppresses parallel stream when Scenario 2 vignette is paraphrased', () => {
@@ -683,6 +758,21 @@ describe('showScenarioCardCanonicalTts', () => {
       streamAlreadySpokeScenarioBoundaryClosingLead(
         "Good work — that's the end of this scenario. Here's the next situation.",
         1,
+      ),
+    ).toBe(true);
+  });
+
+  it('streamAlreadySpokeScenarioBoundaryClosingLead recognizes LLM S2→S3 wrap phrasing', () => {
+    expect(
+      streamAlreadySpokeScenarioBoundaryClosingLead(
+        "That's the second situation wrapped up. On to the next one.",
+        2,
+      ),
+    ).toBe(true);
+    expect(
+      streamAlreadySpokeScenarioBoundaryClosingLead(
+        'That wraps up Sarah and James. On to the third and final situation.',
+        2,
       ),
     ).toBe(true);
   });

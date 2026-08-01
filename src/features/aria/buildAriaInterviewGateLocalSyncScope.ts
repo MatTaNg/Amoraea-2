@@ -83,6 +83,7 @@ export type AriaInterviewGateMomentsLocalScope = Pick<
   | 's3RepairProbeDeliveredRef'
   | 'turnAudioIndexRef'
   | 'lastUserTurnAudioDurationMsRef'
+  | 'lastUserTurnMicStopTelemetryRef'
   | 'responseTimingsRef'
   | 'routeChangedDuringRecordingRef'
 >;

@@ -13,8 +13,11 @@ import {
 } from '@features/aria/interviewLanguageGate';
 import {
   hasQuestionRecoveryPromptAlreadySpokenForSeq,
+  IRRELEVANT_ANSWER_RETRY_LINE,
   looksLikeCompleteShortUserReply,
 } from '@features/aria/interviewAnswerRelevance';
+import { shouldPrioritizeCutOffRecoveryOverMeta } from '@features/aria/interviewCutOffDetection';
+import { resolveHybridCutOffSync } from '@features/aria/resolveHybridCutOffForInterviewTurn';
 import { resolveMetaCommentForInterviewTurn } from '@features/aria/metaCommentClassification';
 import {
   SILENT_BUFFER_RETAKE_PROMPT,
@@ -124,6 +127,17 @@ export async function applyRecordingCompletePostTranscribeGates(
     wordsPerSecond: wps,
     shortAnswerOk,
   });
+  const micStopTelemetry = {
+    audioDurationMs: durMs,
+    wordCount: wc,
+    wordsPerSecond: wps,
+    ratioFlag,
+  };
+  deps.lastUserTurnMicStopTelemetryRef.current = micStopTelemetry;
+  const cutOffSync = resolveHybridCutOffSync({
+    transcriptText: userText,
+    telemetry: micStopTelemetry,
+  });
   let willRatioReask = ratioReaskState.shouldFire;
   if (
     willRatioReask &&
@@ -158,9 +172,38 @@ export async function applyRecordingCompletePostTranscribeGates(
     lastAssistantCue,
     suppressMetaClassificationPostMetaAckAwaitingSubstantive: suppressMetaClassificationPostMetaAckAwaitingSubstantiveGate,
     spokenWordCount: wc,
+    micStopTelemetry,
   });
   if (willRatioReask && metaResolvedForWhisperGate.effective != null) {
-    willRatioReask = false;
+    if (!shouldPrioritizeCutOffRecoveryOverMeta(cutOffSync)) {
+      willRatioReask = false;
+    }
+  }
+  if (
+    turnContext === 'substantive' &&
+    cutOffSync.isCutOff &&
+    cutOffSync.confidence === 'high' &&
+    !hasQuestionRecoveryPromptAlreadySpokenForSeq(
+      deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current,
+      deps.substantiveInterviewQuestionDeliveredSeqRef.current,
+    )
+  ) {
+    await deps.deleteTurnAudioFile(nativeUri);
+    deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current =
+      deps.substantiveInterviewQuestionDeliveredSeqRef.current;
+    deps.setMessages((prev) => [
+      ...prev,
+      { role: 'assistant', content: IRRELEVANT_ANSWER_RETRY_LINE },
+    ]);
+    deps.setVoiceState('speaking');
+    await deps
+      .speakTextSafe(IRRELEVANT_ANSWER_RETRY_LINE, {
+        telemetrySource: 'turn',
+        skipLastQuestionRef: true,
+      })
+      .catch(() => {});
+    deps.setVoiceState('idle');
+    return false;
   }
   setLastWhisperRatioTelemetry(ratioFlag, durMs, wc);
   if (deps.userId) {

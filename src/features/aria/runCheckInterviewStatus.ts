@@ -1,5 +1,15 @@
 import type { CheckInterviewStatusDeps, CheckInterviewStatusTrigger, RestorePreparingResultsInterviewStatusDeps } from '@features/aria/checkInterviewStatusTypes';
 
+/** Do not clobber mount-time resume hydration or an active interview shell back to pre-start routing. */
+function shouldPreserveMidInterviewSession(deps: CheckInterviewStatusDeps): boolean {
+  if (deps.interviewStatusRef.current === 'loading') return true;
+  if (deps.interviewStatusRef.current === 'in_progress') return true;
+  if (deps.statusRef.current === 'active') return true;
+  if (deps.resumeLoadingFlowActiveRef?.current) return true;
+  if (deps.hasResumedRef?.current) return true;
+  return false;
+}
+
 export async function runCheckInterviewStatus(
   deps: CheckInterviewStatusDeps,
   trigger: CheckInterviewStatusTrigger,
@@ -75,9 +85,9 @@ export async function runCheckInterviewStatus(
   }
 
   if (
-    deps.interviewStatusRef.current === 'in_progress' &&
     !deps.isInterviewCompleteRef.current &&
-    !interviewDoneForRouting
+    !interviewDoneForRouting &&
+    shouldPreserveMidInterviewSession(deps)
   ) {
     return;
   }
@@ -100,6 +110,7 @@ export async function runCheckInterviewStatus(
     ) {
       return;
     }
+    if (shouldPreserveMidInterviewSession(deps)) return;
     deps.setInterviewStatus('not_started');
     return;
   }
@@ -113,6 +124,7 @@ export async function runCheckInterviewStatus(
     ) {
       return;
     }
+    if (shouldPreserveMidInterviewSession(deps)) return;
     deps.setInterviewStatus('not_started');
   } else {
     const aid = data.latest_attempt_id as string | null | undefined;
@@ -127,6 +139,7 @@ export async function runCheckInterviewStatus(
           attemptId: aid,
         });
         deps.setPendingScoringSyncAttemptId(null);
+        if (shouldPreserveMidInterviewSession(deps)) return;
         deps.setInterviewStatus('not_started');
         return;
       }

@@ -202,6 +202,40 @@ describe('emotionTransitionModalTtsGuards', () => {
     ).toMatch(/scenario is complete|third situation/i);
   });
 
+  it('skips S2→S3 beforeModal when stream end already delivered LLM wrap plus S3 vignette', () => {
+    const clientBeforeModal =
+      "Got it. That's the second one done. One more situation and then we'll get personal.";
+    const streamSpoke =
+      "That's the second situation wrapped up. On to the next one.\n\nSophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves.";
+    expect(
+      prepareEmotionTransitionBeforeModalForTts(clientBeforeModal, {
+        scenarioJustCompleted: 2,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText: streamSpoke,
+        playbackConfirmedKinds: { situation_3: true },
+        messages: [],
+        interviewMoment: 3,
+      }),
+    ).toBe('');
+  });
+
+  it('skips S2→S3 beforeModal when stream spoke wraps-up-Sarah-James LLM lead plus S3 vignette', () => {
+    const clientBeforeModal =
+      "Got it. That's the second one done. One more situation and then we'll get personal.";
+    const streamSpoke =
+      'That wraps up Sarah and James. On to the third and final situation.\n\nSophie and Daniel have had the same argument for the third time. Sophie feels unheard because Daniel goes silent or leaves.';
+    expect(
+      prepareEmotionTransitionBeforeModalForTts(clientBeforeModal, {
+        scenarioJustCompleted: 2,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText: streamSpoke,
+        playbackConfirmedKinds: { situation_3: true },
+        messages: [],
+        interviewMoment: 3,
+      }),
+    ).toBe('');
+  });
+
   it('prepareEmotionTransitionBeforeModalForTts skips S2 closing when stream already spoke client bundle lead', () => {
     const streamSpoke = s2To3BeforeModal;
     expect(

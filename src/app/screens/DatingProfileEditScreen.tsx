@@ -29,12 +29,12 @@ import { useAuth } from '@features/authentication/hooks/useAuth';
 import { exitDatingProfileOnboardingToPostInterview } from '@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
 import {
-  HEIGHT_CM_MIN,
-  HEIGHT_CM_MAX,
-} from '@/shared/components/HeightCmPicker';
-import { HeightCmInput } from '@/shared/components/HeightCmInput';
-import { parseCmFromValue } from '@/shared/components/HeightSlider';
-import { WeightInput } from '@/shared/components/WeightInput';
+  HeightWeightInputFields,
+} from '@/shared/components/HeightWeightInputFields';
+import {
+  parseStoredHeightCm,
+  parseStoredWeightKg,
+} from '@/shared/utils/unitConversions';
 import {
   LifeDomainDistribution,
   DEFAULT_ONBOARDING_LIFE_DOMAINS,
@@ -45,9 +45,9 @@ import {
 } from '@/shared/components/LifeDomainDistribution';
 import { countAnsweredInDomain } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
-  DATING_PACE_AFTER_EXCITEMENT_OPTIONS,
-  PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS,
   RECENT_DATING_EARLY_WEEKS_OPTIONS,
+  RECENT_DATING_EARLY_WEEKS_QUESTION,
+  PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS,
   SPACE_FOR_NEW_RELATIONSHIP_OPTIONS,
   SEXUAL_FOCUS_OPTIONS,
   SEX_DRIVE_OPTIONS,
@@ -171,7 +171,6 @@ const MIN_PROFILE_AGE = MIN_USER_AGE;
 const ACCENT = '#3b82f6';
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
-const KG_PER_LB = 2.2046;
 
 const GENDER_UI_OPTIONS = ['Man', 'Woman', 'Non-binary'] as const;
 
@@ -232,104 +231,6 @@ function toTitleCaseUi(s: string): string {
       ? seg.charAt(0).toUpperCase() + seg.slice(1).toLowerCase()
       : seg,
   );
-}
-
-function kgToLbsDisplay(kg: unknown): string {
-  const n = typeof kg === 'number' ? kg : parseFloat(String(kg ?? ''));
-  if (!Number.isFinite(n)) return '';
-  return String(Math.round(n * KG_PER_LB * 10) / 10);
-}
-
-function lbsInputToKg(s: string): number | undefined {
-  const n = parseFloat(s.trim());
-  if (!Number.isFinite(n)) return undefined;
-  return n / KG_PER_LB;
-}
-
-function parseFiniteNumber(v: unknown): number | undefined {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-  if (typeof v === 'string' && v.trim() !== '') {
-    const n = parseFloat(v.trim());
-    if (Number.isFinite(n)) return n;
-  }
-  return undefined;
-}
-
-function parseKgFromLabel(s: string): number | undefined {
-  const m = s.trim().match(/(\d+(?:\.\d+)?)\s*kg/i);
-  if (!m) return undefined;
-  const n = parseFloat(m[1]);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function parseLbsFromLabel(s: string): number | undefined {
-  const m = s.trim().match(/(\d+(?:\.\d+)?)\s*lb/i);
-  if (!m) return undefined;
-  const n = parseFloat(m[1]);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/** Modal onboarding often saves only `weightLabel` via `buildHeightWeightProfileFields` (no `weight_kg`), e.g. `"165"` without "lbs". */
-function parseBareWeightLbsFromLabel(s: string): number | undefined {
-  const m = s.trim().match(/^(\d+(?:\.\d+)?)\s*$/);
-  if (!m) return undefined;
-  const n = parseFloat(m[1]);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/** Merge onboarding + legacy shapes: `height_cm`, numeric `height` (cm), `heightLabel` / `"172 cm"` strings. */
-function resolveHeightCmFromProfile(
-  pb: Record<string, unknown>,
-): number | undefined {
-  const fromCm = parseFiniteNumber(pb.height_cm);
-  if (fromCm != null && fromCm >= HEIGHT_CM_MIN && fromCm <= HEIGHT_CM_MAX)
-    return Math.round(fromCm);
-
-  const hNum = parseFiniteNumber(pb.height);
-  if (hNum != null && hNum >= HEIGHT_CM_MIN && hNum <= HEIGHT_CM_MAX)
-    return Math.round(hNum);
-
-  for (const key of ['heightLabel', 'height_label'] as const) {
-    const raw = pb[key];
-    if (typeof raw === 'string' && raw.trim()) {
-      const cm = parseCmFromValue(raw);
-      if (cm != null) return cm;
-    }
-  }
-
-  const hs = pb.height;
-  if (typeof hs === 'string' && hs.trim()) {
-    const cm = parseCmFromValue(hs);
-    if (cm != null) return cm;
-  }
-  return undefined;
-}
-
-/** Merge `weight_kg`, numeric `weight` (kg from save path), `weightLabel`, or raw lbs string. */
-function resolveWeightLbsStrFromProfile(pb: Record<string, unknown>): string {
-  const kgDirect = parseFiniteNumber(pb.weight_kg ?? pb.weightKg);
-  if (kgDirect != null && kgDirect > 12 && kgDirect < 500)
-    return kgToLbsDisplay(kgDirect);
-
-  const wNum = parseFiniteNumber(pb.weight);
-  if (wNum != null && wNum > 12 && wNum < 500) return kgToLbsDisplay(wNum);
-
-  for (const key of ['weightLabel', 'weight_label'] as const) {
-    const raw = pb[key];
-    if (typeof raw !== 'string' || !raw.trim()) continue;
-    const lbs = parseLbsFromLabel(raw);
-    if (lbs != null) return String(Math.round(lbs * 10) / 10);
-    const kg = parseKgFromLabel(raw);
-    if (kg != null) return kgToLbsDisplay(kg);
-    const bareLbs = parseBareWeightLbsFromLabel(raw);
-    if (bareLbs != null && bareLbs > 12 && bareLbs < 700)
-      return String(Math.round(bareLbs * 10) / 10);
-  }
-
-  const ws = pb.weight;
-  if (typeof ws === 'string' && ws.trim()) return ws.trim();
-
-  return '';
 }
 
 function normalizePhotoUriForDisplay(s: string): string {
@@ -448,8 +349,8 @@ function buildEditProfileBaselineInputFromProfile(
       ? rawSex.map((x) => String(x))
       : [],
     lifeDomainsState: { ...DEFAULT_ONBOARDING_LIFE_DOMAINS },
-    weightLbsStr: resolveWeightLbsStrFromProfile(pb),
-    heightCmPick: resolveHeightCmFromProfile(pb),
+    weightKgPick: parseStoredWeightKg(pb),
+    heightCmPick: parseStoredHeightCm(pb),
     typologyValues: profileToTypology(pb),
     matchPrefs: {},
     prefPhysicalCompatImportance: asStr(pb.prefPhysicalCompatImportance),
@@ -611,7 +512,9 @@ export const DatingProfileEditScreen: React.FC<{
     useState<OnboardingLifeDomainValues>({
       ...DEFAULT_ONBOARDING_LIFE_DOMAINS,
     });
-  const [weightLbsStr, setWeightLbsStr] = useState('');
+  const [weightKgPick, setWeightKgPick] = useState<number | undefined>(
+    undefined,
+  );
   const [heightCmPick, setHeightCmPick] = useState<number | undefined>(
     undefined,
   );
@@ -723,8 +626,8 @@ export const DatingProfileEditScreen: React.FC<{
     setSexInterestSelected(
       Array.isArray(rawSex) ? rawSex.map((x) => String(x)) : [],
     );
-    setWeightLbsStr(resolveWeightLbsStrFromProfile(pb));
-    const hcResolved = resolveHeightCmFromProfile(pb);
+    setWeightKgPick(parseStoredWeightKg(pb));
+    const hcResolved = parseStoredHeightCm(pb);
     setHeightCmPick(hcResolved);
     setTypologyValues(profileToTypology(pb));
     setPrefPhysicalCompatImportance(asStr(pb.prefPhysicalCompatImportance));
@@ -837,7 +740,7 @@ export const DatingProfileEditScreen: React.FC<{
       attractedUi,
       sexInterestSelected,
       lifeDomainsState,
-      weightLbsStr,
+      weightKgPick,
       heightCmPick,
       typologyValues,
       matchPrefs,
@@ -856,7 +759,7 @@ export const DatingProfileEditScreen: React.FC<{
       attractedUi,
       sexInterestSelected,
       lifeDomainsState,
-      weightLbsStr,
+      weightKgPick,
       heightCmPick,
       typologyValues,
       matchPrefs,
@@ -1153,10 +1056,9 @@ export const DatingProfileEditScreen: React.FC<{
       }
     }
 
-    const wKg = lbsInputToKg(weightLbsStr);
     const hw = buildHeightWeightProfileFields({
       height_cm: heightCmPick,
-      weight_kg: wKg,
+      weight_kg: weightKgPick,
     });
 
     const qaBase = {
@@ -1201,7 +1103,6 @@ export const DatingProfileEditScreen: React.FC<{
         draftClean.relationshipWithPsychedelics,
       ),
       relationshipWithCannabis: asStr(draftClean.relationshipWithCannabis),
-      datingPaceAfterExcitement: asStr(draftClean.datingPaceAfterExcitement),
       recentDatingEarlyWeeks: asStr(draftClean.recentDatingEarlyWeeks),
       spaceForNewRelationship: asStr(draftClean.spaceForNewRelationship),
       partnerMoodMismatchResponse: asStr(draftClean.partnerMoodMismatchResponse),
@@ -1214,7 +1115,7 @@ export const DatingProfileEditScreen: React.FC<{
     if (hw.weightLabel != null) next.weightLabel = hw.weightLabel;
 
     if (heightCmPick != null) next.height_cm = heightCmPick;
-    if (wKg !== undefined) next.weight_kg = wKg;
+    if (weightKgPick != null) next.weight_kg = weightKgPick;
 
     if (genderUiValue && mapGenderToDb(genderUiValue)) {
       next.gender = mapGenderToDb(genderUiValue);
@@ -1677,19 +1578,17 @@ export const DatingProfileEditScreen: React.FC<{
           <>
             <SectionTitle>Body & habits</SectionTitle>
             <View style={styles.fieldBlock}>
-              <HeightCmInput
-                label="Height (cm)"
-                valueCm={heightCmPick ?? null}
-                onChangeCm={(cm) => setHeightCmPick(cm)}
-              />
-            </View>
-            <View style={styles.fieldBlock}>
-              <WeightInput
-                label="Weight (lbs)"
-                value={weightLbsStr}
-                onChange={setWeightLbsStr}
-                defaultUnit="lbs"
-                allowUnitSwitch={false}
+              <HeightWeightInputFields
+                heightCm={heightCmPick}
+                weightKg={weightKgPick}
+                onHeightCmChange={(cm) => {
+                  setHeightCmPick(cm);
+                  markFormDirty();
+                }}
+                onWeightKgChange={(kg) => {
+                  setWeightKgPick(kg);
+                  markFormDirty();
+                }}
               />
             </View>
             <ChoiceDropdown
@@ -1827,13 +1726,7 @@ export const DatingProfileEditScreen: React.FC<{
               onValueChange={(v) => setSexInterestSelected(v ? [v] : [])}
             />
             <ChoiceDropdown
-              label="After the initial excitement of meeting someone, what pace feels most natural for you?"
-              value={asStr(draft.datingPaceAfterExcitement)}
-              options={DATING_PACE_AFTER_EXCITEMENT_OPTIONS}
-              onValueChange={setScalar('datingPaceAfterExcitement')}
-            />
-            <ChoiceDropdown
-              label="Think about your most recent dating experience. In the first 2–3 weeks, what actually happened?"
+              label={RECENT_DATING_EARLY_WEEKS_QUESTION}
               value={asStr(draft.recentDatingEarlyWeeks)}
               options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
               onValueChange={setScalar('recentDatingEarlyWeeks')}

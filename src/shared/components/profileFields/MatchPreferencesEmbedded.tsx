@@ -279,7 +279,7 @@ export const MatchPreferencesEmbedded: React.FC<
   return (
     <View style={styles.wrap}>
       <Text style={styles.sectionLead}>
-        Set dealbreakers the same way you did during onboarding.
+        Please note that although honoring yourself is important, dealbreakers will also significantly reduce potential matches.
       </Text>
 
       <View style={styles.card}>

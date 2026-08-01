@@ -56,15 +56,22 @@ export const MENTALIZING_OVERCERTAINTY_COUNT_MODIFIERS: Record<1 | 2 | 3 | 4, nu
 /** Overcertainty count at or above this → review flag. */
 export const MENTALIZING_OVERCERTAINTY_REVIEW_MIN_COUNT = 2;
 
-/** Emotion recognition proportion correct (0–1): exclusive upper bounds for bands. */
-export const EMOTION_RECOGNITION_FLOOR_EXCLUSIVE_MAX = 0.34;
-export const EMOTION_RECOGNITION_REVIEW_EXCLUSIVE_MAX = 0.67;
+/** Emotion recognition correct count (0–3) → depth-signal modifier when battery is complete. */
+export const EMOTION_RECOGNITION_CORRECT_COUNT_MODIFIERS: Record<0 | 1 | 2 | 3, number> = {
+  0: 0,
+  1: -0.2,
+  2: -0.1,
+  3: 0,
+};
 
-/** Modifiers when emotion battery is complete. */
-export const EMOTION_RECOGNITION_MODIFIER_BELOW_FLOOR = -0.2;
-export const EMOTION_RECOGNITION_MODIFIER_BELOW_REVIEW = -0.2;
-export const EMOTION_RECOGNITION_MODIFIER_PERFECT = 0.1;
-export const EMOTION_RECOGNITION_PERFECT_MIN_SCORE = 0.99;
+/** Below this correct count on a complete battery → human review flag. */
+export const EMOTION_RECOGNITION_REVIEW_MAX_EXCLUSIVE_CORRECT_COUNT = 3;
+
+export function emotionRecognitionDepthSignalModifierFromCorrectCount(
+  correctCount: 0 | 1 | 2 | 3,
+): number {
+  return EMOTION_RECOGNITION_CORRECT_COUNT_MODIFIERS[correctCount];
+}
 
 /** Disclosure calibration labels → modifier. */
 export const DISCLOSURE_UNDER_MODIFIER = -0.2;

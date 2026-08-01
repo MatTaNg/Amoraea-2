@@ -70,6 +70,9 @@ export async function deliverInterviewOpeningGreeting(
 
   const granted = await audioRecorder.requestPermission();
   deps.setMicPermission(granted ? 'granted' : 'denied');
+  if (__DEV__) {
+    console.log('[START] Mic permission result', { granted });
+  }
   await remoteLog('[START] Mic permission result', { granted });
   if (!granted) {
     if (__DEV__) console.warn('[Amoraea] Mic permission denied at start');
@@ -90,6 +93,9 @@ export async function deliverInterviewOpeningGreeting(
 
   setStatus('active');
   setInterviewStatus('in_progress');
+  if (__DEV__) {
+    console.log('[START] Interview status -> active / in_progress');
+  }
   hasResumedRef.current = true;
   setVoiceState('processing');
   resetInterviewProgressRefs();

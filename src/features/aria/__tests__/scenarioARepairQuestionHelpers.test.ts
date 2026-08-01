@@ -2,14 +2,36 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   coerceScenarioARepairQuestionForTts,
+  isDanglingInterviewRepeatLeadFragment,
   looksLikeScenarioARepairReAskQuestion,
   looksLikeScenarioARepairStreamFragment,
   normalizeScenarioARepairQuestionInAssistantDraft,
+  repairAssistantDraftAfterDanglingRepeatLead,
   spokenTextContainsScenarioARepairQuestion,
+  stripEmbeddedScenarioARepairQuestionAsk,
 } from '../scenarioARepairQuestionHelpers';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '../probeAndScoringUtils';
 
 describe('coerceScenarioARepairQuestionForTts', () => {
+  it('detects and repairs dangling repeat-lead fragments after repair dedup', () => {
+    const broken = "I'm with you. Of course, I said — this?";
+    expect(isDanglingInterviewRepeatLeadFragment(broken)).toBe(true);
+    expect(repairAssistantDraftAfterDanglingRepeatLead(broken)).toBe(
+      `I'm with you. ${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`,
+    );
+    expect(normalizeScenarioARepairQuestionInAssistantDraft(broken)).toBe(
+      `I'm with you. ${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`,
+    );
+  });
+
+  it('repairs dangling repeat lead when repair ask is stripped from a longer paragraph', () => {
+    const dangling = "I'm with you. Of course, I said — this?";
+    expect(stripEmbeddedScenarioARepairQuestionAsk(dangling)).toBe(dangling);
+    expect(repairAssistantDraftAfterDanglingRepeatLead(dangling)).toBe(
+      `I'm with you. ${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`,
+    );
+  });
+
   it('coerces the canonical first repair ask', () => {
     expect(
       coerceScenarioARepairQuestionForTts(

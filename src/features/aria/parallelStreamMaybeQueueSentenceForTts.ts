@@ -1,4 +1,4 @@
-import { prependBriefAckIfMissingBeforeMove } from '@features/aria/interviewAcknowledgmentMoveGate';
+import { prependBriefAckIfMissingBeforeMove, stripBriefAckWhenUserTurnIsNonSubstantive } from '@features/aria/interviewAcknowledgmentMoveGate';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { recentAssistantMessagesForAck } from '@features/aria/interviewReflectionAckVariation';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
@@ -119,7 +119,9 @@ import {
   scenarioCSophiePerspectiveAnsweredInTranscript,
   scenarioCSophiePerspectiveProbeAlreadyDelivered,
   shouldSuppressScenarioCRepairReplay,
+  shouldDeferS2ToS3HandoffForSuppressedS3Q1,
   shouldSuppressScenarioCQ1UntilVignetteSetup,
+  transcriptContainsScenario3VignetteSetup,
   looksLikeScenarioCRepairWithUserAnswerEcho,
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from '@features/aria/scenarioCPromptDetection';
@@ -433,6 +435,7 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           }
           state.streamMoveAckPrepended = true;
         }
+        spoken = stripBriefAckWhenUserTurnIsNonSubstantive(spoken, params.trimmed);
         if (isInternalReflectionSchemaStreamFragment(spoken)) {
           void remoteLog('[M5_REFLECTION_SCHEMA_STREAM_SUPPRESSED]', {
             interviewSessionId: deps.interviewSessionIdRef.current,
@@ -729,7 +732,10 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             state.scenarioARepairQuestionSpokenThisStream = true;
           }
         }
-        if (closingAlreadyInTranscriptForStream || state.interviewClosingSpokenThisStream) {
+        if (
+          !bypassMoment5ClosingBuffer &&
+          (closingAlreadyInTranscriptForStream || state.interviewClosingSpokenThisStream)
+        ) {
           const afterClosingEchoStrip = stripInterviewClosingStreamingEcho(spoken, true);
           if (afterClosingEchoStrip === null) {
             return;
@@ -909,6 +915,10 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           return;
         }
         if (
+          shouldDeferS2ToS3HandoffForSuppressedS3Q1({
+            currentScenario: deps.currentScenarioRef.current,
+            effectiveActiveScenario,
+          }) &&
           shouldSuppressScenarioCQ1UntilVignetteSetup({
             spoken,
             fullStreamText,
@@ -922,6 +932,7 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             preview: spoken.slice(0, 220),
             scenarioRef: deps.currentScenarioRef.current,
             momentRef: deps.currentInterviewMomentRef.current,
+            deferredS2Handoff: true,
           });
           return;
         }
@@ -1101,6 +1112,36 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           deps.s2RepairProbeDeliveredRef.current = true;
         }
         if (deps.currentScenarioRef.current === 3) {
+          const s3VignetteAlreadyDelivered = transcriptContainsScenario3VignetteSetup(
+            params.messagesToUse,
+          );
+          if (
+            s3VignetteAlreadyDelivered &&
+            deps.currentInterviewMomentRef.current === 3 &&
+            looksLikeNonCanonicalScenarioCVignetteFiction(spoken) &&
+            !isExactShowScenario3VignetteText(spoken)
+          ) {
+            if (scenarioCQ1InterpretationSatisfiedInTranscript(params.messagesToUse)) {
+              const replacement = coerceScenarioCNextProbeForStreamTts(params.messagesToUse);
+              spoken = replacement;
+              if (looksLikeScenarioCSophiePerspectiveQuestion(spoken)) {
+                state.scenarioCSophiePerspectiveProbeSpokenThisStream = true;
+              } else if (isScenarioCRepairAssistantPrompt(spoken)) {
+                state.scenarioCRepairQuestionSpokenThisStream = true;
+                markS3RepairProbeTtsDelivered(deps);
+              }
+              void remoteLog('[S3_MID_SCENARIO_INVENTED_FICTION_REPLACED]', {
+                interviewSessionId: deps.interviewSessionIdRef.current,
+                preview: spoken.slice(0, 220),
+              });
+            } else {
+              void remoteLog('[S3_MID_SCENARIO_INVENTED_FICTION_SUPPRESSED]', {
+                interviewSessionId: deps.interviewSessionIdRef.current,
+                preview: spoken.slice(0, 220),
+              });
+              return;
+            }
+          }
           const s3RepairSatisfied = !scenarioCRepairConstructStillPending(params.messagesToUse);
           if (state.scenarioCSophiePerspectiveProbeSpokenThisStream) {
             const afterSophieEchoStrip = stripScenarioCSophiePerspectiveStreamingEcho(spoken, true);
@@ -1421,10 +1462,11 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             isIncompleteMoment4ThresholdLeadSentence(spoken) ||
             looksLikeMoment4ThresholdParaphraseInProgress(spoken))
         ) {
-          void remoteLog('[M4_THRESHOLD_STREAM_SUPPRESSED_UNFORCED]', {
+          void remoteLog('[M4_THRESHOLD_STREAM_COERCED_UNFORCED]', {
             preview: spoken.slice(0, 220),
+            coercedPreview: coerceMoment4ThresholdQuestionForTts(spoken).slice(0, 220),
           });
-          return;
+          spoken = coerceMoment4ThresholdQuestionForTts(spoken);
         }
         if (
           deps.currentInterviewMomentRef.current === 4 &&

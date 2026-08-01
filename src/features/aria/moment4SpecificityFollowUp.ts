@@ -389,21 +389,22 @@ export function deriveMoment4PostGrudgeSpecificityResolvedFromMessages(
   if (lastGrudgeIdx < 0) return false;
 
   const afterGrudge = messages.slice(lastGrudgeIdx + 1);
-  const firstUserAfterGrudge = afterGrudge.find((m) => m.role === 'user');
-  if (!firstUserAfterGrudge?.content?.trim()) return false;
+  const userAnswersAfterGrudge = afterGrudge.filter((m) => m.role === 'user');
+  const lastUserAfterGrudge = userAnswersAfterGrudge[userAnswersAfterGrudge.length - 1];
+  if (!lastUserAfterGrudge?.content?.trim()) return false;
 
   if (
-    moment4QualifiesAsValidNonApplicable(firstUserAfterGrudge.content) ||
-    moment4UserDeclinesToNameSpecificPerson(firstUserAfterGrudge.content)
+    moment4QualifiesAsValidNonApplicable(lastUserAfterGrudge.content) ||
+    moment4UserDeclinesToNameSpecificPerson(lastUserAfterGrudge.content)
   ) {
     return true;
   }
 
-  if (looksLikeIncompleteCutOffUserAnswer(firstUserAfterGrudge.content)) {
+  if (looksLikeIncompleteCutOffUserAnswer(lastUserAfterGrudge.content)) {
     return false;
   }
 
-  if (!needsMoment4SpecificityFollowUp(firstUserAfterGrudge.content)) {
+  if (!needsMoment4SpecificityFollowUp(lastUserAfterGrudge.content)) {
     return true;
   }
 

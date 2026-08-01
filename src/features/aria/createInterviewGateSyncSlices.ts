@@ -92,6 +92,7 @@ export function createInterviewGateMomentScenarioSyncSlice(params: SyncExtraPara
     s3RepairProbeDeliveredRef: params.s3RepairProbeDeliveredRef,
     turnAudioIndexRef: params.turnAudioIndexRef,
     lastUserTurnAudioDurationMsRef: params.lastUserTurnAudioDurationMsRef,
+    lastUserTurnMicStopTelemetryRef: params.lastUserTurnMicStopTelemetryRef,
     responseTimingsRef: params.responseTimingsRef,
     routeChangedDuringRecordingRef: params.routeChangedDuringRecordingRef,
   };

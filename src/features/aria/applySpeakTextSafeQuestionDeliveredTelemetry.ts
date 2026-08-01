@@ -5,6 +5,7 @@ import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { looksLikeScenarioBRepairAsJamesQuestion } from '@features/aria/scenarioBProbeLogic';
 import { isScenarioCRepairAssistantPrompt } from '@features/aria/probeAndScoringUtils';
 import { resolveAssessableQuestionTextForResponseTiming } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
+import { maybePersistScenarioOpeningDeliveredAfterQuestionDelivered } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
 
@@ -53,6 +54,7 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
     attemptId: string | null | undefined,
     lifecycle: 'in_progress' | 'completed',
   ) => Promise<void>;
+  resumeActiveScenarioRef?: MutableRefObject<1 | 2 | 3 | null>;
 }): void {
   if (
     args.isInterviewLine &&
@@ -103,6 +105,14 @@ export function applySpeakTextSafeQuestionDeliveredTelemetry(args: {
       ...(args.ttsPipeline ? { tts_pipeline: args.ttsPipeline } : {}),
     },
     platform: rtd.platform,
+  });
+
+  void maybePersistScenarioOpeningDeliveredAfterQuestionDelivered({
+    userId: args.userId,
+    deliveredQuestionText,
+    currentScenario: args.currentScenario,
+    sessionAttemptId: args.interviewSessionAttemptIdRef?.current ?? null,
+    resumeActiveScenario: args.resumeActiveScenarioRef?.current ?? args.currentScenario,
   });
 
   const sn = args.currentScenario;

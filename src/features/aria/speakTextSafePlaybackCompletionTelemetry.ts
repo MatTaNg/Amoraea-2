@@ -9,7 +9,10 @@ import {
   type ShowScenarioCardCanonicalPlaybackConfirmedKinds,
 } from '@features/aria/showScenarioCardCanonicalTts';
 import type { TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
-import { isTtsDurationMatchWithinOverrunTolerance } from '@features/aria/utils/interviewTtsDurationMatch';
+import {
+  isTtsDurationMatchWithinOverrunTolerance,
+  isTtsPlaybackCompleteForScenarioOpeningCheckpoint,
+} from '@features/aria/utils/interviewTtsDurationMatch';
 import { getSessionLogRuntime, markLastAudioSessionEventType } from '@utilities/sessionLogging';
 import { writeAudioSessionLog } from '@utilities/sessionLogging/audioSessionLogEnvelope';
 import { writeSessionLog } from '@utilities/sessionLogging/writeSessionLog';
@@ -67,10 +70,14 @@ export function writeSpeakTextSafePlaybackCompletionTelemetry(args: {
   }
 
   const showScenarioCardKind = isShowScenarioCardCanonicalDeliveryText(args.text);
+  const scenarioOpeningPlaybackComplete = isTtsPlaybackCompleteForScenarioOpeningCheckpoint(
+    args.actualTtsMs,
+    expectedTtsMs,
+    audioPlaybackTruncated,
+  );
   if (
     showScenarioCardKind &&
-    !audioPlaybackTruncated &&
-    durationMatch &&
+    scenarioOpeningPlaybackComplete &&
     args.showScenarioCardCanonicalPlaybackConfirmedKindsRef
   ) {
     args.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = {

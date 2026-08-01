@@ -1,12 +1,11 @@
 import { isDecline } from '@features/aria/interviewControlTokens';
-import { looksLikeUnassessableScenarioAnswer } from '@features/aria/interviewAnswerRelevance';
 import {
-  chooseBriefScenarioAck,
-  recentAssistantMessagesForAck,
-} from '@features/aria/interviewReflectionAckVariation';
+  looksLikeInterviewProcessMetaComment,
+  looksLikeUnassessableScenarioAnswer,
+} from '@features/aria/interviewAnswerRelevance';
+import { deliverInterviewCanonicalProbe } from '@features/aria/deliverInterviewCanonicalProbe';
+import type { InterviewCanonicalProbeId } from '@features/aria/interviewCanonicalProbeRegistry';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
-import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
-import { commitDedupedAssistantTranscriptTurn } from '@features/aria/interviewTranscriptDedup';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import type { PreClaudeScenarioConstructProbeFlags } from '@features/aria/resolvePreClaudeScenarioConstructProbeFlags';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
@@ -17,12 +16,9 @@ import {
 import {
   lastAssistantPromptIsScenarioBQ1OrPrematureRedirect,
   isDeliveredScenarioBJamesDifferentlyProbe,
-  looksLikeScenarioBJamesDifferentlyQuestion,
-  looksLikeScenarioBRepairAsJamesQuestion,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
-import { looksLikeIncompleteCutOffUserAnswer } from '@features/aria/interviewAnswerRelevance';
 import {
   shouldDeliverScenarioFollowUpQuestion,
   transcriptContainsScenarioAContemptProbe,
@@ -34,70 +30,93 @@ import {
 import { looksLikeScenarioAContemptProbeAssessableShortAnswer } from '@features/aria/scenarioAContemptProbeCoverage';
 import { looksLikeScenarioAContemptProbeQuestion } from '@features/aria/scenarioAContemptProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
-import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
-import { markQuestionDelivered } from '@utilities/sessionLogging';
-import { applySituation2FollowUpProbeReferenceCard } from '@features/aria/runReferenceCardFromAssistantSpeech';
+import type { ConstructSatisfactionResolvedByProbe } from '@features/aria/interviewConstructSatisfactionLlmTypes';
+import { shouldPhase3SkipClientOwnedCanonicalProbe } from '@features/aria/shouldPhase3SkipClientOwnedCanonicalProbe';
 
 export type PreClaudeClientOwnedCanonicalConstructGateResult = {
   handled: boolean;
 };
 
-function withOptionalBriefAck(
-  probe: string,
-  messages: readonly MessageWithScenario[],
-): string {
-  const ack = chooseBriefScenarioAck(recentAssistantMessagesForAck([...messages]));
-  if (!ack) return probe;
-  return `${ack} ${probe}`;
+function phase3SkipLogTag(probeId: InterviewCanonicalProbeId): string {
+  return `[PHASE3_SKIP_CLIENT_CANONICAL_${probeId.toUpperCase()}]`;
 }
 
-async function deliverCanonicalProbe(
+async function maybeSkipForPhase3ConstructSatisfaction(
   deps: PreClaudeTurnGateDeps,
+  trimmed: string,
   messagesToUse: MessageWithScenario[],
-  probeText: string,
-  scenarioNumber: 1 | 2 | 3,
-  logTag: string,
-): Promise<void> {
-  const liveTranscript = (deps.currentMessagesRef.current.length > 0
-    ? deps.currentMessagesRef.current
-    : messagesToUse) as MessageWithScenario[];
-  const questionBody = assessablePromptQuestionBody(probeText);
-  commitDedupedAssistantTranscriptTurn(
-    liveTranscript,
-    messagesToUse,
-    probeText,
-    {
-      scenarioNumber,
-      interviewMoment: deps.currentInterviewMomentRef.current,
-    },
-    (next) => deps.setMessages(next),
-  );
-  deps.lastQuestionTextRef.current = questionBody;
-  if (
-    scenarioNumber === 2 &&
-    deps.setReferenceCardScenario &&
-    deps.committedScenarioRef &&
-    deps.setInterviewUiPhase &&
-    (looksLikeScenarioBJamesDifferentlyQuestion(probeText) ||
-      looksLikeScenarioBRepairAsJamesQuestion(probeText))
-  ) {
-    applySituation2FollowUpProbeReferenceCard(deps, questionBody);
+  constructProbeFlags: PreClaudeScenarioConstructProbeFlags,
+  probeId: InterviewCanonicalProbeId,
+  constructSatisfactionResolvedByProbe?: ConstructSatisfactionResolvedByProbe,
+  orchestratorSkippedProbeId?: InterviewCanonicalProbeId | null,
+): Promise<boolean> {
+  if (orchestratorSkippedProbeId === probeId) {
+    void remoteLog(phase3SkipLogTag(probeId), {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      source: 'orchestrator_execute_skip',
+      reason: 'orchestrator_skip_probe_already_satisfied',
+      userPreview: trimmed.slice(0, 200),
+    });
+    return true;
   }
-  void remoteLog(logTag, {
-    interviewSessionId: deps.interviewSessionIdRef.current,
-    preview: probeText.slice(0, 220),
-    scenarioNumber,
+  const skip = shouldPhase3SkipClientOwnedCanonicalProbe({
+    probeId,
+    trimmed,
+    messagesToUse,
+    constructProbeFlags,
+    constructSatisfactionResolvedByProbe,
   });
-  await deps.speakTextSafe(probeText, ASSISTANT_INTERVIEW_SPEECH);
-  markQuestionDelivered(new Date().toISOString());
-  deps.setVoiceState('idle');
-  deps.setIsWaiting(false);
+  if (!skip) return false;
+  void remoteLog(phase3SkipLogTag(probeId), {
+    interviewSessionId: deps.interviewSessionIdRef.current,
+    source: skip.source,
+    reason: skip.reason,
+    userPreview: trimmed.slice(0, 200),
+  });
+  return true;
+}
+
+async function deliverClientOwnedProbeIfEligible(args: {
+  deps: PreClaudeTurnGateDeps;
+  trimmed: string;
+  messagesToUse: MessageWithScenario[];
+  constructProbeFlags: PreClaudeScenarioConstructProbeFlags;
+  constructSatisfactionResolvedByProbe?: ConstructSatisfactionResolvedByProbe;
+  orchestratorSkippedProbeId?: InterviewCanonicalProbeId | null;
+  probeId: InterviewCanonicalProbeId;
+  eligible: boolean;
+  logTag: string;
+  withBriefAck?: boolean;
+}): Promise<boolean> {
+  if (!args.eligible) return false;
+  if (
+    await maybeSkipForPhase3ConstructSatisfaction(
+      args.deps,
+      args.trimmed,
+      args.messagesToUse,
+      args.constructProbeFlags,
+      args.probeId,
+      args.constructSatisfactionResolvedByProbe,
+      args.orchestratorSkippedProbeId,
+    )
+  ) {
+    return false;
+  }
+  await deliverInterviewCanonicalProbe({
+    deps: args.deps,
+    messagesToUse: args.messagesToUse,
+    probeId: args.probeId,
+    withBriefAck: args.withBriefAck,
+    userText: args.trimmed,
+    logTag: args.logTag,
+  });
+  return true;
 }
 
 /**
  * Fixed scripted construct probes (S1 contempt/repair, S2 James Q2/Q3) never change —
  * deliver them client-side and skip Claude so paraphrases cannot leak into TTS.
- * Runs after client disengagement probes so thin-answer / refusal injects still win.
+ * Fallback when orchestrator execute did not handle the turn (e.g. route_to_claude).
  */
 export async function runPreClaudeClientOwnedCanonicalConstructGate(
   deps: PreClaudeTurnGateDeps,
@@ -106,8 +125,13 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
   lastAssistantContent: string,
   constructProbeFlags: PreClaudeScenarioConstructProbeFlags,
   suppressForcedConstructProbesForMetaFrustration = false,
+  constructSatisfactionResolvedByProbe: ConstructSatisfactionResolvedByProbe = {},
+  orchestratorSkippedProbeId: InterviewCanonicalProbeId | null = null,
 ): Promise<PreClaudeClientOwnedCanonicalConstructGateResult> {
   if (isDecline(trimmed) || suppressForcedConstructProbesForMetaFrustration) {
+    return { handled: false };
+  }
+  if (looksLikeInterviewProcessMetaComment(trimmed)) {
     return { handled: false };
   }
   const questionToAssess =
@@ -120,8 +144,6 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
     (looksLikeScenarioCSophiePerspectiveQuestion(questionToAssess) ||
       looksLikeScenarioCSophiePerspectiveQuestion(lastAssistantContent)) &&
     looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(trimmed);
-  // Incomplete / off-topic answers must not advance via client-owned construct delivery
-  // (irrelevant-answer retry gate should speak first; this is defense in depth).
   if (
     looksLikeUnassessableScenarioAnswer(trimmed) &&
     !contemptProbeShortAnswer &&
@@ -138,41 +160,42 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
   } = constructProbeFlags;
 
   if (
-    shouldForceScenarioAContemptProbe &&
-    shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY) &&
-    !transcriptContainsScenarioAContemptProbe(messagesToUse)
-  ) {
-    const probeText = SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
-    deps.scenarioAContemptProbeAskedRef.current = true;
-    /** Mute was armed for a Claude force path we are skipping — clear so later S1→S2 stream is not silenced. */
-    deps.pendingScenarioAContemptProbeStreamMuteRef.current = false;
-    await deliverCanonicalProbe(
+    await deliverClientOwnedProbeIfEligible({
       deps,
+      trimmed,
       messagesToUse,
-      probeText,
-      1,
-      '[S1_CONTEMPT_CLIENT_OWNED_SKIP_CLAUDE]',
-    );
+      constructProbeFlags,
+      constructSatisfactionResolvedByProbe,
+      orchestratorSkippedProbeId,
+      probeId: 's1_contempt',
+      eligible:
+        shouldForceScenarioAContemptProbe &&
+        shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY) &&
+        !transcriptContainsScenarioAContemptProbe(messagesToUse),
+      logTag: '[S1_CONTEMPT_CLIENT_OWNED_SKIP_CLAUDE]',
+    })
+  ) {
     return { handled: true };
   }
 
   if (
-    allowScenarioARepairAfterContemptAnswer &&
-    shouldDeliverScenarioFollowUpQuestion(
-      messagesToUse,
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-    )
-  ) {
-    const probeText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-    deps.scenarioARepairQuestionAskedRef.current = true;
-    deps.pendingScenarioAContemptProbeStreamMuteRef.current = false;
-    await deliverCanonicalProbe(
+    await deliverClientOwnedProbeIfEligible({
       deps,
+      trimmed,
       messagesToUse,
-      probeText,
-      1,
-      '[S1_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
-    );
+      constructProbeFlags,
+      constructSatisfactionResolvedByProbe,
+      orchestratorSkippedProbeId,
+      probeId: 's1_repair',
+      eligible:
+        allowScenarioARepairAfterContemptAnswer &&
+        shouldDeliverScenarioFollowUpQuestion(
+          messagesToUse,
+          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+        ),
+      logTag: '[S1_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
+    })
+  ) {
     return { handled: true };
   }
 
@@ -189,47 +212,58 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
     !transcriptHasJamesDifferently &&
     shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
 
-  if (needsJamesDifferently) {
-    const probeText = withOptionalBriefAck(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, messagesToUse);
-    await deliverCanonicalProbe(
+  if (
+    await deliverClientOwnedProbeIfEligible({
       deps,
+      trimmed,
       messagesToUse,
-      probeText,
-      2,
-      '[S2_JAMES_DIFF_CLIENT_OWNED_SKIP_CLAUDE]',
-    );
+      constructProbeFlags,
+      constructSatisfactionResolvedByProbe,
+      orchestratorSkippedProbeId,
+      probeId: 's2_james_differently',
+      eligible: needsJamesDifferently,
+      logTag: '[S2_JAMES_DIFF_CLIENT_OWNED_SKIP_CLAUDE]',
+      withBriefAck: true,
+    })
+  ) {
     return { handled: true };
   }
 
   if (
-    shouldForceScenarioBJamesRepairProbe &&
-    shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_B_JAMES_REPAIR_CANONICAL)
-  ) {
-    const probeText = withOptionalBriefAck(SCENARIO_B_JAMES_REPAIR_CANONICAL, messagesToUse);
-    deps.s2RepairProbeDeliveredRef.current = true;
-    await deliverCanonicalProbe(
+    await deliverClientOwnedProbeIfEligible({
       deps,
+      trimmed,
       messagesToUse,
-      probeText,
-      2,
-      '[S2_JAMES_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
-    );
+      constructProbeFlags,
+      constructSatisfactionResolvedByProbe,
+      orchestratorSkippedProbeId,
+      probeId: 's2_james_repair',
+      eligible:
+        shouldForceScenarioBJamesRepairProbe &&
+        shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_B_JAMES_REPAIR_CANONICAL),
+      logTag: '[S2_JAMES_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
+      withBriefAck: true,
+    })
+  ) {
     return { handled: true };
   }
 
   if (
-    shouldForceScenarioCSophiePerspectiveProbe &&
-    shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE)
-  ) {
-    const probeText = withOptionalBriefAck(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, messagesToUse);
-    deps.scenarioCSophiePerspectiveProbeFiredRef.current = true;
-    await deliverCanonicalProbe(
+    await deliverClientOwnedProbeIfEligible({
       deps,
+      trimmed,
       messagesToUse,
-      probeText,
-      3,
-      '[S3_SOPHIE_CLIENT_OWNED_SKIP_CLAUDE]',
-    );
+      constructProbeFlags,
+      constructSatisfactionResolvedByProbe,
+      orchestratorSkippedProbeId,
+      probeId: 's3_sophie_perspective',
+      eligible:
+        shouldForceScenarioCSophiePerspectiveProbe &&
+        shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE),
+      logTag: '[S3_SOPHIE_CLIENT_OWNED_SKIP_CLAUDE]',
+      withBriefAck: true,
+    })
+  ) {
     return { handled: true };
   }
 

@@ -1,4 +1,5 @@
 import { countSpokenWords } from '@features/aria/interviewLanguageGate';
+import { looksLikeInterviewProcessMetaComment } from '@features/aria/interviewAnswerRelevance';
 import { resolvePlausibleInterviewFirstName } from '@features/aria/interviewNameValidation';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
 import {
@@ -15,17 +16,19 @@ import {
 import type { PreClaudeFrustrationSkipGateState } from '@features/aria/resolvePreClaudeFrustrationSkipGates';
 import type { PreClaudeTurnSkipAndMetaGateResult } from '@features/aria/resolvePreClaudeTurnSkipAndMetaGates';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
+import { resolveHybridMetaCommentLlmRefinement } from '@features/aria/resolveHybridMetaCommentLlmRefinement';
+import { classifyPriorAnswerMetaKind } from '@features/aria/interviewPriorAnswerMetaDetection';
 import { getScenarioNumberForNewMessage } from '@features/aria/scenarioNumberDetection';
 import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime, writeSessionLog } from '@utilities/sessionLogging';
 
 /** Meta-comment classification, inability/skip_request handling, telemetry, and result assembly. */
-export function resolvePreClaudeMetaCommentGateState(
+export async function resolvePreClaudeMetaCommentGateState(
   deps: PreClaudeTurnGateDeps,
   trimmed: string,
   resumeGatePendingEarly: boolean,
   frustrationSkip: PreClaudeFrustrationSkipGateState,
-): PreClaudeTurnSkipAndMetaGateResult {
+): Promise<PreClaudeTurnSkipAndMetaGateResult> {
   const {
     frustrationSkipAcceptancePipeline,
     frustrationSkipDeclinePipeline,
@@ -40,7 +43,7 @@ export function resolvePreClaudeMetaCommentGateState(
     deps.metaCommentAckAwaitingSubstantiveBaselineSeqRef.current !== null &&
     deps.substantiveInterviewQuestionDeliveredSeqRef.current ===
       deps.metaCommentAckAwaitingSubstantiveBaselineSeqRef.current;
-  const metaResolved = resolveMetaCommentForInterviewTurn(trimmed, {
+  let metaResolved = resolveMetaCommentForInterviewTurn(trimmed, {
     lastQuestionText: deps.lastQuestionTextRef.current,
     priorUserUtteranceCount: priorUserUtteranceCountForMeta,
     isInterviewAppRoute: deps.isInterviewAppRoute,
@@ -52,6 +55,14 @@ export function resolvePreClaudeMetaCommentGateState(
     suppressMetaClassificationPostMetaAckAwaitingSubstantive,
     resumeGatePending: resumeGatePendingEarly,
     spokenWordCount: wcForMetaExempt,
+    micStopTelemetry: deps.lastUserTurnMicStopTelemetryRef.current,
+  });
+  metaResolved = await resolveHybridMetaCommentLlmRefinement({
+    trimmed,
+    activeQuestionPreview: (deps.lastQuestionTextRef.current ?? '').trim(),
+    metaResolved,
+    micStopTelemetry: deps.lastUserTurnMicStopTelemetryRef.current,
+    interviewSessionId: deps.interviewSessionIdRef.current,
   });
   void remoteLog('meta_comment_classification_result', {
     transcript_text: trimmed,
@@ -75,6 +86,14 @@ export function resolvePreClaudeMetaCommentGateState(
     });
   }
   let metaCommentClassification = metaResolved.effective;
+  if (!metaCommentClassification) {
+    const priorMetaKind = classifyPriorAnswerMetaKind(trimmed);
+    if (priorMetaKind === 'already_answered_claim') {
+      metaCommentClassification = { type: 'already_answered', confidence: 0.72 };
+    } else if (priorMetaKind === 'sufficiency_check_in') {
+      metaCommentClassification = { type: 'checking_in', confidence: 0.72 };
+    }
+  }
   let skipConfirmationGreetingReconnectInjection = false;
   if (
     deps.isInterviewAppRoute &&
@@ -136,6 +155,7 @@ export function resolvePreClaudeMetaCommentGateState(
       : false;
   const skipRequestConfirmationSpeech = buildSkipRequestConfirmationSpeech({
     priorSubstantiveNonMetaExcerpt: priorNonMetaExcerptForSkip,
+    includePriorReflection: metaCommentClassification?.type !== 'skip_request',
   });
 
   if (metaCommentClassification?.type === 'skip_request') {
@@ -265,7 +285,10 @@ export function resolvePreClaudeMetaCommentGateState(
     (metaForTelemetry?.type === 'frustration' && !repeatedFrustrationInMoment) ||
     metaForTelemetry?.type === 'skip_request' ||
     metaForTelemetry?.type === 'inability' ||
-    metaForTelemetry?.type === 'already_answered';
+    metaForTelemetry?.type === 'already_answered' ||
+    metaForTelemetry?.type === 'checking_in' ||
+    metaForTelemetry?.type === 'confusion' ||
+    looksLikeInterviewProcessMetaComment(trimmed);
   if (metaForTelemetry && deps.userId) {
     const r = getSessionLogRuntime();
     const summary = getMetaCommentCanonicalResponseSummary(

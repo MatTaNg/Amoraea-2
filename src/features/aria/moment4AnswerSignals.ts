@@ -21,6 +21,10 @@ const LIKELY_NAME_IN_RELATION_RE =
 const ROLE_NOUN_APPOSED_NAME_RE =
   /\b(?:a|an|the|my|our|with)?\s*(?:close |old |former )?(?:woman|man|guy|girl|lady|gentleman|person|friend|roommate|housemate|partner|colleague|coworker|neighbor|boss|ex|cousin|buddy)\s*(?:,|named)\s+[A-Z][a-z]{2,24}\b/i;
 
+/** Role noun immediately followed by proper name — e.g. "my friend Devanshu", "my cousin Rita". */
+const ROLE_NOUN_INLINE_NAME_RE =
+  /\b(?:my|our|a|an|the)?\s*(?:close |old |former )?(?:friend|cousin|brother|sister|roommate|housemate|coworker|colleague|neighbor|boss|partner|ex|buddy)\s+[A-Z][a-z]{2,24}\b/i;
+
 /**
  * Named or clearly referenced specific person — mirrors {@link inferResponseConcretenessFromTranscript}
  * moment-4 `namedPerson` heuristic (personalMomentSliceEnrichment.ts).
@@ -36,19 +40,24 @@ export function moment4HasNamedOrReferencedPerson(text: string): boolean {
     /\b(?:(?:i|we) )?had (?:a |an |my |our )(?:close |old |former |childhood )?(?:friend|roommate|coworker|colleague)\b/i.test(
       t,
     ) ||
-    /\b(?:a |an |my |our )(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man)\b/i.test(
+    /\b(?:a |an |my |our |one )(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man|individual)\b/i.test(
       t,
     ) ||
     /\b(?:a |an )person who\b/i.test(t) ||
-    /\bthere was (?:a |an |one )?(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man|person|guy|girl)\b/i.test(
+    /\bthere was (?:a |an |one )?(?:close |old |former )?(?:friend|roommate|housemate|coworker|colleague|boss|partner|ex|neighbor|cousin|woman|man|person|guy|girl|individual)\b/i.test(
       t,
     ) ||
-    /\b(?:a|the)\s+(woman|man|guy|girl|lady|gentleman)\b/i.test(t) ||
+    /\b(?:a|the)\s+(woman|man|guy|girl|lady|gentleman|individual)\b/i.test(t) ||
     /\b(?:a|the)\s+person who\b/i.test(t) ||
     /\b(with|from)\s+[A-Z][a-z]{1,24}\b/.test(t) ||
     ROLE_NOUN_APPOSED_NAME_RE.test(t) ||
+    ROLE_NOUN_INLINE_NAME_RE.test(t) ||
     LIKELY_NAME_IN_RELATION_RE.test(t)
   ) {
+    return true;
+  }
+
+  if (/\b(this|that|the|one)\s+individual\b/i.test(t)) {
     return true;
   }
 
@@ -70,7 +79,16 @@ export function moment4HasNamedOrReferencedPerson(text: string): boolean {
 
   /** Third-person pronoun tied to a concrete interpersonal action — e.g. "She shared…", "He lied…". */
   if (
-    /\b(?:she|he)\s+(?:was|were|shared|betrayed|told|said|texted|called|yelled|lied|cheated|ignored|abandoned|didn'?t|wouldn'?t|left|hurt|angered|cut|giving|pushing|inserting|used)\b/i.test(
+    /\b(?:she|he)\s+(?:was|were|has|had|shared|betrayed|told|said|texted|called|yelled|lied|cheated|ignored|abandoned|didn'?t|wouldn'?t|left|hurt|angered|cut|giving|pushing|inserting|used|acted|repeatedly)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+
+  /** Plural they/them when tied to concrete interpersonal behavior — e.g. "they acted… on a trip". */
+  if (
+    /\bthey\s+(?:was|were|has|had|have|shared|betrayed|told|said|texted|called|yelled|lied|cheated|ignored|abandoned|didn'?t|wouldn'?t|left|hurt|angered|cut|acted|repeatedly)\b/i.test(
       t,
     )
   ) {
@@ -100,6 +118,10 @@ export function moment4HasSpecificEventDescription(text: string): boolean {
       lower,
     ) ||
     /\b(i|we)\s+(went to|walked out|stopped talking|cut (him|her|them) off|moved in|moved out|moved to)\b/i.test(lower) ||
+    /\b(we|i)\s+don'?t talk\b/i.test(lower) ||
+    /\bdon'?t talk (anymore|any more|much|any longer)\b/i.test(lower) ||
+    /\b(didn'?t|doesn'?t|don'?t)\s+like\s+(my|his|her|their|the|that|this|it)\b/i.test(lower) ||
+    /\bwho (didn'?t|doesn'?t|don'?t|wouldn'?t|wasn'?t|hasn'?t|haven'?t)\b/i.test(lower) ||
     /\b(moved in with|moved out|lived with)\b/i.test(lower) ||
     /\b(cheated on|lied to|betrayed|broke up|split up|fell out|cut me off)\b/i.test(lower) ||
     /\b(coordinat|planning).{0,80}\b(vacation|visit|trip|event)\b/i.test(lower);

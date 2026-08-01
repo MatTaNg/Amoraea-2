@@ -11,6 +11,7 @@ import {
 import { isApprovedElongatingProbeOnly } from './elongatingProbe';
 import {
   looksLikeMicStopCutOffExemptFromMetaComment,
+  looksLikeInterviewProcessMetaComment,
   looksLikeRepairQuestionEchoAnswer,
 } from './interviewAnswerRelevance';
 import { looksLikeGoBackToPreviousScenarioRequest } from './interviewGoBackRequest';
@@ -23,6 +24,7 @@ import {
   withConfusionSubtype,
   wordCount,
 } from './metaCommentPatternScoring';
+import { classifyPriorAnswerMetaKind } from './interviewPriorAnswerMetaDetection';
 import type {
   ConfusionSubtype,
   MetaCommentClassification,
@@ -127,6 +129,10 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
 
   if (looksLikeRepairQuestionEchoAnswer(t)) return null;
 
+  if (looksLikeInterviewProcessMetaComment(t)) {
+    return { type: 'confusion', confidence: 0.95 };
+  }
+
   if (looksLikeGoBackToPreviousScenarioRequest(t)) return null;
 
   if (looksLikeInterviewScoreStatusRequest(t)) return null;
@@ -162,6 +168,13 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
           return withConfusionSubtype({ type: kind, confidence: scores[kind] }, t);
         }
       }
+    }
+    const priorMetaKind = classifyPriorAnswerMetaKind(t);
+    if (priorMetaKind === 'already_answered_claim') {
+      return withConfusionSubtype({ type: 'already_answered', confidence: 0.72 }, t);
+    }
+    if (priorMetaKind === 'sufficiency_check_in') {
+      return withConfusionSubtype({ type: 'checking_in', confidence: 0.72 }, t);
     }
     return withConfusionSubtype(
       { type: 'ambiguous_short', confidence: Math.max(0.35, bestWeak) },

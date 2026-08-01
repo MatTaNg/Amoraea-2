@@ -5,7 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { renderDealbreakerQuestionHighlight } from '@/shared/components/profileFields/dealbreakerQuestionHighlight';
-import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './SingleChoiceModal.styled';
 
@@ -54,7 +53,7 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
   const handleSelect = (optionValue: string) => {
     onValueChange(optionValue);
     if (autoAdvanceOnSelect && !hasSecondaryQuestion) {
-      deferAfterPaint(onNext);
+      onNext();
     }
   };
   const hasPrimarySelection = options.some((option) => option.value === value);

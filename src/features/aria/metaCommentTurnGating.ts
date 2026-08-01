@@ -10,6 +10,11 @@ import {
 } from '@features/aria/metaCommentClassificationTypes';
 import { classifyUserMetaComment } from '@features/aria/metaCommentClassifierCore';
 import {
+  evaluateHybridCutOffDetection,
+  shouldSuppressMetaForCutOffDetection,
+} from '@features/aria/interviewCutOffDetection';
+import type { UserTurnMicStopTelemetry } from '@features/aria/interviewCutOffDetectionTypes';
+import {
   isInterviewExitConfirmationMoment,
   isInterviewNameCollectionActive,
   isInterviewPreambleBriefingMoment,
@@ -77,6 +82,8 @@ export function resolveMetaCommentForInterviewTurn(
     resumeGatePending?: boolean;
     /** Prefer interview `countSpokenWords` when provided; else heuristic word count on `text`. */
     spokenWordCount?: number;
+    /** Optional Whisper/VAD telemetry from the turn that just finished recording. */
+    micStopTelemetry?: UserTurnMicStopTelemetry | null;
   }
 ): ResolvedMetaComment {
   const raw = classifyUserMetaComment(text);
@@ -115,6 +122,12 @@ export function resolveMetaCommentForInterviewTurn(
   const postMetaAckSeqWindow =
     ctx.suppressMetaClassificationPostMetaAckAwaitingSubstantive === true && wc < 8;
 
+  const cutOffSync = evaluateHybridCutOffDetection({
+    transcriptText: text,
+    telemetry: ctx.micStopTelemetry,
+  });
+  const suppressMetaForCutOff = shouldSuppressMetaForCutOffDetection(cutOffSync);
+
   let exemptMetaCommentTurn = false;
   let exemptMetaCommentTurnReason: ExemptMetaCommentTurnReason = 'no_exemption_condition_met';
 
@@ -136,7 +149,9 @@ export function resolveMetaCommentForInterviewTurn(
   } else if (
     postMetaAckSeqWindow &&
     !isExplicitRepeatRequestPreClassification(text) &&
-    !isConfusionRepeatRequestText(text)
+    !isConfusionRepeatRequestText(text) &&
+    raw?.type !== 'inability' &&
+    raw?.type !== 'skip_request'
   ) {
     exemptMetaCommentTurn = true;
     exemptMetaCommentTurnReason = 'seq_not_advanced_since_last_ack';
@@ -144,7 +159,8 @@ export function resolveMetaCommentForInterviewTurn(
     exemptMetaCommentTurnReason = 'no_exemption_condition_met';
   }
 
-  const effective = exemptMetaCommentTurn ? null : raw;
+  const effective =
+    exemptMetaCommentTurn || suppressMetaForCutOff ? null : raw;
   return { raw, effective, exemptMetaCommentTurn, exemptMetaCommentTurnReason };
 }
 
@@ -167,7 +183,7 @@ export function isCheckingInFrustrationAdjacent(args: {
       prior
     );
   const sharpCheckingIn =
-    /\b(did you get all that|was that enough|did that answer it|i already said all of that|i just explained all of that)\b/.test(
+    /\b(did you get all that|was that enough|wasn'?t that enough|(isn'?t|ain'?t) that enough|did that answer it|i already said all of that|i just explained all of that)\b/.test(
       current
     );
   return sharpCheckingIn || priorLong || priorPersonalOrEmotional || priorDetailedNarrative;

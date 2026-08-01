@@ -102,6 +102,10 @@ export interface StoredInterviewData {
   scenarioSkipConfirmedCount?: number;
   /** Last assessable question text at save time — used to replay question-only on resume. */
   lastQuestionText?: string | null;
+  /** Audio interrupt kind when navigation-away flush ran — avoids full scenario replay after recording interrupt. */
+  navigationAwayAudioInterrupt?: 'recording' | 'tts';
+  /** True when flush ran from AppState background (app switch / kill) rather than navigation blur. */
+  backgroundProgressFlush?: boolean;
 }
 
 /** Merge prior disk snapshot with a patch without dropping fields omitted from `patch` (partial saves). */

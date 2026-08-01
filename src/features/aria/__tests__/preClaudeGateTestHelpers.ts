@@ -136,6 +136,7 @@ export function createMockPreClaudeDeps(
     scenarioSkipConfirmedCountRef: mockRef(0),
     scenarioSkipPenaltySumRef: mockRef(0),
     lastUserTurnAudioDurationMsRef: mockRef(null),
+    lastUserTurnMicStopTelemetryRef: mockRef(null),
     lastVoiceTurnConfidenceRef: mockRef(null),
     lastVoiceTurnLanguageRef: mockRef(null),
     responseTimingsRef: mockRef([]),

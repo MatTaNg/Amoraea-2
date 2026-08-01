@@ -989,7 +989,10 @@ export function scenarioCRepairConstructStillPending(
     .filter(
       (m) => m.role === 'user' && (m.content ?? '').trim().length > 0 && !isDecline(m.content ?? ''),
     );
-  if (userTurnsAfterAnchor.length === 0) return false;
+  if (userTurnsAfterAnchor.length === 0) {
+    /** Sophie (or Q1) probe delivered — still waiting for the user's answer before repair/M4. */
+    return true;
+  }
   if (
     userTurnsAfterAnchor.some((m) =>
       scenarioCUserAnswerHasSubstantiveRepairContent((m.content ?? '').trim()),
@@ -1110,6 +1113,23 @@ export function transcriptContainsScenario3VignetteSetup(
   );
 }
 
+/** S2→S3 handoff deferral applies only during the S2 boundary — not when S3 is already active. */
+export function shouldDeferS2ToS3HandoffForSuppressedS3Q1(args: {
+  currentScenario: number | null | undefined;
+  effectiveActiveScenario: number | null;
+}): boolean {
+  return args.currentScenario !== 3 && args.effectiveActiveScenario !== 3;
+}
+
+/** Skip replaying the S2→S3 handoff bundle when Sophie/Daniel is already in progress. */
+export function shouldSkipS2ToS3HandoffReplayAtStreamEnd(args: {
+  currentScenario: number | null | undefined;
+  messages: ReadonlyArray<{ role: string; content?: string | null }>;
+}): boolean {
+  if (args.currentScenario === 3) return true;
+  return transcriptContainsScenario3VignetteSetup(args.messages);
+}
+
 /**
  * Block streaming S3 Q1 until the setup narrative was spoken or is present in the transcript.
  * Prevents jumping straight to Daniel's return line without Sophie/Daniel context.
@@ -1199,7 +1219,7 @@ export function resolveScenarioCNextProbeAfterSatisfiedQ1(
   const sophieProbeAsked = scenarioCSophiePerspectiveProbeAlreadyDelivered(messages);
   const sophieAnswered = scenarioCSophiePerspectiveAnsweredInTranscript(messages);
   const sophieInferred = messages.some(
-    (m) => m.role === 'user' && userAnswerSatisfiesScenarioCSophiePerspectiveProbe(m.content ?? ''),
+    (m) => m.role === 'user' && userAnswerHasSophiePerspectiveLanguage(m.content ?? ''),
   );
   if (!sophieProbeAsked && !sophieAnswered && !sophieInferred) {
     return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;

@@ -1,4 +1,8 @@
-import { runReplayLastQuestionAfterBackgroundInterrupt } from '@features/aria/runReplayLastQuestionAfterBackgroundInterrupt';
+import {
+  runReplayLastQuestionAfterBackgroundInterrupt,
+  runReplayWelcomeAfterInterviewReentry,
+  shouldOfferWelcomeOnReentry,
+} from '@features/aria/runReplayLastQuestionAfterBackgroundInterrupt';
 import type { InterviewMicLifecycleDeps } from '@features/aria/hooks/interviewMicLifecycleTypes';
 import {
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
@@ -7,6 +11,7 @@ import {
 import {
   acquireResumeWelcomePlaybackLock,
   isResumeWelcomePlaybackLocked,
+  peekMountResumeOwnsWelcomePlayback,
   releaseResumeWelcomePlaybackLock,
 } from '@features/aria/interviewLocalPersistence';
 import {
@@ -24,6 +29,7 @@ jest.mock('@features/aria/interviewLocalPersistence', () => {
     ...actual,
     wasResumeWelcomeSpoken: jest.fn(async () => false),
     markResumeWelcomeSpoken: jest.fn(async () => undefined),
+    peekMountResumeOwnsWelcomePlayback: jest.fn(() => false),
   };
 });
 
@@ -133,13 +139,72 @@ describe('runReplayLastQuestionAfterBackgroundInterrupt', () => {
     }
   });
 
-  it('replays last question only for regular TTS interrupt', async () => {
+  it('skips idle reentry welcome when mount resume hydration will own playback', async () => {
     const speakTextSafe = jest.fn(async () => undefined);
+    const deps = baseDeps({ speakTextSafe });
+    (peekMountResumeOwnsWelcomePlayback as jest.Mock).mockReturnValueOnce(true);
+
+    await runReplayWelcomeAfterInterviewReentry(
+      deps,
+      'foreground_after_app_background_idle',
+      null,
+    );
+
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('skips TTS-interrupt reentry when mount resume hydration will own playback', async () => {
+    const speakTextSafe = jest.fn(async () => undefined);
+    const deps = baseDeps({ speakTextSafe });
+    (peekMountResumeOwnsWelcomePlayback as jest.Mock).mockReturnValueOnce(true);
+
+    await runReplayLastQuestionAfterBackgroundInterrupt(deps, 'tts');
+
+    expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('offers welcome on idle app return even when resumeOfferWelcomeTtsRef is false', async () => {
+    const speakTextSafe = jest.fn(async () => undefined);
+    const expectedWelcome = buildResumeWelcomeMessage({
+      mode: 'replay_incomplete',
+      resumeScenario: 1,
+      lastQuestionText: 'What happened next?',
+    });
+    const deps = baseDeps({
+      resumeOfferWelcomeTtsRef: { current: false },
+      speakTextSafe,
+    });
+
+    expect(shouldOfferWelcomeOnReentry(deps)).toBe(true);
+
+    await runReplayWelcomeAfterInterviewReentry(
+      deps,
+      'foreground_after_app_background_idle',
+      null,
+    );
+
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expectedWelcome,
+      expect.objectContaining({ telemetrySource: 'greeting' }),
+    );
+  });
+
+  it('replays welcome (with embedded last question) on regular TTS interrupt mid-interview', async () => {
+    const speakTextSafe = jest.fn(async () => undefined);
+    const expectedWelcome = buildResumeWelcomeMessage({
+      mode: 'replay_incomplete',
+      resumeScenario: 1,
+      lastQuestionText: 'What happened next?',
+    });
     const deps = baseDeps({ speakTextSafe });
 
     await runReplayLastQuestionAfterBackgroundInterrupt(deps, 'tts');
 
     expect(speakTextSafe).toHaveBeenCalledWith(
+      expectedWelcome,
+      expect.objectContaining({ telemetrySource: 'greeting' }),
+    );
+    expect(speakTextSafe).not.toHaveBeenCalledWith(
       'What happened next?',
       expect.objectContaining({ telemetrySource: 'replay' }),
     );

@@ -6,6 +6,7 @@ import {
 } from '@utilities/persistPersonalMomentScoresIncremental';
 import { runPreClaudeFrustrationSkipAcceptanceGate } from '@features/aria/runPreClaudeFrustrationSkipAcceptanceGate';
 import { runPreClaudeFrustrationSkipDeclineGate } from '@features/aria/runPreClaudeFrustrationSkipDeclineGate';
+import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/probeAndScoringUtils';
 import { createMockPreClaudeDeps } from './preClaudeGateTestHelpers';
 
 jest.mock('@utilities/sessionLogging', () => ({
@@ -167,9 +168,21 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
     expect(result).toEqual({ haltTurn: true });
     expect(deps.frustrationSkipOfferPendingRef.current).toBe(false);
     expect(deps.inabilityCountByMomentRef.current[2]).toBe(0);
-    const spoken = String(speakTextSafe.mock.calls[0]?.[0] ?? '');
-    expect(spoken).toMatch(/stay on this one/i);
-    expect(spoken).not.toMatch(/—|–|_/);
+    expect(speakTextSafe).toHaveBeenCalledTimes(2);
+    expect(speakTextSafe).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/stay on this one/i),
+      expect.objectContaining({
+        skipLastQuestionRef: true,
+        skipQuestionDeliveredTelemetry: true,
+        allowDuplicateConsecutiveTts: true,
+      }),
+    );
+    expect(speakTextSafe).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/What is going on between these two/i),
+      expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
+    );
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
@@ -178,5 +191,46 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
         }),
       ]),
     );
+  });
+
+  it('re-asks the pending scenario question after skip decline encouragement', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const repairQ = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+    const messages = [
+      { role: 'assistant', content: repairQ, scenarioNumber: 1 },
+      { role: 'user', content: "I don't know", scenarioNumber: 1 },
+      { role: 'user', content: 'No.', scenarioNumber: 1 },
+    ];
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 1 },
+      currentScenarioRef: { current: 1 },
+      lastQuestionTextRef: { current: repairQ },
+      frustrationSkipOfferPendingRef: { current: true },
+      scenarioSkipOfferSourceRef: { current: 'inability_escalation' },
+      inabilityCountByMomentRef: { current: { 1: 1 } },
+      speakTextSafe,
+      setMessages,
+    });
+
+    const result = await runPreClaudeFrustrationSkipDeclineGate(deps, messages);
+
+    expect(result).toEqual({ haltTurn: true });
+    expect(speakTextSafe).toHaveBeenCalledTimes(2);
+    expect(speakTextSafe).toHaveBeenNthCalledWith(
+      1,
+      expect.stringMatching(/stay on this one/i),
+      expect.objectContaining({
+        skipLastQuestionRef: true,
+        skipQuestionDeliveredTelemetry: true,
+        allowDuplicateConsecutiveTts: true,
+      }),
+    );
+    expect(speakTextSafe).toHaveBeenNthCalledWith(
+      2,
+      expect.stringMatching(/If you were Ryan, how would you repair this/i),
+      expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
+    );
+    expect(deps.lastQuestionTextRef.current).toBe(repairQ);
   });
 });

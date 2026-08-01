@@ -6,7 +6,6 @@ import { Button } from '@/shared/ui/Button';
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { getHobbiesByIds } from '@/shared/constants/hobbies';
 import { hobbiesStringToIds } from '@/shared/utils/hobbiesHelpers';
-import { deferAfterPaint } from '@/shared/utils/deferAfterPaint';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './HobbyDealbreakerOnboardingModal.styled';
 
@@ -51,7 +50,7 @@ export const HobbyDealbreakerOnboardingModal: React.FC<HobbyDealbreakerOnboardin
   const handleSelect = useCallback(
     (next: string) => {
       onHobbyDealbreakerChange(next === HOBBY_DEALBREAKER_NONE_VALUE ? null : next);
-      deferAfterPaint(onNext);
+      onNext();
     },
     [onHobbyDealbreakerChange, onNext],
   );

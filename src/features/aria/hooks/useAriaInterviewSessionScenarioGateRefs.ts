@@ -45,6 +45,9 @@ export function useAriaInterviewSessionScenarioGateRefs() {
   const s2RepairProbeDeliveredRef = useRef(false);
   const s3RepairProbeDeliveredRef = useRef(false);
   const lastUserTurnAudioDurationMsRef = useRef<number | null>(null);
+  const lastUserTurnMicStopTelemetryRef = useRef<
+    import('@features/aria/interviewCutOffDetectionTypes').UserTurnMicStopTelemetry | null
+  >(null);
   const turnAudioIndexRef = useRef(0);
   const responseTimingsRef = useRef<
     Array<{
@@ -93,6 +96,7 @@ export function useAriaInterviewSessionScenarioGateRefs() {
     s2RepairProbeDeliveredRef,
     s3RepairProbeDeliveredRef,
     lastUserTurnAudioDurationMsRef,
+    lastUserTurnMicStopTelemetryRef,
     turnAudioIndexRef,
     responseTimingsRef,
   };

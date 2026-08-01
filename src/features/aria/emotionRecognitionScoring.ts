@@ -275,6 +275,57 @@ export function resolveEmotionRecognitionRawScoreForGate(params: {
   return null;
 }
 
+/**
+ * Gate / modifier input: returns correct count (0–3) for complete batteries only.
+ * Prefer {@link emotionRecognitionResponses} when available.
+ */
+export function resolveEmotionRecognitionCorrectCountForGate(params: {
+  emotionRecognitionRawScore?: number | null;
+  emotionRecognitionCorrectCount?: 0 | 1 | 2 | 3 | null;
+  emotionRecognitionResponses?: unknown;
+}): 0 | 1 | 2 | 3 | null {
+  const hydrated =
+    params.emotionRecognitionResponses != null
+      ? hydrateEmotionResponsesFromStorage(params.emotionRecognitionResponses)
+      : null;
+  if (hydrated != null && !isEmotionRecognitionBatteryComplete(hydrated)) {
+    return null;
+  }
+  if (hydrated != null && isEmotionRecognitionBatteryComplete(hydrated)) {
+    const fromResponses = emotionRecognitionCorrectCountFromResponses(hydrated);
+    if (fromResponses !== null) return fromResponses;
+  }
+  const r = params.emotionRecognitionRawScore;
+  if (typeof r === 'number' && Number.isFinite(r)) {
+    const stored = storedEmotionCorrectCountFromRaw(r);
+    if (stored !== null) return stored;
+    const legacy = legacyEmotionProportionFromRaw(r);
+    if (legacy !== null) return Math.round(legacy * EXPECTED_EMOTION_RECOGNITION_ITEMS) as 0 | 1 | 2 | 3;
+    return null;
+  }
+  if (typeof r === 'string' && String(r).trim() !== '') {
+    const n = Number(String(r).trim());
+    if (!Number.isFinite(n)) return null;
+    const stored = storedEmotionCorrectCountFromRaw(n);
+    if (stored !== null) return stored;
+    const legacy = legacyEmotionProportionFromRaw(n);
+    if (legacy !== null) return Math.round(legacy * EXPECTED_EMOTION_RECOGNITION_ITEMS) as 0 | 1 | 2 | 3;
+    return null;
+  }
+  const c = params.emotionRecognitionCorrectCount;
+  if (c === null || c === undefined) return null;
+  if (typeof c === 'string' && String(c).trim() !== '') {
+    const n = parseInt(String(c).trim(), 10);
+    if (Number.isFinite(n) && n >= 0 && n <= 3) return n as 0 | 1 | 2 | 3;
+  }
+  if (typeof c === 'number' && Number.isFinite(c)) {
+    const stored = storedEmotionCorrectCountFromRaw(c);
+    if (stored !== null) return stored;
+    if (c >= 0 && c <= 3) return Math.round(c) as 0 | 1 | 2 | 3;
+  }
+  return null;
+}
+
 /** Attempts that failed solely on the removed emotion recognition hard floor (manual review). */
 export function isLegacyEmotionRecognitionFloorOnlyFail(attempt: {
   passed?: boolean | null;

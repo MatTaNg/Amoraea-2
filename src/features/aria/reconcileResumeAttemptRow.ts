@@ -5,6 +5,7 @@ import { clearInterviewFromStorage, saveInterviewToStorage } from '@utilities/st
 import {
   lastFullyCompletedScenario,
   inferLatestScenarioIntroFromTranscript,
+  shouldResumeMidInterviewFromSaved,
 } from '@utilities/interviewResumeCursor';
 import type { SavedInterviewSnapshot } from '@utilities/storage/InterviewStorage';
 
@@ -62,7 +63,9 @@ export async function reconcileResumeAttemptRow(params: {
     const userTurns = saved.messages?.filter((m) => m.role === 'user').length ?? 0;
     const lastDone = lastFullyCompletedScenario(saved.scenariosCompleted ?? [], saved.scenarioScores);
     const inferredScenario = inferLatestScenarioIntroFromTranscript(saved.messages ?? []);
+    const resumableMidInterview = shouldResumeMidInterviewFromSaved(saved);
     const hasSubstantialLocalProgress =
+      resumableMidInterview ||
       userTurns >= 2 ||
       (saved.scenariosCompleted?.length ?? 0) > 0 ||
       lastDone > 0 ||
@@ -70,6 +73,25 @@ export async function reconcileResumeAttemptRow(params: {
       saved.resumeActiveScenario === 3 ||
       inferredScenario === 2 ||
       inferredScenario === 3;
+    if (resumableMidInterview && !bootstrapAttemptId && savedAttemptId) {
+      interviewSessionAttemptIdRef.current = null;
+      await saveInterviewToStorage(userId, {
+        ...saved,
+        sessionAttemptId: undefined,
+      });
+      await remoteLog('[resume] dropped_orphan_session_attempt_id_kept_local_progress', {
+        orphanAttemptId: savedAttemptId,
+        userTurns,
+        resumeActiveFromStorage: saved.resumeActiveScenario ?? null,
+      });
+      return {
+        kind: 'continue',
+        planAttemptMismatch: false,
+        resumeAttemptResumeScenario,
+        resumeAttemptEmotionResponses,
+        didOrphanAttemptRebind,
+      };
+    }
     if (bootstrapAttemptId && hasSubstantialLocalProgress) {
       didOrphanAttemptRebind = true;
       planAttemptMismatch = false;

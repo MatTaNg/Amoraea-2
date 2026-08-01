@@ -50,6 +50,7 @@ import {
 import {
   buildScenarioBoundaryLeadForInterview,
 } from '@features/aria/interviewTransitionBundles';
+import { resolveScenarioBoundaryLeadForInterview } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { resolveScenarioUserTextForBoundaryReflection } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import {
   reflectionLooksLikeGenericScenarioTheme,
@@ -222,33 +223,110 @@ export function completedScenarioForShowScenarioCardKind(
   return null;
 }
 
+/** Scenario number opened by a situation_* card (not moment_4/5). */
+function showScenarioCardKindOpensScenarioNumber(kind: ShowScenarioCardKind): number | null {
+  switch (kind) {
+    case 'situation_1':
+      return 1;
+    case 'situation_2':
+      return 2;
+    case 'situation_3':
+      return 3;
+    default:
+      return null;
+  }
+}
+
+function fullStreamLooksLikeScenarioBoundaryHandoff(fullStream: string): boolean {
+  const t = stripControlTokens(fullStream).trim();
+  if (!t) return false;
+  return (
+    hasScenarioBoundaryWrapPhrase(t) ||
+    /\bhere'?s the next situation\b/i.test(t) ||
+    /\bhere'?s the third situation\b/i.test(t) ||
+    (/\b(?:first|second|third) situation\b/i.test(t) && /\b(?:nice|good) work\b/i.test(t))
+  );
+}
+
+/** Blocks mid-scenario redirects from replaying earlier (or same) scenario cards. */
+export function isShowScenarioCardKindAllowedForInterviewProgress(args: {
+  kind: ShowScenarioCardKind;
+  interviewScenario?: number | null;
+  interviewMoment?: number | null;
+  fullStream: string;
+}): boolean {
+  const opens = showScenarioCardKindOpensScenarioNumber(args.kind);
+  const current = args.interviewScenario ?? 1;
+
+  if (opens == null) {
+    if (args.kind === 'moment_4') return current >= 3;
+    if (args.kind === 'moment_5') return (args.interviewMoment ?? 1) >= 5;
+    return true;
+  }
+
+  if (opens < current) return false;
+  if (opens === current + 1) return true;
+  if (opens === current) {
+    if (opens === 1 && current === 1 && (args.interviewMoment ?? 1) === 1) {
+      return true;
+    }
+    return fullStreamLooksLikeScenarioBoundaryHandoff(args.fullStream);
+  }
+  return fullStreamLooksLikeScenarioBoundaryHandoff(args.fullStream);
+}
+
+function clampResolvedShowScenarioCardKind(
+  args: {
+    fullStream: string;
+    interviewMoment?: number;
+    interviewScenario?: number;
+  },
+  kind: ShowScenarioCardKind | null,
+): ShowScenarioCardKind | null {
+  if (!kind) return null;
+  if (
+    !isShowScenarioCardKindAllowedForInterviewProgress({
+      kind,
+      interviewScenario: args.interviewScenario,
+      interviewMoment: args.interviewMoment,
+      fullStream: args.fullStream,
+    })
+  ) {
+    return null;
+  }
+  return kind;
+}
+
 export function resolveShowScenarioCardKindForInterview(args: {
   fullStream: string;
   interviewMoment?: number;
   interviewScenario?: number;
 }): ShowScenarioCardKind | null {
-  const kind = detectShowScenarioCardKind(args.fullStream);
-  if (kind) return kind;
+  const detected = detectShowScenarioCardKind(args.fullStream);
+  if (detected) {
+    const clamped = clampResolvedShowScenarioCardKind(args, detected);
+    if (clamped) return clamped;
+  }
   if (
     args.interviewMoment === 2 &&
     args.interviewScenario === 2 &&
     textContainsScenario2VignetteMarkers(args.fullStream)
   ) {
-    return 'situation_2';
+    return clampResolvedShowScenarioCardKind(args, 'situation_2');
   }
   if (
     args.interviewMoment === 1 &&
     /here'?s the next situation/i.test(args.fullStream) &&
     textContainsScenario2VignetteMarkers(args.fullStream)
   ) {
-    return 'situation_2';
+    return clampResolvedShowScenarioCardKind(args, 'situation_2');
   }
   if (
     args.interviewMoment === 1 &&
     args.interviewScenario === 1 &&
     textContainsScenario1VignetteMarkers(args.fullStream)
   ) {
-    return 'situation_1';
+    return clampResolvedShowScenarioCardKind(args, 'situation_1');
   }
   if (
     args.interviewScenario === 1 &&
@@ -256,14 +334,14 @@ export function resolveShowScenarioCardKindForInterview(args: {
     (hasScenarioBoundaryWrapPhrase(args.fullStream) ||
       /\bhere'?s the next situation\b/i.test(args.fullStream))
   ) {
-    return 'situation_2';
+    return clampResolvedShowScenarioCardKind(args, 'situation_2');
   }
   if (
     args.interviewMoment === 2 &&
     args.interviewScenario === 2 &&
     textContainsScenario3VignetteMarkers(args.fullStream)
   ) {
-    return 'situation_3';
+    return clampResolvedShowScenarioCardKind(args, 'situation_3');
   }
   if (
     args.interviewScenario === 2 &&
@@ -272,14 +350,14 @@ export function resolveShowScenarioCardKindForInterview(args: {
       /\bhere'?s the third situation\b/i.test(args.fullStream) ||
       /\bthat scenario is complete\b/i.test(args.fullStream))
   ) {
-    return 'situation_3';
+    return clampResolvedShowScenarioCardKind(args, 'situation_3');
   }
   if (
     args.interviewMoment === 2 &&
     args.interviewScenario === 3 &&
     textContainsScenario3VignetteMarkers(args.fullStream)
   ) {
-    return 'situation_3';
+    return clampResolvedShowScenarioCardKind(args, 'situation_3');
   }
   if (
     args.interviewScenario === 3 &&
@@ -289,7 +367,7 @@ export function resolveShowScenarioCardKindForInterview(args: {
       (args.interviewMoment === 3 &&
         isPrematureStandaloneM4PersonalTransitionLine(args.fullStream)))
   ) {
-    return 'moment_4';
+    return clampResolvedShowScenarioCardKind(args, 'moment_4');
   }
   return null;
 }
@@ -544,6 +622,30 @@ export function resolveClientScenarioBoundaryPrefixForCanonicalTts(args: {
   return clientLead;
 }
 
+/** Async variant — tries Claude ack+transition when enabled, else static lead. */
+export async function resolveClientScenarioBoundaryPrefixForCanonicalTtsAsync(args: {
+  kind: ShowScenarioCardKind;
+  messages: ReadonlyArray<{ role: string; content?: string; scenarioNumber?: number }>;
+  firstName: string;
+  extractedPrefix: string;
+  interviewSessionId?: string | null;
+}): Promise<string> {
+  const completingScenario =
+    args.kind === 'situation_2' ? 1 : args.kind === 'situation_3' ? 2 : args.kind === 'moment_4' ? 3 : null;
+  if (!completingScenario) return args.extractedPrefix.trim();
+  const userCorpus = resolveScenarioUserTextForBoundaryReflection(
+    args.messages as Parameters<typeof resolveScenarioUserTextForBoundaryReflection>[0],
+    completingScenario,
+  );
+  const { lead } = await resolveScenarioBoundaryLeadForInterview({
+    completedScenario: completingScenario,
+    firstName: args.firstName,
+    lastUserAnswer: userCorpus || null,
+    interviewSessionId: args.interviewSessionId,
+  });
+  return lead;
+}
+
 export function composeShowScenarioCardTtsWithTransitionPrefix(args: {
   prefix: string;
   canonicalText: string;
@@ -616,6 +718,16 @@ export function streamAlreadySpokeScenarioBoundaryClosingLead(
     return (
       /\bthat scenario is complete\b/.test(streamLower) ||
       /\bsecond one done\b/.test(streamLower) ||
+      /\bsecond situation wrapped up\b/.test(streamLower) ||
+      (/\bthat'?s the second situation\b/.test(streamLower) &&
+        /\bwrapped up\b/.test(streamLower)) ||
+      (/\bon to the next one\b/.test(streamLower) &&
+        /\b(?:second|wrapped up|second situation)\b/.test(streamLower)) ||
+      /\bwraps up sarah and james\b/.test(streamLower) ||
+      /\bthird and final situation\b/.test(streamLower) ||
+      (/\bon to the third\b/.test(streamLower) && /\bsituation\b/.test(streamLower)) ||
+      (/\bthat wraps up\b/.test(streamLower) &&
+        /\b(?:sarah and james|second situation|second one)\b/.test(streamLower)) ||
       /\bone more situation and then we'?ll get personal\b/.test(streamLower) ||
       (/\bnice work\b/.test(streamLower) &&
         (/\bthird situation\b/.test(streamLower) || /\bget personal\b/.test(streamLower)))
@@ -745,6 +857,21 @@ export function isShowScenarioCardCanonicalPlaybackConfirmed(
   kind: ShowScenarioCardKind,
 ): boolean {
   return confirmed?.[kind] === true;
+}
+
+/** Skip replaying Situation 3 when Sophie/Daniel is already in progress (mid-scenario follow-ups). */
+export function shouldSkipSituation3CanonicalReplay(args: {
+  currentScenario?: number | null;
+  messages: ReadonlyArray<{ role: string; content?: string | null }>;
+  playbackConfirmedKinds: ShowScenarioCardCanonicalPlaybackConfirmedKinds;
+}): boolean {
+  if (isShowScenarioCardCanonicalPlaybackConfirmed(args.playbackConfirmedKinds, 'situation_3')) {
+    return true;
+  }
+  if ((args.currentScenario ?? 0) >= 3 && transcriptContainsScenario3VignetteSetup(args.messages)) {
+    return true;
+  }
+  return false;
 }
 
 /** Skip replaying the Situation 1 opening card after contempt/repair or when opening TTS already confirmed. */

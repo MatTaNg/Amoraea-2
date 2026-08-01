@@ -8,7 +8,7 @@ import {
 import {
   shouldAdvanceScenarioAAfterSatisfiedRepair,
 } from '@features/aria/interviewDisengagementProbes';
-import { isScenarioCRepairAssistantPrompt, isScenarioCBoundaryReflectionWithoutMoment4Handoff, isScenarioCQ1Prompt, looksLikeScenarioCSophiePerspectiveQuestion, looksLikeScenarioCSophieRolePlayMisparaphraseQuestion, looksLikeScenarioCSophieReceiveMisparaphraseQuestion, scenarioCRepairConstructStillPending, scenarioCUserAnswerHasSubstantiveRepairContent, scenarioCUserAnswerSatisfiesRepairQuestionAnswer } from '@features/aria/scenarioCPromptDetection';
+import { isScenarioCRepairAssistantPrompt, isScenarioCBoundaryReflectionWithoutMoment4Handoff, isScenarioCQ1Prompt, looksLikeScenarioCRepairWithUserAnswerEcho, looksLikeScenarioCSophiePerspectiveQuestion, looksLikeScenarioCSophieRolePlayMisparaphraseQuestion, looksLikeScenarioCSophieReceiveMisparaphraseQuestion, scenarioCRepairConstructStillPending, scenarioCUserAnswerHasSubstantiveRepairContent, scenarioCUserAnswerSatisfiesRepairQuestionAnswer } from '@features/aria/scenarioCPromptDetection';
 import { isScenarioModalFollowUpProbe } from '@features/aria/interviewScenarioModalPrompt';
 import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
 import { userAnswerHasSophiePerspectiveLanguage } from '@features/aria/interviewMentalizingAndAnswerSignals';
@@ -110,6 +110,12 @@ export function shouldAdvanceScenarioCAfterSatisfiedDanielRepair(
   if (!draft) return true;
   if (isScenarioModalFollowUpProbe(draft)) return true;
   if (isShortAckOnlySentence(draft)) return true;
+  if (
+    isScenarioCRepairAssistantPrompt(draft) ||
+    looksLikeScenarioCRepairWithUserAnswerEcho(draft)
+  ) {
+    return true;
+  }
 
   return false;
 }

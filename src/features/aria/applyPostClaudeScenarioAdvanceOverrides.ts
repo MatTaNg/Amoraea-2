@@ -10,6 +10,10 @@ import {
   resolveScenarioUserTextForBoundaryReflection,
 } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import { buildScenario2To3BundleForInterview } from '@features/aria/interviewTransitionBundles';
+import {
+  enrichScenarioBoundaryHandoffBundleWithDynamicLead,
+  parseScenarioCompleteAdvanceBundle,
+} from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { shouldReplaceScenarioBRepairWithSkipAndScenario3Transition } from '@features/aria/probeAndScoringUtils';
 import { remoteLog } from '@utilities/remoteLog';
 
@@ -19,8 +23,7 @@ export type PostClaudeScenarioAdvanceOverridesResult = {
   priorAssistantContentS3: string;
 };
 
-/** Canonical scenario-complete tokens when repair satisfaction or incomplete boundary wraps apply. */
-export function applyPostClaudeScenarioAdvanceOverrides(
+function applyPostClaudeScenarioAdvanceOverridesSync(
   text: string,
   params: PostClaudeAssistantTurnParams,
   deps: PostClaudeAssistantTurnDeps,
@@ -64,5 +67,39 @@ export function applyPostClaudeScenarioAdvanceOverrides(
     text: nextText,
     strippedText,
     priorAssistantContentS3,
+  };
+}
+
+/** Canonical scenario-complete tokens when repair satisfaction or incomplete boundary wraps apply. */
+export function applyPostClaudeScenarioAdvanceOverrides(
+  text: string,
+  params: PostClaudeAssistantTurnParams,
+  deps: PostClaudeAssistantTurnDeps,
+  messagesToUse: PostClaudeInterviewMessage[],
+): PostClaudeScenarioAdvanceOverridesResult {
+  return applyPostClaudeScenarioAdvanceOverridesSync(text, params, deps, messagesToUse);
+}
+
+/** Async variant — enriches injected `[SCENARIO_COMPLETE:N]` bundles with dynamic boundary leads. */
+export async function applyPostClaudeScenarioAdvanceOverridesAsync(
+  text: string,
+  params: PostClaudeAssistantTurnParams,
+  deps: PostClaudeAssistantTurnDeps,
+  messagesToUse: PostClaudeInterviewMessage[],
+): Promise<PostClaudeScenarioAdvanceOverridesResult> {
+  const sync = applyPostClaudeScenarioAdvanceOverridesSync(text, params, deps, messagesToUse);
+  if (!parseScenarioCompleteAdvanceBundle(sync.text)) {
+    return sync;
+  }
+  const enriched = await enrichScenarioBoundaryHandoffBundleWithDynamicLead({
+    bundleText: sync.text,
+    firstName: params.participantFirstNameForSpoken,
+    messages: messagesToUse,
+    interviewSessionId: deps.interviewSessionIdRef.current,
+  });
+  return {
+    ...sync,
+    text: enriched,
+    strippedText: stripControlTokens(enriched),
   };
 }

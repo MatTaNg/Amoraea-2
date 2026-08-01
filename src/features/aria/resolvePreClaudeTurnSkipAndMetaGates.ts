@@ -27,11 +27,11 @@ export type PreClaudeTurnSkipAndMetaGateResult = {
 };
 
 /** Frustration/proactive skip pipelines, meta-comment classification, and related telemetry. */
-export function resolvePreClaudeTurnSkipAndMetaGates(
+export async function resolvePreClaudeTurnSkipAndMetaGates(
   deps: PreClaudeTurnGateDeps,
   trimmed: string,
   resumeGatePendingEarly: boolean,
-): PreClaudeTurnSkipAndMetaGateResult {
+): Promise<PreClaudeTurnSkipAndMetaGateResult> {
   const frustrationSkip = resolvePreClaudeFrustrationSkipGates(deps, trimmed);
   return resolvePreClaudeMetaCommentGateState(
     deps,

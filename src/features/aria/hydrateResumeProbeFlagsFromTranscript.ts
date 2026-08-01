@@ -29,12 +29,10 @@ import { extractInterviewNameFromTranscript } from '@features/aria/interviewName
 import { resolvePlausibleInterviewFirstName } from '@features/aria/interviewNameValidation';
 import { remoteLog } from '@utilities/remoteLog';
 import type { SavedInterviewSnapshot } from '@utilities/storage/InterviewStorage';
-import { transcriptContainsScenario3VignetteSetup } from '@features/aria/scenarioCPromptDetection';
 import {
-  type ShowScenarioCardKind,
   type ShowScenarioCardCanonicalPlaybackConfirmedKinds,
-  transcriptContainsCanonicalShowScenarioCardBody,
 } from '@features/aria/showScenarioCardCanonicalTts';
+import { hydrateShowScenarioCardPlaybackConfirmedFromStorage } from '@features/aria/scenarioDeliveryResumeCheckpoint';
 
 type ResumeProbeDeps = Pick<
   HandleResumeDeps,
@@ -166,25 +164,10 @@ export function hydrateResumeProbeFlagsFromTranscript(
   }
   deps.scenarioAContemptProbeTtsDeliveredSessionRef.current = scenarioAContemptProbePreviouslyAsked;
   deps.scenarioAContemptProbePlaybackConfirmedRef.current = scenarioAContemptProbePreviouslyAsked;
-  const showScenarioCardKinds: ShowScenarioCardKind[] = [
-    'situation_1',
-    'situation_2',
-    'situation_3',
-    'moment_4',
-    'moment_5',
-  ];
-  const playbackConfirmedKinds: ShowScenarioCardCanonicalPlaybackConfirmedKinds = {};
-  for (const kind of showScenarioCardKinds) {
-    if (kind === 'situation_3') {
-      if (transcriptContainsScenario3VignetteSetup(transcriptMessages)) {
-        playbackConfirmedKinds[kind] = true;
-      }
-      continue;
-    }
-    if (transcriptContainsCanonicalShowScenarioCardBody(transcriptMessages, kind)) {
-      playbackConfirmedKinds[kind] = true;
-    }
-  }
+  const playbackConfirmedKinds: ShowScenarioCardCanonicalPlaybackConfirmedKinds = {
+    ...hydrateShowScenarioCardPlaybackConfirmedFromStorage(saved.scenarioOpeningDeliveredFor),
+    ...deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current,
+  };
   deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = playbackConfirmedKinds;
   const scenarioOneFollowUp = scenarioOneFollowUpFlagsFromTranscript(transcriptMessages);
   deps.scenarioARepairQuestionAskedRef.current = scenarioOneFollowUp.repairQuestionAsked;

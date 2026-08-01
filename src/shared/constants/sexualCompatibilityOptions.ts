@@ -5,11 +5,8 @@ export const SEX_DRIVE_OPTIONS = [
   { label: 'A few times a month', value: 'A few times a month' },
 ];
 
-export const DATING_PACE_AFTER_EXCITEMENT_OPTIONS = [
-  'Slow and gradual',
-  'Steady and consistent',
-  "Fast when there's strong chemistry",
-].map((label) => ({ label, value: label }));
+export const RECENT_DATING_EARLY_WEEKS_QUESTION =
+  'Think about your most recent dating experience. In the first 2–3 weeks, how often did you see each other?';
 
 export const RECENT_DATING_EARLY_WEEKS_OPTIONS = [
   'We saw each other occasionally and took it slow',

@@ -47,6 +47,7 @@ export function buildInterviewResponseTimingEntry(
     }
   }
   deps.lastUserTurnAudioDurationMsRef.current = null;
+  deps.lastUserTurnMicStopTelemetryRef.current = null;
 
   const wordCount = trimmed.split(/\s+/).filter(Boolean).length;
   const momentNumForTiming = deps.currentInterviewMomentRef.current;

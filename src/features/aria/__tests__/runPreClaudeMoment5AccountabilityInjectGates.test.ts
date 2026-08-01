@@ -72,6 +72,27 @@ describe('runPreClaudeMoment5AccountabilityInjectGates', () => {
     expect(result).toEqual({ handled: false, moment5CombinedUserText: expect.any(String) });
   });
 
+  it('defers M5 inject gates when user asks to skip/advance (skip_request meta)', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = baseMoment5Deps({ speakTextSafe });
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: "What's the next one?", interviewMoment: 5 },
+    ];
+
+    const result = await runPreClaudeMoment5AccountabilityInjectGates(
+      deps,
+      "What's the next one?",
+      messagesToUse,
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      { type: 'skip_request', confidence: 0.89 },
+    );
+
+    expect(result).toEqual({ handled: false, moment5CombinedUserText: "What's the next one?" });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(deps.moment5SpecificityRedirectIssuedRef.current).toBe(false);
+  });
+
   it('fires accountability probe when model delivered M5 but delivery refs were stale', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = baseMoment5Deps({

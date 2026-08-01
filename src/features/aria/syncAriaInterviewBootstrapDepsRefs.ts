@@ -104,6 +104,8 @@ export function syncCheckInterviewStatusDeps(
     interviewStatusRef: ctx.interviewStatusRef,
     isInterviewCompleteRef: ctx.isInterviewCompleteRef,
     statusRef: ctx.statusRef,
+    resumeLoadingFlowActiveRef: ctx.resumeLoadingFlowActiveRef,
+    hasResumedRef: ctx.hasResumedRef,
     interviewSessionIdRef: ctx.interviewSessionIdRef,
     userInterviewRoutingTable: ctx.userInterviewRoutingTable,
     userInterviewPassSelect: ctx.userInterviewPassSelect,

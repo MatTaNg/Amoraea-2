@@ -191,6 +191,7 @@ export type StartInterviewDeps = {
   lastVoiceTurnLanguageRef: MutableRefObject<string | null>;
   lastVoiceTurnConfidenceRef: MutableRefObject<number | null>;
   currentScenarioRef: MutableRefObject<number | null>;
+  interviewUserTurnEpochRef?: MutableRefObject<number>;
   setSessionLogPlatform: (platform: SessionPlatform | null) => void;
   setAudioSessionDeviceSnapshot: (snapshot: DeviceSnapshot) => void;
   setLastInterviewDeviceEnvironment: (env: InterviewDeviceEnvironmentPayload) => void;

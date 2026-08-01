@@ -10,10 +10,14 @@ import { syncInterviewMomentsFromTranscript } from '@features/aria/interviewProg
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import {
   hydrateShowScenarioCardPlaybackConfirmedFromStorage,
+  lastQuestionTextIndicatesScenarioOpeningDelivered,
   resolveScenarioResumeIntroBodyForReplay,
+  transcriptHasCommittedScenarioOpeningQuestionAfterIntro,
   transcriptHasScenarioOpeningQuestionDelivered,
+  resumeScenarioOpeningWasHeardBeforeExit,
 } from '@features/aria/scenarioDeliveryResumeCheckpoint';
-import { getScenarioResumeIntroAssistantBody } from '@features/aria/interviewScenarioVignetteCopy';
+import { getScenarioResumeIntroAssistantBody, buildScenarioResumeReplaySpokenBody } from '@features/aria/interviewScenarioVignetteCopy';
+import { messageAnchorsScenarioIntro } from '@features/aria/scenarioNumberDetection';
 import {
   reconcileResumeAttemptRow,
   syncResumeAttemptIdForSessionLogs,
@@ -23,8 +27,12 @@ import {
   restoreResumeScoredScenariosRef,
 } from '@features/aria/restoreResumeScenarioDisplayState';
 import { runHydratePostClosingFromSaved } from '@features/aria/runHydratePostClosingFromSaved';
+import { runCoalescedInterviewResume } from '@features/aria/interviewResumeHandleCoordinator';
+import {
+  clearResumeWelcomePlaybackLock,
+  bumpResumeWelcomePlaybackGeneration,
+} from '@features/aria/interviewLocalPersistence';
 import type { HandleResumeDeps, HandleResumeParams } from '@features/aria/sessionLifecycleTypes';
-import { clearResumeWelcomePlaybackLock, bumpResumeWelcomePlaybackGeneration } from '@features/aria/interviewLocalPersistence';
 import { remoteLog } from '@utilities/remoteLog';
 import {
   assignScenarioNumbersToTranscript,
@@ -42,13 +50,34 @@ import {
 import { isScenarioABoundaryReflectionWithoutNextVignette } from '@features/aria/scenarioAContemptProbeTextMatch';
 import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
 import { isScenarioBBoundaryReflectionWithoutNextVignette } from '@features/aria/scenarioBProbeLogic';
-import { isScenarioCQ1Prompt } from '@features/aria/scenarioCPromptDetection';
+import { isScenarioCQ1Prompt, scenarioCRepairConstructStillPending } from '@features/aria/scenarioCPromptDetection';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { awaitInterviewScreenReadyWithTimeout } from '@features/aria/awaitInterviewScreenReadyWithTimeout';
 import { hydrateScenarioSkipConfirmedCount } from '@features/aria/scenarioSkipCountHydration';
 import { startResumeLoadingFailsafe } from '@features/aria/runResumeLoadingFailsafe';
 import { saveInterviewToStorage } from '@utilities/storage/InterviewStorage';
 import type { StoredScenarioScores } from '@utilities/storage/InterviewStorage';
+
+function abortResumeIfSuperseded(
+  deps: HandleResumeDeps,
+  resumeTurnEpoch: number,
+  releaseResumeHandleInFlight: () => void,
+  clearResumeLoadingFailsafe?: () => void,
+): boolean {
+  if (deps.interviewUserTurnEpochRef.current === resumeTurnEpoch) {
+    return false;
+  }
+  clearResumeLoadingFailsafe?.();
+  deps.resumeLoadingFlowActiveRef.current = false;
+  deps.setResumeLoadingVisible(false);
+  deps.setResumeHydrationPending?.(false);
+  releaseResumeHandleInFlight();
+  void remoteLog('[REENTRY_RESUME] aborted_superseded_by_fresh_begin', {
+    resumeTurnEpoch,
+    currentEpoch: deps.interviewUserTurnEpochRef.current,
+  });
+  return true;
+}
 
 export async function runHandleResume(
   deps: HandleResumeDeps,
@@ -103,6 +132,7 @@ async function runHandleResumeInner(
   interruptAllInterviewTtsOutput();
   moment5QuestionDeliveryInFlightRef.current = false;
   interviewUserTurnEpochRef.current += 1;
+  const resumeTurnEpoch = interviewUserTurnEpochRef.current;
   clearResumeWelcomePlaybackLock();
   resumeLoadingFlowActiveRef.current = true;
   setResumeLoadingVisible(true);
@@ -136,6 +166,12 @@ async function runHandleResumeInner(
     interviewStatusRef.current = 'not_started';
     hasResumedRef.current = false;
     releaseResumeHandleInFlight();
+    return;
+  }
+
+  if (
+    abortResumeIfSuperseded(deps, resumeTurnEpoch, releaseResumeHandleInFlight, clearResumeLoadingFailsafe)
+  ) {
     return;
   }
 
@@ -190,6 +226,7 @@ async function runHandleResumeInner(
     syncedMoments: syncedForPlan,
     scoringFailed: saved.scoringFailed ?? null,
     moment4ScoresIntact: integrity.moment4ScoresIntact,
+    lastQuestionText: saved.lastQuestionText ?? deps.lastQuestionTextRef.current,
   });
 
   const resumeProgressScenario = Math.max(
@@ -208,11 +245,13 @@ async function runHandleResumeInner(
   );
   // Missing vignette + mid-scenario progress (Q1 / probes / user turns) must not replay the
   // full scenario opening — welcome-back + current question is enough.
-  const openingQuestionDelivered = transcriptHasScenarioOpeningQuestionDelivered(
-    restoredForPlan,
-    resumeProgressScenario,
-    saved.scenarioOpeningDeliveredFor,
-  );
+  const openingQuestionDelivered = resumeScenarioOpeningWasHeardBeforeExit({
+    transcriptMessages: restoredForPlan,
+    scenario: resumeProgressScenario,
+    persistedOpeningDeliveredFor: saved.scenarioOpeningDeliveredFor,
+    lastQuestionText: saved.lastQuestionText ?? deps.lastQuestionTextRef.current,
+    navigationAwayAudioInterrupt: saved.navigationAwayAudioInterrupt ?? null,
+  });
   const shouldRestartIncompleteScenario =
     resumeProgressScenario <= resumePlan.resumeScenario &&
     !openingQuestionDelivered &&
@@ -332,23 +371,50 @@ async function runHandleResumeInner(
       ? null
       : resolvedResumeScenario;
 
-  const situation2VignetteInTranscript = transcriptMessages.some(
-    (m) => m.role === 'assistant' && textContainsScenarioBVignetteBody(m.content ?? ''),
+  const navigationAwayWasRecordingInterrupt = saved.navigationAwayAudioInterrupt === 'recording';
+  const openingPersistedForResumeScenario =
+    saved.scenarioOpeningDeliveredFor?.includes(resolvedResumeScenario) === true;
+  const lastQuestionIndicatesOpening = lastQuestionTextIndicatesScenarioOpeningDelivered(
+    saved.lastQuestionText ?? deps.lastQuestionTextRef.current,
+    resolvedResumeScenario,
   );
-  const situation2OpeningPlaybackConfirmed =
-    saved.scenarioOpeningDeliveredFor?.includes(2) === true ||
-    deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current?.situation_2 === true;
-  const interruptedSituation2Handoff =
+  const idleCloseWithOpeningQuestionSaved =
+    saved.navigationAwayAudioInterrupt == null && lastQuestionIndicatesOpening;
+  const interruptedScenarioIntroHandoff =
+    !navigationAwayWasRecordingInterrupt &&
+    !openingPersistedForResumeScenario &&
+    !idleCloseWithOpeningQuestionSaved &&
     !resumePlan.rewindDueToCorruptScoring &&
-    situation2VignetteInTranscript &&
-    !situation2OpeningPlaybackConfirmed &&
-    resumePlan.mode !== 'resume_post_scenarios';
-  if (interruptedSituation2Handoff) {
-    currentScenarioRef.current = 2;
-    resumeActiveScenarioRef.current = 2;
-    currentInterviewMomentRef.current = Math.max(currentInterviewMomentRef.current, 2) as 1 | 2 | 3 | 4 | 5;
-    (interviewMomentsCompleteRef.current as Record<number, boolean>)[1] = true;
-    void remoteLog('[REENTRY_RESUME] interrupted_s2_handoff_recovery', {
+    resumePlan.mode !== 'resume_post_scenarios' &&
+    !hasInScenarioProgress &&
+    resolvedResumeScenario >= 1 &&
+    resolvedResumeScenario <= 3 &&
+    transcriptMessages.some(
+      (m) =>
+        m.role === 'assistant' &&
+        messageAnchorsScenarioIntro(m.content ?? '') === resolvedResumeScenario,
+    ) &&
+    !transcriptHasScenarioOpeningQuestionDelivered(
+      transcriptMessages,
+      resolvedResumeScenario,
+      saved.scenarioOpeningDeliveredFor,
+      saved.lastQuestionText ?? deps.lastQuestionTextRef.current,
+    );
+  if (interruptedScenarioIntroHandoff) {
+    currentScenarioRef.current = resolvedResumeScenario;
+    resumeActiveScenarioRef.current = resolvedResumeScenario;
+    currentInterviewMomentRef.current = Math.max(
+      currentInterviewMomentRef.current,
+      resolvedResumeScenario,
+    ) as 1 | 2 | 3 | 4 | 5;
+    if (resolvedResumeScenario >= 2) {
+      (interviewMomentsCompleteRef.current as Record<number, boolean>)[1] = true;
+    }
+    if (resolvedResumeScenario >= 3) {
+      (interviewMomentsCompleteRef.current as Record<number, boolean>)[2] = true;
+    }
+    void remoteLog('[REENTRY_RESUME] interrupted_scenario_intro_recovery', {
+      scenario: resolvedResumeScenario,
       hasInScenarioProgress,
       transcriptLen: transcriptMessages.length,
     });
@@ -376,6 +442,7 @@ async function runHandleResumeInner(
       resumeActiveScenario: resumeActiveScenarioRef.current,
       moment_5_clarification_fired: moment5ClarificationFired,
       scenarioSkipConfirmedCount: hydratedSkipCount,
+      navigationAwayAudioInterrupt: undefined,
     });
   }
 
@@ -393,7 +460,29 @@ async function runHandleResumeInner(
       scenario: resolvedResumeScenario,
       transcriptMessages,
       persistedOpeningDeliveredFor: saved.scenarioOpeningDeliveredFor,
+      lastQuestionText: saved.lastQuestionText ?? deps.lastQuestionTextRef.current,
+      navigationAwayAudioInterrupt: saved.navigationAwayAudioInterrupt ?? null,
     });
+  }
+
+  if (
+    scenarioIntroBody?.trim() &&
+    transcriptHasScenarioOpeningQuestionDelivered(
+      transcriptMessages,
+      resolvedResumeScenario,
+      saved.scenarioOpeningDeliveredFor,
+      saved.lastQuestionText ?? deps.lastQuestionTextRef.current,
+    )
+  ) {
+    scenarioIntroBody = null;
+  }
+
+  if (openingPersistedForResumeScenario || openingQuestionDelivered) {
+    scenarioIntroBody = null;
+  }
+
+  if (interruptedScenarioIntroHandoff && resumePlan.mode !== 'resume_post_scenarios') {
+    scenarioIntroBody = buildScenarioResumeReplaySpokenBody(resolvedResumeScenario);
   }
 
   const lastAssistantContent = [...transcriptMessages]
@@ -439,6 +528,9 @@ async function runHandleResumeInner(
     scenarioIntroBody = MOMENT_4_GRUDGE_QUESTION_TEXT;
   }
 
+  const scenarioOpeningPlaybackConfirmed =
+    saved.scenarioOpeningDeliveredFor?.includes(resolvedResumeScenario) === true;
+
   const fullMessages = [...transcriptMessages, ...scoreCards] as MessageWithScenario[];
 
   await deps.prepareInterviewAudioForResumePlayback?.();
@@ -452,6 +544,11 @@ async function runHandleResumeInner(
     persistenceAttemptId,
   });
 
+  if (
+    abortResumeIfSuperseded(deps, resumeTurnEpoch, releaseResumeHandleInFlight, clearResumeLoadingFailsafe)
+  ) {
+    return;
+  }
   setInterviewStatus('in_progress');
   interviewStatusRef.current = 'in_progress';
   setStatus('active');
