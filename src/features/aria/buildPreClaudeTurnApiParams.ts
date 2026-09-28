@@ -35,6 +35,7 @@ export type BuildPreClaudeTurnApiParamsContext = {
   lastAssistantContent: string;
   isNameEntryTurn: boolean;
   trimmed: string;
+  shouldForceMoment4OrientationProbe: boolean;
   shouldForceMoment4ThresholdProbe: boolean;
   moment4ThresholdHintInAnswer: boolean;
   moment5CombinedUserText: string;
@@ -84,6 +85,7 @@ export function buildPreClaudeTurnApiParams(
     lastAssistantContent,
     isNameEntryTurn,
     trimmed,
+    shouldForceMoment4OrientationProbe,
     shouldForceMoment4ThresholdProbe,
     moment4ThresholdHintInAnswer,
     moment5CombinedUserText,
@@ -258,6 +260,7 @@ export function buildPreClaudeTurnApiParams(
   params.shouldForceScenarioBJamesRepairProbe = shouldForceScenarioBJamesRepairProbe;
   params.shouldForceScenarioCRepairProbe = shouldForceScenarioCRepairProbe;
   params.shouldForceScenarioCSophiePerspectiveProbe = shouldForceScenarioCSophiePerspectiveProbe;
+  params.shouldForceMoment4OrientationProbe = shouldForceMoment4OrientationProbe;
   params.shouldForceMoment4ThresholdProbe = shouldForceMoment4ThresholdProbe;
   params.specificEmmaLineAlreadyAddressed = specificEmmaLineAlreadyAddressed;
   params.suppressForcedConstructProbesForMetaFrustration = suppressForcedConstructProbesForMetaFrustration;

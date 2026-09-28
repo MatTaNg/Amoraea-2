@@ -26,19 +26,7 @@ export const styles = StyleSheet.create({
   },
   contactSection: {
     marginTop: 16,
-  },
-  contactLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: 8,
-  },
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: theme.colors.border,
-    borderRadius: 8,
-    marginBottom: 16,
-    backgroundColor: theme.colors.surface,
+    gap: 16,
   },
   buttonContainer: {
     borderTopWidth: 1,

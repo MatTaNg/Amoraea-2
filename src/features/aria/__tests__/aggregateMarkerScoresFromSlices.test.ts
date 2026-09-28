@@ -1,7 +1,9 @@
 import {
   aggregateMarkerScoresFromLabeledSlices,
+  aggregatePillarScoresWithCommitmentMergeDetailed,
   combinedContemptFromScenarioPillarScores,
   extractEgoDevelopmentLevel,
+  extractRepairSourceSignals,
   mergeCommitmentThresholdWeighted,
   type PillarMomentLabel,
 } from '../aggregateMarkerScoresFromSlices';
@@ -24,16 +26,16 @@ describe('combinedContemptFromScenarioPillarScores', () => {
 });
 
 describe('calculateScoreConsistency contempt row', () => {
-  it('fills contempt s1–s3 from split sub-scores + 60/40 blend', () => {
+  it('fills destructive_conflict s1–s3 from split sub-scores + 60/40 blend', () => {
     const out = calculateScoreConsistency(
       { contempt_expression: 2, contempt_recognition: 3 },
       { contempt_expression: 3 },
       { contempt_expression: 2, contempt_recognition: 4 }
     );
-    expect(out.contempt.s1).toBe(2);
-    expect(out.contempt.s2).toBe(3);
-    expect(out.contempt.s3).toBe(3);
-    expect(out.contempt.mean).toBeCloseTo(2.7, 5);
+    expect(out.destructive_conflict.s1).toBe(2);
+    expect(out.destructive_conflict.s2).toBe(3);
+    expect(out.destructive_conflict.s3).toBe(3);
+    expect(out.destructive_conflict.mean).toBeCloseTo(2.7, 5);
   });
 });
 
@@ -83,23 +85,31 @@ function labeled(
 }
 
 describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
-  it('averages repair from scenarios 1–3 only (ignores M4)', () => {
+  it('averages repair from assessable sources only (missing slices omitted, not zeroed)', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { repair: 4 }, { repair: 'a' }),
       labeled('scenario_2', { repair: 4 }, { repair: 'b' }),
       labeled('scenario_3', { repair: 4 }, { repair: 'c' }),
-      labeled('moment_4', { repair: 2 }, { repair: 'm4' }),
+      labeled('moment_4', { repair: null }, { repair: 'No assessable repair evidence from this scenario' }),
     ]);
     expect(scores.repair).toBe(4);
   });
 
-  it('uses regulation from scenario_3 only', () => {
+  it('includes Moment 4 spontaneous repair when assessable', () => {
+    const { scores } = aggregateMarkerScoresFromLabeledSlices([
+      labeled('scenario_3', { repair: 6 }, { repair: 's3' }),
+      labeled('moment_4', { repair: 8 }, { repair: 'spontaneous: I apologized and we talked it through.' }),
+    ]);
+    expect(scores.repair).toBe(7);
+  });
+
+  it('averages regulation from S1, S3, M4, M5, and support; missing sources omitted', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { regulation: 9 }, { regulation: 'x' }),
       labeled('scenario_3', { regulation: 5 }, { regulation: 'y' }),
       labeled('moment_4', { regulation: 8 }, { regulation: 'z' }),
     ]);
-    expect(scores.regulation).toBe(5);
+    expect(scores.regulation).toBe(7);
   });
 
   it('averages appreciation from scenario_1 and scenario_2 only (ignores M4/M5)', () => {
@@ -134,7 +144,7 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
     expect(highRecovered.appreciation).toBe(8);
   });
 
-  it('averages mentalizing and accountability from scenarios only (ignores M4/M5)', () => {
+  it('averages mentalizing from scenarios + support (ignores M4/M5); accountability includes M5', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { mentalizing: 8, accountability: 7 }, { mentalizing: 's1', accountability: 's1' }),
       labeled('scenario_2', { mentalizing: 8, accountability: 7 }, { mentalizing: 's2', accountability: 's2' }),
@@ -143,16 +153,17 @@ describe('aggregateMarkerScoresFromLabeledSlices (moment matrix)', () => {
       labeled('moment_5', { mentalizing: 3, accountability: 3 }, { mentalizing: 'm5', accountability: 'm5' }),
     ]);
     expect(scores.mentalizing).toBe(8);
-    expect(scores.accountability).toBe(7);
+    expect(scores.accountability).toBe(6);
   });
 
-  it('excludes attunement from moment_4', () => {
+  it('excludes moment_4 attunement from responsiveness_support rollup', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices([
       labeled('scenario_1', { attunement: 6 }, { attunement: 's1' }),
       labeled('scenario_2', { attunement: 8 }, { attunement: 's2' }),
       labeled('moment_4', { attunement: 2 }, { attunement: 'm4' }),
     ]);
-    expect(scores.attunement).toBe(7);
+    expect(scores.responsiveness_support).toBe(7);
+    expect(scores.attunement).toBeUndefined();
   });
 
   it('combines contempt: 60% expression + 40% recognition when both pools exist', () => {
@@ -221,5 +232,41 @@ describe('extractEgoDevelopmentLevel', () => {
 
   it('returns null when absent', () => {
     expect(extractEgoDevelopmentLevel({ pillarScores: { mentalizing: 5 } })).toBe(null);
+  });
+});
+
+describe('extractRepairSourceSignals', () => {
+  it('keeps hypothetical, autobiographical, and spontaneous distinguishable without changing the pillar', () => {
+    const rows = [
+      labeled('scenario_1', { repair: 8 }, { repair: 's1 spontaneous' }),
+      labeled('scenario_2', { repair: 6 }, { repair: 's2 spontaneous' }),
+      labeled('scenario_3', { repair: 9 }, { repair: 's3 hypothetical' }),
+      labeled('moment_4', { repair: 2 }, { repair: 'No assessable repair evidence from this scenario' }),
+      labeled('moment_5', { repair: 4 }, { repair: 'm5 autobiographical' }),
+    ];
+    const { scores } = aggregateMarkerScoresFromLabeledSlices(rows);
+    expect(scores.repair).toBe(7);
+    const sources = extractRepairSourceSignals(rows);
+    expect(sources.hypothetical_repair).toBe(9);
+    expect(sources.autobiographical_repair).toBe(4);
+    expect(sources.spontaneous_repair).toBe(7);
+    expect(sources.spontaneous_scenario_1).toBe(8);
+    expect(sources.spontaneous_scenario_2).toBe(6);
+    expect(sources.no_divergence_penalty).toBe(true);
+    expect(sources.hypothetical_minus_autobiographical).toBe(5);
+    const detailed = aggregatePillarScoresWithCommitmentMergeDetailed(
+      rows.map((r) => ({ pillarScores: r.pillarScores, keyEvidence: r.keyEvidence })),
+    );
+    expect(detailed.scores.repair).toBe(7);
+    expect(detailed.repairSourceSignals.hypothetical_minus_autobiographical).toBe(5);
+  });
+
+  it('does not treat missing autobiographical as a zero gap', () => {
+    const sources = extractRepairSourceSignals([
+      labeled('scenario_3', { repair: 8 }, { repair: 's3' }),
+    ]);
+    expect(sources.hypothetical_repair).toBe(8);
+    expect(sources.autobiographical_repair).toBeNull();
+    expect(sources.hypothetical_minus_autobiographical).toBeNull();
   });
 });

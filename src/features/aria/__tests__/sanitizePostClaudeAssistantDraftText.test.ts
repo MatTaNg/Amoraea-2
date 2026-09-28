@@ -4,6 +4,10 @@ import { sanitizePostClaudeAssistantDraftText } from '@features/aria/sanitizePos
 import { SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '@features/aria/probeAndScoringUtils';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/scenarioAContemptProbeLogic';
 import {
+  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+  SCENARIO_B_JAMES_REPAIR_CANONICAL,
+} from '@features/aria/scenarioBProbeLogic';
+import {
   createMockPostClaudeDeps,
   createMockPostClaudeParams,
 } from './postClaudeGateTestHelpers';
@@ -81,6 +85,7 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
       moment4ThresholdProbeAskedRef: { current: false },
     });
     const params = createMockPostClaudeParams({
+      shouldForceMoment4OrientationProbe: true,
       shouldForceMoment4ThresholdProbe: true,
       trimmed:
         'I had a fight with my friend. We talked it through and see eye to eye now.',
@@ -145,7 +150,7 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
     expect(deps.moment4ThresholdProbeAskedRef.current).toBe(true);
   });
 
-  it('replaces thin modal follow-up with repair question when S1 contempt already satisfied', () => {
+  it('does not inject retired S1 repair after contempt is satisfied', () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 1 },
       scenarioAContemptProbeAskedRef: { current: true },
@@ -164,10 +169,75 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
       false,
     );
 
-    expect(result.strippedText).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    expect(result.strippedText).toBe('');
+    expect(result.shouldInjectScenarioARepairAfterContemptAnswer).toBe(false);
   });
 
-  it('normalizes truncated Got it. this with Emma? stream fragment to canonical S1 repair', () => {
+  it('does not coerce retired S2 James-repair into the spoken draft', () => {
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+    });
+    const params = createMockPostClaudeParams({
+      messagesToUse: [
+        { role: 'assistant', content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, scenarioNumber: 2 },
+        {
+          role: 'user',
+          content: 'He could have celebrated with her and told her he was proud of her.',
+          scenarioNumber: 2,
+        },
+      ],
+      trimmed: 'He could have celebrated with her and told her he was proud of her.',
+      shouldForceScenarioBJamesRepairProbe: true,
+    });
+
+    const result = sanitizePostClaudeAssistantDraftText(
+      deps,
+      params,
+      `Got it. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`,
+      '',
+      false,
+    );
+
+    expect(result.strippedText).not.toContain(SCENARIO_B_JAMES_REPAIR_CANONICAL);
+    expect(result.strippedText).not.toMatch(/if you were James/i);
+    expect(result.assistantIssuedScenarioBRepairAsJames).toBe(false);
+  });
+
+  it('strips session-log James repair paraphrase and advances after James-differently', () => {
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 2 },
+      currentScenarioRef: { current: 2 },
+    });
+    const paraphrase =
+      'If James wanted to repair this with Sarah the next day, what would that actually look like — what would he say?';
+    const params = createMockPostClaudeParams({
+      messagesToUse: [
+        { role: 'assistant', content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, scenarioNumber: 2 },
+        {
+          role: 'user',
+          content:
+            'You could have not led with logistics and asked her instead how she felt, got excited with her, and told her how proud of her he was.',
+          scenarioNumber: 2,
+        },
+      ],
+      trimmed:
+        'You could have not led with logistics and asked her instead how she felt, got excited with her, and told her how proud of her he was.',
+    });
+
+    const result = sanitizePostClaudeAssistantDraftText(
+      deps,
+      params,
+      `Makes sense. ${paraphrase}`,
+      '',
+      false,
+    );
+
+    expect(result.strippedText).not.toMatch(/repair this with Sarah/i);
+    expect(result.strippedText).toMatch(/Sophie and Daniel|\[SCENARIO_COMPLETE:2\]/i);
+  });
+
+  it('does not normalize truncated Emma fragment into retired S1 repair', () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 1 },
       scenarioAContemptProbeAskedRef: { current: true },
@@ -191,10 +261,10 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
       false,
     );
 
-    expect(result.strippedText).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    expect(result.strippedText).not.toContain(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
   });
 
-  it('replaces thin modal follow-up with repair when contempt satisfied at moment 2 (scenario still 1)', () => {
+  it('does not inject retired S1 repair when contempt satisfied at moment 2 (scenario still 1)', () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 2 },
       currentScenarioRef: { current: 1 },
@@ -219,11 +289,11 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
       false,
     );
 
-    expect(result.strippedText).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
-    expect(result.shouldInjectScenarioARepairAfterContemptAnswer).toBe(true);
+    expect(result.strippedText).toBe('');
+    expect(result.shouldInjectScenarioARepairAfterContemptAnswer).toBe(false);
   });
 
-  it('replaces Ryan coaching with repair after contempt user answer without Emma-line coverage flag', () => {
+  it('does not replace Ryan coaching with retired S1 repair after contempt answer', () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 1 },
       scenarioAContemptProbeAskedRef: { current: true },
@@ -248,10 +318,11 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
       false,
     );
 
-    expect(result.strippedText).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    expect(result.strippedText).not.toContain(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    expect(result.strippedText).not.toMatch(/how would you repair/i);
   });
 
-  it('strips incomplete Emma coaching and appends repair after Q1 contempt satisfied on first answer', () => {
+  it('strips incomplete Emma coaching without appending retired S1 repair', () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 1 },
       currentScenarioRef: { current: 1 },
@@ -275,9 +346,9 @@ describe('sanitizePostClaudeAssistantDraftText', () => {
 
     const result = sanitizePostClaudeAssistantDraftText(deps, params, draft, '', false);
 
-    expect(result.strippedText).toContain(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    expect(result.strippedText).not.toContain(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
     expect(result.strippedText).not.toMatch(/how do you think emma actually/i);
-    expect(result.shouldInjectScenarioARepairAfterContemptAnswer).toBe(true);
+    expect(result.shouldInjectScenarioARepairAfterContemptAnswer).toBe(false);
   });
 
   it('strips post-repair contempt re-ask when user already covered Emma line and answered repair', () => {

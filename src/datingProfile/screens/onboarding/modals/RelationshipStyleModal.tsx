@@ -33,11 +33,11 @@ export const RelationshipStyleModal: React.FC<RelationshipStyleModalProps> = ({
           <SingleChoiceOptionList
             options={RELATIONSHIP_STYLE_CHOICES}
             value={relationshipStyle}
+            deferSelectUntilPaint
             onSelect={(v) => {
               onRelationshipStyleChange(v);
               onNext();
             }}
-            variant="onboarding"
           />
         </View>
       </ScrollView>

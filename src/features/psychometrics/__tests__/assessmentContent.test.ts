@@ -20,7 +20,6 @@ import {
   scorePostInterviewAssessment,
   scoreRetiredAssessment,
 } from '../assessmentContent';
-import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
 import { buildAssessmentSavePayload } from '../psychometricsPersistence';
 
 describe('scoreAssessment', () => {
@@ -193,18 +192,21 @@ describe('scoreAssessment', () => {
     expect(scoreAssessment('npi_entitlement', responses).total).toBe(4);
   });
 
-  it('runs 9 active instruments in configured order', () => {
+  it('runs 8 active instruments in configured order', () => {
     expect(ASSESSMENT_ORDER).toEqual([
       'brs',
       'anxiety_trait',
       'scs_sf',
       'gasp',
-      'dweck',
-      'aaq2',
+      'relationship_growth_beliefs',
+      'conflict_catastrophizing',
       'rses',
-      NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
-      'rfq',
+      'amoraea_entitlement_v1',
     ]);
+    expect(ASSESSMENT_ORDER).not.toContain('aaq2');
+    expect(ASSESSMENT_ORDER).not.toContain('rfq');
+    expect(ASSESSMENT_ORDER).not.toContain('npi_entitlement');
+    expect(ASSESSMENT_ORDER).not.toContain('dweck');
     expect(ASSESSMENT_ORDER).not.toContain('sexual_communication');
     expect(ASSESSMENT_ORDER).not.toContain('mspss');
     expect(ASSESSMENT_ORDER).not.toContain('scs');
@@ -231,9 +233,9 @@ describe('scoreAssessment', () => {
     });
   });
 
-  it('maps retired SCS resume position to RFQ (final instrument)', () => {
+  it('maps retired SCS resume position to RSES', () => {
     expect(resolvePsychometricsResumePosition('scs', 5)).toEqual({
-      assessmentIndex: 8,
+      assessmentIndex: 6,
       questionIndex: 0,
       allQuestionsAnswered: false,
     });
@@ -261,7 +263,7 @@ describe('psychometricBatteryProgressPosition', () => {
     });
   });
 
-  it('uses NPI or SD3 item count based on active battery slot', () => {
+  it('uses entitlement item count for the last active battery slot', () => {
     const narcissismId = ASSESSMENT_ORDER[7];
     const narcissismCount = ASSESSMENTS[narcissismId].questions.length;
     const beforeNarcissism = ASSESSMENT_ORDER.slice(0, 7).reduce(
@@ -272,7 +274,7 @@ describe('psychometricBatteryProgressPosition', () => {
       current: beforeNarcissism + 1,
       total: psychometricBatteryTotalQuestions(),
     });
-    expect(narcissismCount).toBe(NPI_ENTITLEMENT_ENABLED ? 7 : 9);
+    expect(narcissismCount).toBe(ASSESSMENTS.amoraea_entitlement_v1.questions.length);
   });
 });
 
@@ -294,8 +296,8 @@ describe('resolvePsychometricsResumePosition', () => {
   });
 
   it('marks flow complete when index is past the final assessment', () => {
-    expect(resolvePsychometricsResumePosition('rfq', 8)).toEqual({
-      assessmentIndex: 8,
+    expect(resolvePsychometricsResumePosition('amoraea_entitlement_v1', 8)).toEqual({
+      assessmentIndex: 7,
       questionIndex: 7,
       allQuestionsAnswered: true,
     });

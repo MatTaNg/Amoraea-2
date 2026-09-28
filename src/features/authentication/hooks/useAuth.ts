@@ -42,7 +42,13 @@ import {
   isEmailNotConfirmedAuthError,
 } from '@features/authentication/confirmTestAccountEmail';
 import { isDevScenarioJumpEmail } from '@features/aria/devScenarioJumpReferral';
+import { normalizeAuthPhoneE164 } from '@features/authentication/normalizeAuthPhone';
 import * as ExpoLinking from 'expo-linking';
+
+export const AUTH_SMS_RESEND_COOLDOWN_MS = 60_000;
+
+/** @deprecated Use AUTH_SMS_RESEND_COOLDOWN_MS */
+export const AUTH_EMAIL_RESEND_COOLDOWN_MS = AUTH_SMS_RESEND_COOLDOWN_MS;
 
 export {
   getAuthEmailRedirectTo,
@@ -131,6 +137,26 @@ function getAuthSnapshot(): AuthSnapshot {
   return snapshot;
 }
 
+type AuthSignupOptions = {
+  inviteCode?: string;
+  age?: number;
+  gender?: Gender;
+};
+
+function buildSignupMetadata(options?: AuthSignupOptions): Record<string, unknown> {
+  const metadata: Record<string, unknown> = {};
+  if (options?.inviteCode) {
+    const trimmed = options.inviteCode.trim();
+    metadata.referral_code = trimmed;
+    if (isRelationshipValidationReferralCode(trimmed)) {
+      metadata.is_relationship_validation = true;
+    }
+  }
+  if (typeof options?.age === 'number') metadata.age = options.age;
+  if (options?.gender) metadata.gender = options.gender;
+  return metadata;
+}
+
 function readIsRelationshipValidation(user: User | null): boolean {
   if (!user) return false;
   const meta = user.user_metadata as {
@@ -139,6 +165,17 @@ function readIsRelationshipValidation(user: User | null): boolean {
   } | undefined;
   if (meta?.is_relationship_validation === true) return true;
   return isRelationshipValidationReferralCode(meta?.referral_code);
+}
+
+function userHasAuthIdentity(user: User): boolean {
+  return Boolean(user.phone?.trim() || user.email?.trim());
+}
+
+function userAuthIdentityVerified(user: User): boolean {
+  if (user.phone && user.phone_confirmed_at) return true;
+  if (user.email && user.email_confirmed_at) return true;
+  if (user.email && isDevScenarioJumpEmail(user.email)) return true;
+  return false;
 }
 
 /** Apply auth state from a session + server-verified user (preferred) or cached user on transient errors. */
@@ -150,7 +187,7 @@ const applySessionForApp = async (
     return { session: null as Session | null, user: null as User | null };
   }
 
-  if (!session.user.email) {
+  if (!userHasAuthIdentity(session.user)) {
     await supabase.auth.signOut();
     return { session: null, user: null };
   }
@@ -170,22 +207,19 @@ const applySessionForApp = async (
       await supabase.auth.signOut();
       return { session: null, user: null };
     }
-    if (session.user.email) {
+    if (userHasAuthIdentity(session.user)) {
       return { session, user: session.user };
     }
     await supabase.auth.signOut();
     return { session: null, user: null };
   }
 
-  if (!verifiedUser?.email) {
+  if (!verifiedUser || !userHasAuthIdentity(verifiedUser)) {
     await supabase.auth.signOut();
     return { session: null, user: null };
   }
 
-  if (!verifiedUser.email_confirmed_at && !opts?.allowUnconfirmedForRecovery) {
-    if (isDevScenarioJumpEmail(verifiedUser.email)) {
-      return { session, user: verifiedUser };
-    }
+  if (!userAuthIdentityVerified(verifiedUser) && !opts?.allowUnconfirmedForRecovery) {
     await supabase.auth.signOut();
     return { session: null, user: null };
   }
@@ -555,8 +589,6 @@ function startAuthInitOnce(): Promise<void> {
   return authInitPromise;
 }
 
-export const AUTH_EMAIL_RESEND_COOLDOWN_MS = 60_000;
-
 export function isAuthEmailRateLimitError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false;
   const code = (err as { code?: string }).code;
@@ -601,17 +633,38 @@ export const useAuth = () => {
     void startAuthInitOnce();
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const resolvePhoneE164 = (rawPhone: string): string => {
+    const e164 = normalizeAuthPhoneE164(rawPhone);
+    if (!e164) {
+      throw new Error('Please enter a valid phone number (include area code).');
+    }
+    return e164;
+  };
+
+  const signInWithPhone = async (rawPhone: string, password: string) => {
+    const phone = resolvePhoneE164(rawPhone);
+    clearPasswordResetPendingInStorage();
+    setSnapshot({ emailConfirmationLinkError: null });
+    const { data, error } = await supabase.auth.signInWithPassword({
+      phone,
+      password,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  /** Legacy email login — used for linking phone to an existing account. */
+  const signInWithEmail = async (email: string, password: string) => {
     clearPasswordResetPendingInStorage();
     setSnapshot({ emailConfirmationLinkError: null });
     let { data, error } = await supabase.auth.signInWithPassword({
-      email,
+      email: email.trim(),
       password,
     });
     if (error && isEmailNotConfirmedAuthError(error) && isDevScenarioJumpEmail(email)) {
       await confirmTestAccountEmailIfNeeded(email);
       ({ data, error } = await supabase.auth.signInWithPassword({
-        email,
+        email: email.trim(),
         password,
       }));
     }
@@ -619,21 +672,127 @@ export const useAuth = () => {
     return data;
   };
 
+  const signUpWithPhone = async (
+    rawPhone: string,
+    password: string,
+    options?: AuthSignupOptions,
+  ) => {
+    const phone = resolvePhoneE164(rawPhone);
+    const metadata = buildSignupMetadata(options);
+
+    await supabase.auth.signOut();
+    clearPasswordResetPendingInStorage();
+    passwordRecoveryPendingRef.current = false;
+    setSnapshot({
+      passwordRecoveryPending: false,
+      passwordRecoveryLinkError: null,
+      emailConfirmationLinkError: null,
+    });
+
+    const { data, error } = await supabase.auth.signUp({
+      phone,
+      password,
+      options: {
+        data: metadata,
+      },
+    });
+    if (error) throw error;
+    if (data.user == null) {
+      throw new Error('An account with this phone number already exists. Sign in instead.');
+    }
+    if (Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+      throw new Error('An account with this phone number already exists. Sign in instead.');
+    }
+    return data;
+  };
+
+  const resendConfirmationSms = async (rawPhone: string) => {
+    const phone = resolvePhoneE164(rawPhone);
+    clearPasswordResetPendingInStorage();
+    const { error } = await supabase.auth.resend({
+      type: 'sms',
+      phone,
+    });
+    if (error) throw error;
+  };
+
+  const resendPhoneChangeSms = async (rawPhone: string) => {
+    const phone = resolvePhoneE164(rawPhone);
+    clearPasswordResetPendingInStorage();
+    const { error } = await supabase.auth.resend({
+      type: 'phone_change',
+      phone,
+    });
+    if (error) throw error;
+  };
+
+  const verifyPhoneOtp = async (
+    rawPhone: string,
+    token: string,
+    type: 'sms' | 'phone_change' = 'sms',
+  ) => {
+    const phone = resolvePhoneE164(rawPhone);
+    const trimmedToken = token.trim();
+    if (trimmedToken.length < 6) {
+      throw new Error('Please enter the 6-digit verification code.');
+    }
+    const { data, error } = await supabase.auth.verifyOtp({
+      phone,
+      token: trimmedToken,
+      type,
+    });
+    if (error) throw error;
+    return data;
+  };
+
+  /** Sign in with email/password, attach a phone, and send verification SMS (phone_change). */
+  const startLinkPhoneToEmailAccount = async (
+    email: string,
+    password: string,
+    rawPhone: string,
+  ) => {
+    const phone = resolvePhoneE164(rawPhone);
+    await supabase.auth.signOut();
+    clearPasswordResetPendingInStorage();
+    const { error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    });
+    if (signInError) throw signInError;
+    const { error: updateError } = await supabase.auth.updateUser({ phone });
+    if (updateError) throw updateError;
+  };
+
+  /** Complete phone link after SMS OTP; signs out so the user can log in with phone + password. */
+  const completeLinkPhoneToEmailAccount = async (rawPhone: string, token: string) => {
+    await verifyPhoneOtp(rawPhone, token, 'phone_change');
+    await supabase.auth.signOut();
+  };
+
+  const sendPhonePasswordResetOtp = async (rawPhone: string) => {
+    const phone = resolvePhoneE164(rawPhone);
+    await supabase.auth.signOut();
+    clearPasswordResetPendingInStorage();
+    const { error } = await supabase.auth.signInWithOtp({ phone });
+    if (error) throw error;
+  };
+
+  const resetPasswordWithPhoneOtp = async (rawPhone: string, token: string, newPassword: string) => {
+    await verifyPhoneOtp(rawPhone, token, 'sms');
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    await supabase.auth.signOut();
+  };
+
+  /** @deprecated Use signInWithPhone */
+  const signIn = signInWithPhone;
+
   const signUp = async (
     email: string,
     password: string,
-    options?: { inviteCode?: string; age?: number; gender?: Gender },
+    options?: AuthSignupOptions,
   ) => {
-    const metadata: Record<string, unknown> = {};
-    if (options?.inviteCode) {
-      const trimmed = options.inviteCode.trim();
-      metadata.referral_code = trimmed;
-      if (isRelationshipValidationReferralCode(trimmed)) {
-        metadata.is_relationship_validation = true;
-      }
-    }
-    if (typeof options?.age === 'number') metadata.age = options.age;
-    if (options?.gender) metadata.gender = options.gender;
+    const metadata = buildSignupMetadata(options);
 
     await supabase.auth.signOut();
     clearPasswordResetPendingInStorage();
@@ -648,7 +807,7 @@ export const useAuth = () => {
       email,
       password,
       options: {
-        data: Object.keys(metadata).length ? metadata : undefined,
+        data: metadata,
         emailRedirectTo: getAuthEmailRedirectTo(),
       },
     });
@@ -737,9 +896,19 @@ export const useAuth = () => {
   return {
     ...state,
     signIn,
+    signInWithPhone,
+    signInWithEmail,
     signUp,
+    signUpWithPhone,
     signOut,
     resendConfirmationEmail,
+    resendConfirmationSms,
+    resendPhoneChangeSms,
+    verifyPhoneOtp,
+    startLinkPhoneToEmailAccount,
+    completeLinkPhoneToEmailAccount,
+    sendPhonePasswordResetOtp,
+    resetPasswordWithPhoneOtp,
     resetPasswordForEmail,
     updatePassword,
     clearPasswordRecoveryPending,

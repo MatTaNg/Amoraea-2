@@ -76,6 +76,7 @@ describe('runPostClaudeEmptyTranscriptFallbackGates', () => {
     });
     const params = createMockPostClaudeParams({
       elongatingSuppressedForUserTurn: true,
+      shouldForceMoment4OrientationProbe: true,
       shouldForceMoment4ThresholdProbe: true,
       participantFirstNameForSpoken: 'Matt',
     });
@@ -159,6 +160,50 @@ describe('runPostClaudeEmptyTranscriptFallbackGates', () => {
 
     expect(result.handled).toBe(false);
     if (!result.handled) {
+      expect(result.text).toMatch(/\[SCENARIO_COMPLETE:1\]/i);
+      expect(result.displayText).toMatch(/Sarah has been job hunting/i);
+    }
+  });
+
+  it('injects S1→S2 when elongating suppressed after Q1 Emma clear-line contempt (repair retired)', async () => {
+    const deps = createMockPostClaudeDeps({
+      scenarioAContemptProbeAskedRef: { current: false },
+      scenarioARepairQuestionAskedRef: { current: false },
+      currentInterviewMomentRef: { current: 1 },
+      currentScenarioRef: { current: 1 },
+    });
+    const params = createMockPostClaudeParams({
+      elongatingSuppressedForUserTurn: true,
+      shouldForceScenarioAContemptProbe: false,
+      participantFirstNameForSpoken: 'Matt',
+      messagesToUse: [
+        { role: 'assistant', content: "What's going on between these two?", scenarioNumber: 1, interviewMoment: 1 },
+        {
+          role: 'user',
+          content:
+            "Ryan should not have taken that call. Emma is being condescending when she says you've made that very clear.",
+          scenarioNumber: 1,
+          interviewMoment: 1,
+        },
+      ],
+    });
+    const speak = createMockSpeakAssistantTurn();
+
+    const result = await runPostClaudeEmptyTranscriptFallbackGates(
+      deps,
+      params,
+      emptyCtx({
+        shouldInjectScenarioARepairAfterContemptAnswer: false,
+        assistantIssuedScenarioAContemptProbe: false,
+      }),
+      'Got it. What do you think Emma means when she says "you\'ve made that very clear"?',
+      '',
+      speak,
+    );
+
+    expect(result.handled).toBe(false);
+    if (!result.handled) {
+      expect(result.displayText).not.toMatch(/if you were ryan/i);
       expect(result.text).toMatch(/\[SCENARIO_COMPLETE:1\]/i);
       expect(result.displayText).toMatch(/Sarah has been job hunting/i);
     }

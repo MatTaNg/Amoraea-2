@@ -37,6 +37,7 @@ export type ClaudeParallelStreamTtsCallParams = {
   shouldForceScenarioBJamesRepairProbe: boolean;
   shouldForceScenarioCRepairProbe: boolean;
   shouldForceScenarioCSophiePerspectiveProbe: boolean;
+  shouldForceMoment4OrientationProbe: boolean;
   shouldForceMoment4ThresholdProbe: boolean;
   userScenarioTag: number;
   hadPriorSubstantiveAnswerForFrustrationOffer: boolean;

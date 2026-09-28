@@ -32,6 +32,7 @@ import {
   filterAdminUserCohort,
   formatYmdLocal,
   sortUserGroups,
+  toggleAdminStatusFilterSelection,
 } from '@features/admin/interviewDashboard/adminInterviewDashboardCohortUtils';
 import { fetchAdminCohortProfileDemographics } from '@features/admin/interviewDashboard/fetchAdminCohortProfileDemographics';
 import type {
@@ -64,7 +65,8 @@ export function AdminInterviewUsersCohortTab({
   onDeleteUser: (row: UserRow) => void;
   deletingUserId: string | null;
 }) {
-  const [statusFilter, setStatusFilter] = useState<AdminUserStatusFilter>('all');
+  const [statusFilters, setStatusFilters] = useState<AdminUserStatusFilter[]>([]);
+  const [needsReviewQuickFilter, setNeedsReviewQuickFilter] = useState(false);
   const [timeRangeFilter, setTimeRangeFilter] = useState<TimeRangeFilter>('all');
   const [customTimeFrom, setCustomTimeFrom] = useState('');
   const [customTimeTo, setCustomTimeTo] = useState('');
@@ -88,7 +90,8 @@ export function AdminInterviewUsersCohortTab({
         humanVerifiedCohortFilter,
         uncertaintyBandFilter,
         hideIncomplete,
-        statusFilter,
+        statusFilters,
+        needsReviewQuickFilter,
         userSearchQuery,
       }),
     [
@@ -100,7 +103,8 @@ export function AdminInterviewUsersCohortTab({
       humanVerifiedCohortFilter,
       uncertaintyBandFilter,
       hideIncomplete,
-      statusFilter,
+      statusFilters,
+      needsReviewQuickFilter,
       userSearchQuery,
     ],
   );
@@ -262,6 +266,24 @@ export function AdminInterviewUsersCohortTab({
             <Text style={styles.userSearchClearText}>Clear</Text>
           </TouchableOpacity>
         ) : null}
+      </View>
+      <View style={styles.needsReviewRow}>
+        <TouchableOpacity
+          style={[styles.needsReviewChip, needsReviewQuickFilter && styles.needsReviewChipActive]}
+          onPress={() => setNeedsReviewQuickFilter((v) => !v)}
+          accessibilityRole="button"
+          accessibilityState={{ selected: needsReviewQuickFilter }}
+          accessibilityLabel="Needs Review quick filter"
+        >
+          <Text
+            style={[styles.needsReviewChipText, needsReviewQuickFilter && styles.needsReviewChipTextActive]}
+          >
+            Needs Review
+          </Text>
+        </TouchableOpacity>
+        <Text style={styles.needsReviewHint}>
+          Near-miss scores (6.0–6.5), Almost status, or review flags
+        </Text>
       </View>
       <View style={styles.cohortToolbar}>
         <View style={styles.cohortStatsRowInline}>
@@ -454,21 +476,37 @@ export function AdminInterviewUsersCohortTab({
         </View>
         <View style={[styles.filterCluster, styles.filterClusterGrow]}>
           <Text style={styles.filterClusterLabel}>Status</Text>
-          {STATUS_FILTER_OPTIONS.map((opt) => (
-            <TouchableOpacity
-              key={opt.id}
-              style={[styles.filterChipCompact, statusFilter === opt.id && styles.filterChipActive]}
-              onPress={() => setStatusFilter(opt.id)}
-              accessibilityRole="button"
-              accessibilityState={{ selected: statusFilter === opt.id }}
+          <TouchableOpacity
+            style={[styles.filterChipCompact, statusFilters.length === 0 && styles.filterChipActive]}
+            onPress={() => setStatusFilters([])}
+            accessibilityRole="button"
+            accessibilityState={{ selected: statusFilters.length === 0 }}
+          >
+            <Text
+              style={[
+                styles.filterChipTextCompact,
+                statusFilters.length === 0 && styles.filterChipTextActive,
+              ]}
             >
-              <Text
-                style={[styles.filterChipTextCompact, statusFilter === opt.id && styles.filterChipTextActive]}
+              All
+            </Text>
+          </TouchableOpacity>
+          {STATUS_FILTER_OPTIONS.filter((opt) => opt.id !== 'all').map((opt) => {
+            const active = statusFilters.includes(opt.id);
+            return (
+              <TouchableOpacity
+                key={opt.id}
+                style={[styles.filterChipCompact, active && styles.filterChipActive]}
+                onPress={() => setStatusFilters((prev) => toggleAdminStatusFilterSelection(prev, opt.id))}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
               >
-                {opt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Text style={[styles.filterChipTextCompact, active && styles.filterChipTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
       <ScrollView contentContainerStyle={styles.cardsContainer}>

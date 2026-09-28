@@ -235,7 +235,7 @@ export function formatAaq2HighExperientialAvoidanceFloorAdminDescription(aaq2Sco
 }
 
 export function formatRsesLowSelfEsteemFloorAdminDescription(rsesScore: number): string {
-  return `Rosenberg Self-Esteem sum score of ${rsesScore.toFixed(0)} is at or below the automatic fail threshold of ${RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD.toFixed(0)}. User self-reported consistently low self-worth across nearly all self-esteem items, predicting reassurance-seeking, partner-burdening, and anxious relational dynamics.`;
+  return `Rosenberg Self-Esteem sum score of ${rsesScore.toFixed(0)} is at or below the Amoraea admissions threshold of ${RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD.toFixed(0)} (range 10–40). This is an Amoraea admissions threshold, not a clinically validated universal partner-suitability cutoff.`;
 }
 
 export function formatScsLowPrivateSelfAwarenessFloorAdminDescription(
@@ -272,6 +272,14 @@ export const ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES = [
   RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
   SD3_NARCISSISM_FLOOR_FAIL_CODE,
   NPI_ENTITLEMENT_FLOOR_FAIL_CODE,
+] as const;
+
+/** Floors applied to new-user / current-battery gate scoring. Retired instruments stay readable historically. */
+export const ACTIVE_NEW_USER_PSYCHOMETRIC_FLOOR_CODES = [
+  GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
+  SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE,
+  BRS_LOW_RESILIENCE_FLOOR_CODE,
+  RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
 ] as const;
 
 export type PsychometricGateFailFloorCode = (typeof ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES)[number];
@@ -370,7 +378,9 @@ export function collectPsychometricFloorUncertaintyFlags(
       flags.push(SD3_NARCISSISM_FLOOR_FAIL_CODE);
     }
   }
-  return flags;
+  return flags.filter((code) =>
+    (ACTIVE_NEW_USER_PSYCHOMETRIC_FLOOR_CODES as readonly string[]).includes(code),
+  );
 }
 
 export function formatPsychometricGateFailDescription(

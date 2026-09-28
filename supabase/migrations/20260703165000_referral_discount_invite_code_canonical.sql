@@ -19,16 +19,24 @@ BEGIN
   ) THEN
     -- Users who signed up with a legacy shareable code but have not yet completed should still
     -- retain referral attribution and the referred-user boost.
-    UPDATE public.users AS referred
-    SET referred_by_id = COALESCE(referred.referred_by_id, rc.referrer_user_id),
-        referral_boost_active = CASE
-          WHEN COALESCE(referred.referred_by_id, rc.referrer_user_id) IS NOT NULL THEN TRUE
-          ELSE referred.referral_boost_active
-        END
-    FROM public.referral_codes AS rc
-    WHERE referred.pending_referral_code IS NOT NULL
-      AND referred.id <> rc.referrer_user_id
-      AND public.normalize_referral_code(referred.pending_referral_code) = rc.code;
+    IF EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'users'
+        AND column_name = 'pending_referral_code'
+    ) THEN
+      UPDATE public.users AS referred
+      SET referred_by_id = COALESCE(referred.referred_by_id, rc.referrer_user_id),
+          referral_boost_active = CASE
+            WHEN COALESCE(referred.referred_by_id, rc.referrer_user_id) IS NOT NULL THEN TRUE
+            ELSE referred.referral_boost_active
+          END
+      FROM public.referral_codes AS rc
+      WHERE referred.pending_referral_code IS NOT NULL
+        AND referred.id <> rc.referrer_user_id
+        AND public.normalize_referral_code(referred.pending_referral_code) = rc.code;
+    END IF;
 
     -- Completed legacy referrals become canonical referred_by links.
     UPDATE public.users AS referred
@@ -49,9 +57,21 @@ BEGIN
 END;
 $$;
 
-UPDATE public.users
-SET pending_referral_code = NULL
-WHERE pending_referral_code IS NOT NULL;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM information_schema.columns
+    WHERE table_schema = 'public'
+      AND table_name = 'users'
+      AND column_name = 'pending_referral_code'
+  ) THEN
+    UPDATE public.users
+    SET pending_referral_code = NULL
+    WHERE pending_referral_code IS NOT NULL;
+  END IF;
+END;
+$$;
 
 -- Public validation for registration UI against canonical invite codes.
 CREATE OR REPLACE FUNCTION public.invite_code_is_available(p_raw TEXT)
@@ -111,6 +131,8 @@ $$;
 GRANT EXECUTE ON FUNCTION public.apply_referral_completion_effects(UUID) TO authenticated;
 
 -- Secure summary for client referral discount UI.
+DROP FUNCTION IF EXISTS public.get_referral_discount_status(UUID);
+
 CREATE OR REPLACE FUNCTION public.get_referral_discount_status(p_user_id UUID DEFAULT auth.uid())
 RETURNS TABLE (
   referral_code TEXT,

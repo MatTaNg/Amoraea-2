@@ -33,13 +33,12 @@ export function countDefensePatternsForDepthModifier(
   ].filter(Boolean).length;
 }
 
-/** Active defense-pattern flags (0–4, projection excluded) → modifier. */
-export const DEFENSE_PATTERN_COUNT_MODIFIERS: Record<0 | 1 | 2 | 3 | 4, number> = {
+/** Active defense-pattern flags (0–3) → modifier. Projection is excluded from count. */
+export const DEFENSE_PATTERN_COUNT_MODIFIERS: Record<0 | 1 | 2 | 3, number> = {
   0: 0,
   1: -0.1,
   2: -0.2,
   3: -0.35,
-  4: -0.35,
 };
 
 /** Defense flags at exactly this count → human review (projection excluded). */

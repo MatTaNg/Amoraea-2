@@ -2,6 +2,7 @@ import type { BuildPersonalMomentHandoffReflectionOptions } from './personalMome
 import { extractLeadingReflectionFromMoment4ThresholdProbe } from './deliveredReflectionRegistry';
 import { hasCommitmentThresholdSignal } from './interviewMoment5AppreciationBridge';
 import {
+  isIrrelevantAnswerRetryAssistantLine,
   looksLikeIncompleteCutOffUserAnswer,
   looksLikeUnassessableScenarioAnswer,
 } from './interviewAnswerRelevance';
@@ -49,6 +50,153 @@ export const MOMENT_4_GRUDGE_QUESTION_TEXT =
 /** Client-injected Moment 4 commitment-threshold follow-up (verbatim ack + question). */
 export const MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT =
   'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
+
+export const MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT =
+  'Think of a relationship you cared about — when things got difficult, what made you keep working on it rather than walking away?' as const;
+
+/** Show-scenario card body for the commitment-orientation follow-up (question only). */
+export const MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY =
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT;
+
+export const MOMENT_SUPPORT_QUESTION_TEXT =
+  'Think of a time when a partner, or someone you care about, heard some bad news, needed support from you, or was really stressed. What happened, and what did you do?' as const;
+
+export const MOMENT_SUPPORT_QUESTION_CARD_BODY = MOMENT_SUPPORT_QUESTION_TEXT;
+
+export const MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT =
+  'How did you know what kind of support they needed from you?' as const;
+
+export const MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY = MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT;
+
+function normalizeProbeCompare(text: string): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+export function looksLikeMoment4OrientationQuestion(text: string): boolean {
+  const t = normalizeProbeCompare(text);
+  return (
+    t.includes('what made you keep working on it rather than walking away') ||
+    (t.includes('relationship you cared about') && t.includes('keep working on it')) ||
+    t.includes('what made you keep investing in the relationship rather than pulling away') ||
+    (t.includes('keep investing in the relationship') && t.includes('pulling away'))
+  );
+}
+
+/** Streaming may flush before the keep-investing tail arrives. */
+export function isIncompleteMoment4OrientationLeadSentence(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMoment4OrientationQuestion(t)) return false;
+  const low = t.toLowerCase();
+  if (/\bwhat made you keep working on it\b/.test(low)) return !/\?\s*$/.test(t);
+  if (
+    /\brelationship you cared about\b/.test(low) &&
+    !/\bkeep working on it\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  if (/\bwhat made you keep investing\b/.test(low)) return !/\?\s*$/.test(t);
+  if (
+    /\bkeep investing in the relationship\b/.test(low) &&
+    !/\bpulling away\b/.test(low)
+  ) {
+    return true;
+  }
+  if (
+    /\bthinking about relationships that have really mattered\b/.test(low) &&
+    !/\?\s*$/.test(t)
+  ) {
+    return true;
+  }
+  if (/\bwhen things got difficult\b/.test(low) && !/\?\s*$/.test(t)) return true;
+  return false;
+}
+
+export function looksLikeMomentSupportQuestion(text: string): boolean {
+  const t = normalizeProbeCompare(text);
+  if (looksLikeMomentSupportConditionalProbe(text)) return false;
+  if (t === normalizeProbeCompare(MOMENT_SUPPORT_QUESTION_TEXT)) return true;
+  const hasSupportCue =
+    t.includes('needed support from you') ||
+    t.includes('really stressed') ||
+    t.includes('heard some bad news');
+  const hasStoryAsk =
+    t.includes('what happened') && t.includes('what did you do');
+  const hasPartnerFrame =
+    t.includes('partner') || t.includes('someone you care about');
+  return hasSupportCue && hasStoryAsk && hasPartnerFrame;
+}
+
+/** Streaming may flush before the support-story tail arrives. */
+export function isIncompleteMomentSupportLeadSentence(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeMomentSupportQuestion(t)) return false;
+  const low = t.toLowerCase();
+  if (/\bthink of a time when a partner\b/.test(low)) return !/\?\s*$/.test(t);
+  if (/\bsomeone you care about\b/.test(low) && !/\bwhat happened\b/.test(low)) return true;
+  if (/\breally stressed\b/.test(low) && !/\bwhat did you do\b/.test(low)) return true;
+  return false;
+}
+
+export function looksLikeMomentSupportConditionalProbe(text: string): boolean {
+  const t = normalizeProbeCompare(text);
+  return t.includes('how did you know what kind of support they needed');
+}
+
+export function transcriptIncludesAssistantMatch(
+  msgs: ReadonlyArray<{ role: string; content?: string | null }>,
+  matcher: (text: string) => boolean,
+): boolean {
+  return msgs.some((m) => m.role === 'assistant' && matcher(m.content ?? ''));
+}
+
+export function looksLikeAssessableOrientationAnswer(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeUnassessableScenarioAnswer(t)) return false;
+  return t.split(/\s+/).filter(Boolean).length >= 8;
+}
+
+export function looksLikeAssessableSupportAnswer(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || looksLikeUnassessableScenarioAnswer(t)) return false;
+  return t.split(/\s+/).filter(Boolean).length >= 8;
+}
+
+/** True when the support story already explains how they recognized the other person's need. */
+export function looksLikeNeedRecognitionInSupportAnswer(text: string): boolean {
+  const t = (text ?? '').toLowerCase().replace(/[.!?…]+$/g, '').trim();
+  if (!t) return false;
+  return (
+    /\bi asked\b/.test(t) ||
+    /\bjust asked\b/.test(t) ||
+    /\basked (them|her|him|you)\b/.test(t) ||
+    /\bthey (told|said) me\b/.test(t) ||
+    /\bcould tell\b/.test(t) ||
+    /\bpicked up on\b/.test(t) ||
+    /\bread (the|their) (room|cues)\b/.test(t) ||
+    /\bwhat they needed\b/.test(t) ||
+    /\bknew they needed\b/.test(t) ||
+    /\bthey needed space\b/.test(t) ||
+    /\bthey needed to talk\b/.test(t) ||
+    /\bchecked (in|with) (them|her|him)\b/.test(t)
+  );
+}
+
+/** After the support story or need-recognition probe, a valid answer should advance to Moment 5. */
+export function shouldAdvanceToMoment5AfterSupportAnswer(params: {
+  lastAssistantContent: string;
+  userAnswerText: string;
+}): boolean {
+  const user = params.userAnswerText;
+  if (!user.trim()) return false;
+  if (looksLikeMomentSupportConditionalProbe(params.lastAssistantContent)) {
+    return looksLikeNeedRecognitionInSupportAnswer(user) || looksLikeAssessableSupportAnswer(user);
+  }
+  if (looksLikeMomentSupportQuestion(params.lastAssistantContent)) {
+    return looksLikeNeedRecognitionInSupportAnswer(user);
+  }
+  return false;
+}
 
 /** Language that actually addresses the work-through vs walk-away fork (not bare "partner" mention). */
 const MOMENT4_THRESHOLD_FORK_LANGUAGE_RE =
@@ -340,6 +488,21 @@ export function isAnsweringFirstUserTurnAfterMoment4Threshold(
     }
   }
   if (lastThresholdIdx < 0) return false;
+  const lastAssistant = [...msgsPriorToCurrentUser].reverse().find((m) => m.role === 'assistant');
+  if (isIrrelevantAnswerRetryAssistantLine(lastAssistant?.content ?? '')) {
+    let lastSubstantiveAssistant = '';
+    for (let i = msgsPriorToCurrentUser.length - 1; i >= 0; i--) {
+      const m = msgsPriorToCurrentUser[i];
+      if (m.role !== 'assistant') continue;
+      const content = m.content ?? '';
+      if (isIrrelevantAnswerRetryAssistantLine(content)) continue;
+      lastSubstantiveAssistant = content;
+      break;
+    }
+    if (looksLikeMoment4ThresholdQuestion(lastSubstantiveAssistant)) {
+      return true;
+    }
+  }
   for (let j = lastThresholdIdx + 1; j < msgsPriorToCurrentUser.length; j++) {
     const m = msgsPriorToCurrentUser[j];
     if (m.role !== 'user') continue;
@@ -364,9 +527,10 @@ function looksLikeMoment5ConflictParaphraseForGrudgeGuard(text: string): boolean
   );
 }
 
-/** True when the last assistant turn is the grudge/dislike question (or full Moment 4 handoff), not threshold or appreciation. */
+/** True when the last assistant turn is the grudge/dislike question (or full Moment 4 handoff), not commitment follow-ups or appreciation. */
 export function looksLikeMoment4GrudgePrompt(text: string): boolean {
   if (looksLikeMoment4ThresholdQuestion(text)) return false;
+  if (looksLikeMoment4OrientationQuestion(text)) return false;
   if (looksLikeMoment5ConflictParaphraseForGrudgeGuard(text)) return false;
   const t = (text ?? '').toLowerCase();
   if (t.includes('think of a time you really celebrated someone') || (t.includes('really celebrated') && t.includes('your life'))) {
@@ -409,19 +573,19 @@ export function looksLikeMisplacedNonGrudgeMoment4Answer(text: string): boolean 
 }
 
 /**
- * After a substantive answer to the Moment 4 grudge/dislike prompt, the commitment follow-up may fire
+ * After a substantive answer to the Moment 4 grudge/dislike prompt, the keep-investing orientation follow-up may fire
  * regardless of relationship wording, tone, or analytical vs emotional content — do not gate on relationshipType.
  * Do not inject when the user is answering a different assistant prompt, or when the answer is clearly misplaced fiction.
  */
-export function shouldForceMoment4ThresholdProbe(params: {
-  probeAlreadyAsked: boolean;
+export function shouldForceMoment4OrientationProbe(params: {
+  orientationProbeAlreadyAsked: boolean;
   isMoment4: boolean;
   lastAssistantContent: string;
   userAnswerText: string;
   /** User is answering the client-injected Moment 4 specificity follow-up (not the grudge prompt). */
   answeringSpecificityFollowUp?: boolean;
 }): boolean {
-  if (!params.isMoment4 || params.probeAlreadyAsked) return false;
+  if (!params.isMoment4 || params.orientationProbeAlreadyAsked) return false;
   if (looksLikeGoBackToPreviousScenarioRequest(params.userAnswerText)) return false;
   if (looksLikeIncompleteCutOffUserAnswer(params.userAnswerText)) return false;
   if (params.answeringSpecificityFollowUp) {
@@ -430,6 +594,33 @@ export function shouldForceMoment4ThresholdProbe(params: {
   }
   if (!looksLikeMoment4GrudgePrompt(params.lastAssistantContent)) return false;
   if (looksLikeMisplacedNonGrudgeMoment4Answer(params.userAnswerText)) return false;
+  return true;
+}
+
+/**
+ * After a substantive answer to the keep-investing orientation question, the walk-away threshold follow-up may fire.
+ */
+export function shouldForceMoment4ThresholdProbe(params: {
+  probeAlreadyAsked: boolean;
+  isMoment4: boolean;
+  lastAssistantContent: string;
+  userAnswerText: string;
+  orientationInTranscript: boolean;
+  priorTranscript?: ReadonlyArray<{ role: string; content?: string | null }>;
+}): boolean {
+  if (!params.isMoment4 || params.probeAlreadyAsked) return false;
+  if (!params.orientationInTranscript) return false;
+  if (looksLikeGoBackToPreviousScenarioRequest(params.userAnswerText)) return false;
+  if (looksLikeIncompleteCutOffUserAnswer(params.userAnswerText)) return false;
+  if (looksLikeMoment4ThresholdQuestion(params.lastAssistantContent)) return false;
+  const prior = params.priorTranscript ?? [];
+  if (
+    !looksLikeMoment4OrientationQuestion(params.lastAssistantContent) &&
+    !isAnsweringFirstUserTurnAfterMoment4Orientation(prior)
+  ) {
+    return false;
+  }
+  if (!looksLikeAssessableOrientationAnswer(params.userAnswerText)) return false;
   return true;
 }
 
@@ -452,9 +643,51 @@ function transcriptHasSubstantiveUserAnswerAfterMoment4Grudge(
   });
 }
 
+/** True when `msgs` contains an orientation assistant line and no user message appears after the last such line. */
+export function isAnsweringFirstUserTurnAfterMoment4Orientation(
+  msgsPriorToCurrentUser: ReadonlyArray<{ role: string; content?: string | null }>,
+): boolean {
+  let lastOrientationIdx = -1;
+  for (let i = 0; i < msgsPriorToCurrentUser.length; i++) {
+    const m = msgsPriorToCurrentUser[i];
+    if (m.role === 'assistant' && looksLikeMoment4OrientationQuestion(m.content ?? '')) {
+      lastOrientationIdx = i;
+    }
+  }
+  if (lastOrientationIdx < 0) return false;
+  for (let j = lastOrientationIdx + 1; j < msgsPriorToCurrentUser.length; j++) {
+    const m = msgsPriorToCurrentUser[j];
+    if (m.role !== 'user') continue;
+    const text = (m.content ?? '').trim();
+    if (!text) continue;
+    if (!looksLikeAssessableOrientationAnswer(text)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function transcriptHasSubstantiveUserAnswerAfterMoment4Orientation(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+): boolean {
+  let lastOrientationIdx = -1;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'assistant' && looksLikeMoment4OrientationQuestion(m.content ?? '')) {
+      lastOrientationIdx = i;
+    }
+  }
+  if (lastOrientationIdx < 0) return false;
+  return messages.slice(lastOrientationIdx + 1).some((m) => {
+    if (m.role !== 'user') return false;
+    const text = (m.content ?? '').trim();
+    return looksLikeAssessableOrientationAnswer(text);
+  });
+}
+
 /**
  * When repeat-request lands after only a neutral personal ack, replay the pending M4 commitment
- * threshold follow-up instead of the grudge prompt or the useless ack line.
+ * follow-up (orientation first, then threshold) instead of the grudge prompt or the useless ack line.
  */
 export function resolveMoment4ConfusionRepeatReplayFallback(
   messages: ReadonlyArray<{ role: string; content?: string | null }>,
@@ -464,9 +697,17 @@ export function resolveMoment4ConfusionRepeatReplayFallback(
   },
 ): string | null {
   if (options.currentInterviewMoment !== 4) return null;
+  const orientationInTranscript = transcriptIncludesAssistantMatch(
+    messages,
+    looksLikeMoment4OrientationQuestion,
+  );
+  if (!orientationInTranscript) {
+    if (!transcriptHasSubstantiveUserAnswerAfterMoment4Grudge(messages)) return null;
+    return MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT;
+  }
   if (options.moment4ThresholdProbeAsked) return null;
   if (transcriptIncludesMoment4ThresholdAssistant(messages)) return null;
-  if (!transcriptHasSubstantiveUserAnswerAfterMoment4Grudge(messages)) return null;
+  if (!transcriptHasSubstantiveUserAnswerAfterMoment4Orientation(messages)) return null;
   return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
 }
 

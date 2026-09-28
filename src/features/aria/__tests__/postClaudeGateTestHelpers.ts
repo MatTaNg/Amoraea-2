@@ -28,6 +28,7 @@ export function createMockPostClaudeParams(
     shouldForceScenarioBJamesRepairProbe: false,
     shouldForceScenarioCRepairProbe: false,
     shouldForceScenarioCSophiePerspectiveProbe: false,
+    shouldForceMoment4OrientationProbe: false,
     shouldForceMoment4ThresholdProbe: false,
     specificEmmaLineAlreadyAddressed: false,
     suppressForcedConstructProbesForMetaFrustration: false,

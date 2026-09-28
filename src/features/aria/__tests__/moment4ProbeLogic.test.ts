@@ -7,15 +7,22 @@ import {
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4ThresholdQuestion,
   looksLikeUnassessableMoment4ThresholdAnswer,
+  looksLikeNeedRecognitionInSupportAnswer,
+  shouldAdvanceToMoment5AfterSupportAnswer,
   coerceMoment4ThresholdQuestionForTts,
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT,
+  shouldForceMoment4OrientationProbe,
   shouldForceMoment4ThresholdProbe,
   transcriptIncludesMoment4ThresholdAssistant,
 } from '../moment4ProbeLogic';
 
 const M4_GRUDGE_CARD = MOMENT_4_GRUDGE_QUESTION_TEXT;
+
+const M4_ORIENTATION = MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT;
 
 const M4_THRESHOLD =
   '"At what point do you decide when a relationship is something to work through versus something you need to walk away from?"';
@@ -216,59 +223,107 @@ describe('moment4ProbeLogic', () => {
     const evalResult = evaluateMoment4RelationshipType(answer);
     expect(evalResult.relationshipType).toBe('non_close');
     expect(
-      shouldForceMoment4ThresholdProbe({
+      shouldForceMoment4OrientationProbe({
         isMoment4: true,
-        probeAlreadyAsked: false,
+        orientationProbeAlreadyAsked: false,
         lastAssistantContent: M4_GRUDGE_CARD,
         userAnswerText: answer,
       })
     ).toBe(true);
   });
 
-  it('triggers threshold probe when Moment 4 and probe not yet asked; stops after probe ref is set', () => {
+  it('triggers orientation probe when Moment 4 and probe not yet asked; stops after orientation in transcript', () => {
     const okAnswer = 'I held a grudge against my roommate for a year; we worked through it slowly.';
     expect(
-      shouldForceMoment4ThresholdProbe({
+      shouldForceMoment4OrientationProbe({
         isMoment4: true,
-        probeAlreadyAsked: false,
+        orientationProbeAlreadyAsked: false,
         lastAssistantContent: M4_GRUDGE_CARD,
         userAnswerText: okAnswer,
       })
     ).toBe(true);
     expect(
-      shouldForceMoment4ThresholdProbe({
+      shouldForceMoment4OrientationProbe({
         isMoment4: true,
-        probeAlreadyAsked: true,
+        orientationProbeAlreadyAsked: true,
         lastAssistantContent: M4_GRUDGE_CARD,
         userAnswerText: okAnswer,
       })
     ).toBe(false);
     expect(
-      shouldForceMoment4ThresholdProbe({
+      shouldForceMoment4OrientationProbe({
         isMoment4: false,
-        probeAlreadyAsked: false,
+        orientationProbeAlreadyAsked: false,
         lastAssistantContent: M4_GRUDGE_CARD,
         userAnswerText: okAnswer,
       })
     ).toBe(false);
   });
 
-  it('does not force threshold when user asks to go back to a previous scenario', () => {
+  it('does not force orientation when user asks to go back to a previous scenario', () => {
     expect(
-      shouldForceMoment4ThresholdProbe({
+      shouldForceMoment4OrientationProbe({
         isMoment4: true,
-        probeAlreadyAsked: false,
+        orientationProbeAlreadyAsked: false,
         lastAssistantContent: M4_GRUDGE_CARD,
         userAnswerText: 'Can we go back?',
       })
     ).toBe(false);
     expect(
-      shouldForceMoment4ThresholdProbe({
+      shouldForceMoment4OrientationProbe({
         isMoment4: true,
-        probeAlreadyAsked: false,
+        orientationProbeAlreadyAsked: false,
         lastAssistantContent: M4_GRUDGE_CARD,
         userAnswerText: 'Can we go back?',
         answeringSpecificityFollowUp: true,
+      })
+    ).toBe(false);
+  });
+
+  it('does not force orientation when last assistant was the orientation question (user answering follow-up)', () => {
+    expect(
+      shouldForceMoment4OrientationProbe({
+        isMoment4: true,
+        orientationProbeAlreadyAsked: false,
+        lastAssistantContent: M4_ORIENTATION,
+        userAnswerText: 'We kept working on it because we still cared about each other deeply.',
+      })
+    ).toBe(false);
+  });
+
+  it('does not force orientation when user answers Scenario C fiction instead of the grudge prompt (attempt 153)', () => {
+    const misplaced =
+      "I think they'd need to genuinely try everything first — probably including couples therapy — before calling it. One recurring argument isn't enough. But if Daniel kept leaving and never came back, or if Sophie kept escalating every time Daniel needed space and neither of them could shift their pattern even with help, that's when I'd say it's not working.";
+    expect(looksLikeMisplacedNonGrudgeMoment4Answer(misplaced)).toBe(true);
+    expect(
+      shouldForceMoment4OrientationProbe({
+        isMoment4: true,
+        orientationProbeAlreadyAsked: false,
+        lastAssistantContent: M4_GRUDGE_CARD,
+        userAnswerText: misplaced,
+      })
+    ).toBe(false);
+  });
+
+  it('forces threshold after assessable orientation answer', () => {
+    const orientationAnswer =
+      'We kept working on it because we had built so much together and still believed we could repair things.';
+    expect(
+      shouldForceMoment4ThresholdProbe({
+        isMoment4: true,
+        probeAlreadyAsked: false,
+        lastAssistantContent: M4_ORIENTATION,
+        userAnswerText: orientationAnswer,
+        orientationInTranscript: true,
+      })
+    ).toBe(true);
+    expect(
+      shouldForceMoment4ThresholdProbe({
+        isMoment4: true,
+        probeAlreadyAsked: true,
+        lastAssistantContent: M4_ORIENTATION,
+        userAnswerText: orientationAnswer,
+        orientationInTranscript: true,
       })
     ).toBe(false);
   });
@@ -280,20 +335,7 @@ describe('moment4ProbeLogic', () => {
         probeAlreadyAsked: false,
         lastAssistantContent: M4_THRESHOLD,
         userAnswerText: 'I would leave when trust was gone for good.',
-      })
-    ).toBe(false);
-  });
-
-  it('does not force threshold when user answers Scenario C fiction instead of the grudge prompt (attempt 153)', () => {
-    const misplaced =
-      "I think they'd need to genuinely try everything first — probably including couples therapy — before calling it. One recurring argument isn't enough. But if Daniel kept leaving and never came back, or if Sophie kept escalating every time Daniel needed space and neither of them could shift their pattern even with help, that's when I'd say it's not working.";
-    expect(looksLikeMisplacedNonGrudgeMoment4Answer(misplaced)).toBe(true);
-    expect(
-      shouldForceMoment4ThresholdProbe({
-        isMoment4: true,
-        probeAlreadyAsked: false,
-        lastAssistantContent: M4_GRUDGE_CARD,
-        userAnswerText: misplaced,
+        orientationInTranscript: true,
       })
     ).toBe(false);
   });
@@ -348,6 +390,20 @@ describe('moment4ProbeLogic', () => {
         looksLikeAssessableMoment4ThresholdAnswer(
           "If you're both committed to making it work and committed to growth then I think you should do whatever it takes.",
         ),
+      ).toBe(true);
+    });
+  });
+
+  describe('support need-recognition answers', () => {
+    it('treats "I asked her" as a valid need-recognition answer', () => {
+      expect(looksLikeNeedRecognitionInSupportAnswer('I asked her.')).toBe(true);
+      expect(looksLikeNeedRecognitionInSupportAnswer('i asked her')).toBe(true);
+      expect(looksLikeNeedRecognitionInSupportAnswer('I asked.')).toBe(true);
+      expect(
+        shouldAdvanceToMoment5AfterSupportAnswer({
+          lastAssistantContent: MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT,
+          userAnswerText: 'I asked her.',
+        }),
       ).toBe(true);
     });
   });

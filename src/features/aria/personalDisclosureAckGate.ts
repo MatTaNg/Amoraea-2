@@ -1,5 +1,6 @@
 import { isStandalonePersonalDisclosureAcknowledgment } from './personalDisclosureAckPatterns';
 export { isStandalonePersonalDisclosureAcknowledgment } from './personalDisclosureAckPatterns';
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
 import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -72,7 +73,10 @@ export function resolveScenarioFollowUpAfterSuppressedResponse(
     }
   }
 
+  // S1 hypothetical Ryan repair is retired — never reinject it after elongating suppression
+  // (coerce would empty it and leave the mic spinning on "Got it." alone).
   if (
+    !isInterviewCanonicalProbeRetired('s1_repair') &&
     (opts.shouldInjectScenarioARepairAfterContemptAnswer ||
       (isActiveScenarioAConstructProbeTurn(opts.currentScenario, opts.interviewMoment) &&
         opts.scenarioAContemptProbeAsked &&

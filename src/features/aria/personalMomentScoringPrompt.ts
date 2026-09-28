@@ -100,15 +100,19 @@ export function coerceMentalizingOvercertaintyFromModelJson(parsed: {
 }
 
 const MOMENT_META = {
-  name: 'Moment 4 (Personal Grudge/Dislike)',
+  name: 'Moment 4 (Personal Grudge/Dislike + commitment slices)',
   constructs:
-    'contempt_recognition (only ongoing bitterness/hostility toward the real person named), contempt_expression, commitment_threshold, accountability, mentalizing — NOT repair, NOT attunement, NOT appreciation, NOT regulation',
+    'contempt_recognition (only ongoing bitterness/hostility toward the real person named), contempt_expression, persistence_exit_judgment (walk-away follow-up; dual-write commitment_threshold), commitment_orientation (keep-investing follow-up), accountability, mentalizing, regulation when autobiographical evidence is present; repair only if meaningful spontaneous repair process is present — NOT attunement, NOT appreciation',
   markerIds: [
     'contempt_recognition',
     'contempt_expression',
+    'persistence_exit_judgment',
+    'commitment_orientation',
     'commitment_threshold',
     'accountability',
     'mentalizing',
+    'regulation',
+    'repair',
   ] as const,
 };
 
@@ -193,12 +197,17 @@ MOMENT 4 — SCORE 1 ONLY FOR ACTIVE FAILURE (when there IS engagement):
 Reserve score 1 for active construct failure: e.g. unreflective contempt expression, explicit refusal of any responsibility, or hostile framing. Do NOT use 1 for mere absence of signal — that is null as above.
 
 MOMENT 4 — CONSTRUCT SCOPE (this slice only):
-- **repair:** Do not score. Set \`repair\` to JSON null if present in your template keys, or omit it — this moment does not assess live repair skill.
+- **repair:** Score **only** if the user volunteered a **meaningful repair process** unprompted (apology, amends, talking a rupture through, ownership plus a next step). Tag keyEvidence as **spontaneous**. If they never described repair, set \`repair\` to JSON null — absence of spontaneous repair is missing evidence, not a low score. Do not treat appreciation or "I moved on" alone as repair.
 - **contempt_recognition:** Score ONLY if the user shows ongoing bitterness, hostility, or contemptuous narrative toward the real person they named (not generic conflict description). If there is no assessable signal for that specific recognition strand, use JSON null with keyEvidence noting it was not assessed.
 - **contempt_expression:** (Real person, not a vignette — but same **CONTEMPT_EXPRESSION** scale as scenarios.)${CONTEMPT_EXPRESSION_SCORING_RUBRIC}
   In this moment, chronic "I can’t win" / global blame **without** reflective ownership may sit in the mid/lower **expression** range when it functions as a contemptuous narrative; that is separate from **fair** moral language about the other’s **concrete** harmful **actions** (not automatically low 1–4 per the rubric).
 - **attunement:** Do not score. Omit or null — the grudge prompt does not test real-time attunement to another's emotional state.
-- **regulation:** Do not score. Omit or null — regulation is assessed only from Scenario C (pursue-withdraw).
+- **regulation:** Score when the grudge or commitment answers show how they managed their own emotional state under interpersonal strain. Prefer autobiographical behavioral evidence over abstract claims. If no meaningful regulation evidence, use JSON null — do not invent a midpoint.
+- **persistence_exit_judgment:** Primary score for the walk-away / work-through follow-up. Also copy the same numeric score to **commitment_threshold** for historical rollup.
+- **commitment_orientation:** Primary score for the complementary "what made you keep investing" follow-up. Persist independently; do not average it into persistence_exit_judgment.
+
+CONTEXTUAL REASONING (uses existing ego-development / depth framework — not a new pillar):
+Higher-quality reasoning includes contextual reasoning, calibrated uncertainty, multiple plausible interpretations, and holding competing truths. Lower-quality reasoning includes rigid always/never rules, black-and-white interpretations, unjustified certainty, and rote therapy language without contextual understanding. Let this inform mentalizing, ego_development_level, and mentalizing_overcertainty — do not create a separate pillar score.
 
 M4 QUESTION DESIGN AND SCORING CALIBRATION
 
@@ -244,6 +253,10 @@ Treat resolution orientation as absent when "I moved on" / "I don't think about 
 If the surrounding tone is dismissive, contemptuous, or frames the other person as entirely at fault with no curiosity, treat "I moved on" as consistent with unresolved hostility regardless of the phrasing.
 
 Other resolution-orientation indicators remain direct evidence when present: explicit forgiveness, perspective-taking, acknowledgment of personal growth, or ongoing relationship survival. Do not include "neutral acceptance without ongoing hostility" as a standalone indicator.
+
+COMMITMENT SLICES (persist independently; both feed commitment_persistence):
+- **persistence_exit_judgment** — walk-away vs work-through follow-up. Dual-write the same number to **commitment_threshold**.
+- **commitment_orientation** — what made them keep investing rather than pulling away. Do not average into persistence_exit_judgment.
 
 COMMITMENT_THRESHOLD (Moment 4 — first-person):
 - **Low scores (about 2–4):** Unconditional persistence, "I never walk away," "just keep trying no matter what," or no workable invest/communicate/assess/decide structure — **without** reflective limits or self-critique.

@@ -36,7 +36,6 @@ import {
   resolveScenarioBActiveQuestionWhenInProgress,
   resolveScenarioBNextRequiredFollowUpPrompt,
   scenarioBMinimumEngagementForHandoff,
-  scenarioBJamesRepairProbeAlreadySatisfied,
 } from '@features/aria/scenarioBProbeLogic';
 import {
   resolveScenarioANextRequiredFollowUpPrompt,
@@ -142,8 +141,7 @@ function inferCompletedScenarioForUngroundedBoundaryRebuild(args: {
   }
   if (
     args.s2ToS3BoundaryCue &&
-    scenarioBMinimumEngagementForHandoff(args.messages) &&
-    scenarioBJamesRepairProbeAlreadySatisfied(args.messages)
+    scenarioBMinimumEngagementForHandoff(args.messages)
   ) {
     return 2;
   }
@@ -319,7 +317,7 @@ export function coerceScenarioBoundaryHandoffDisplayText(
     (activeScenario === 2 || (activeScenario === 3 && interviewMoment <= 3)) &&
     !s1HandoffCue &&
     (hasS3Vignette || s2ToS3HandoffCue || isScenarioBBoundaryReflectionWithoutNextVignette(raw)) &&
-    !scenarioBJamesRepairProbeAlreadySatisfied(messages)
+    !scenarioBMinimumEngagementForHandoff(messages)
   ) {
     const redirect = resolveScenarioBNextRequiredFollowUpPrompt(messages);
     void remoteLog('[S2_PREMATURE_S3_HANDOFF_BLOCKED]', {
@@ -432,8 +430,7 @@ export function coerceScenarioBoundaryHandoffDisplayText(
   const s2ToS3Handoff =
     s2ToS3HandoffContext &&
     s2ToS3BoundaryCue &&
-    scenarioBMinimumEngagementForHandoff(messages) &&
-    scenarioBJamesRepairProbeAlreadySatisfied(messages);
+    scenarioBMinimumEngagementForHandoff(messages);
 
   if (s2ToS3Handoff) {
     const coerced = clientBundle(

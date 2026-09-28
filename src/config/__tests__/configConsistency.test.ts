@@ -2,8 +2,6 @@ import { describe, expect, it } from '@jest/globals';
 
 import {
   GATE_MARKER_BASE_WEIGHTS,
-  GATE_PASS_WEIGHTED_MIN,
-  REFERRAL_WEIGHTED_PASS_MIN,
 } from '../scoring/interviewGateThresholds';
 import {
   ELABORATION_COMPENSATORY_REPAIR_MAX_WORD_COUNT,
@@ -32,13 +30,19 @@ import { EMOTION_ITEM_CORRECT_ANSWERS } from '../scoring/emotionRecognitionItems
 import { COMMUNICATION_FLOOR_MIN_AVG_WORDS } from '../scoring/communicationFloor';
 
 describe('config consistency', () => {
-  it('gate marker base weights sum to 1', () => {
+  it('gate marker base weights are the eight vNext pillars and sum to 1', () => {
+    expect(GATE_MARKER_BASE_WEIGHTS).toEqual({
+      destructive_conflict: 0.18,
+      accountability: 0.18,
+      repair: 0.17,
+      regulation: 0.14,
+      responsiveness_support: 0.09,
+      mentalizing: 0.07,
+      commitment_persistence: 0.07,
+      appreciation: 0.1,
+    });
     const sum = Object.values(GATE_MARKER_BASE_WEIGHTS).reduce((a, b) => a + b, 0);
-    expect(sum).toBeCloseTo(1, 5);
-  });
-
-  it('referral pass threshold is below standard pass threshold', () => {
-    expect(REFERRAL_WEIGHTED_PASS_MIN).toBeLessThan(GATE_PASS_WEIGHTED_MIN);
+    expect(sum).toBeCloseTo(1, 10);
   });
 
   it('pillar narrative bands are strictly ordered', () => {

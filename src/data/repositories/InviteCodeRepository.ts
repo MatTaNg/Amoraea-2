@@ -8,6 +8,7 @@ import {
 } from '@features/relationshipValidation/constants';
 import { mapGenderToDb } from '@/shared/utils/genderMapper';
 import type { Gender } from '@domain/models/Profile';
+import { parseSmsMarketingOptIn } from '@features/notifications/smsMarketingOptIn';
 
 const INVITE_CODE_LENGTH = 6;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Excluded I,O,0,1 for clarity
@@ -50,7 +51,14 @@ export class InviteCodeRepository {
 
   async ensureUserWithInviteCode(
     userId: string,
-    options: { email?: string; referralCode?: string; age?: number; gender?: Gender }
+    options: {
+      email?: string;
+      phone?: string;
+      referralCode?: string;
+      age?: number;
+      gender?: Gender;
+      smsMarketingOptIn?: boolean;
+    }
   ): Promise<{ inviteCode: string }> {
     const { data: existing } = await supabase
       .from('users')
@@ -66,6 +74,20 @@ export class InviteCodeRepository {
           .update({ validation_track: RELATIONSHIP_VALIDATION_TRACK })
           .eq('id', userId)
           .is('validation_track', null);
+      }
+      if (options.phone?.trim()) {
+        await supabase
+          .from('users')
+          .update({ phone: options.phone.trim() })
+          .eq('id', userId)
+          .is('phone', null);
+      }
+      if (options.email?.trim()) {
+        await supabase
+          .from('users')
+          .update({ email: options.email.trim() })
+          .eq('id', userId)
+          .is('email', null);
       }
       return { inviteCode: existing.invite_code || '' };
     }
@@ -100,10 +122,12 @@ export class InviteCodeRepository {
     const { error } = await supabase.from('users').insert({
       id: userId,
       email: options.email ?? null,
+      phone: options.phone ?? null,
       invite_code: inviteCode,
       referred_by_id: referredById,
       is_alpha_tester: isAlphaTester,
       referral_boost_active: referredById != null,
+      sms_marketing_opt_in: parseSmsMarketingOptIn(options.smsMarketingOptIn),
       ...(isRelationshipValidation ? { validation_track: RELATIONSHIP_VALIDATION_TRACK } : {}),
     });
 

@@ -1,6 +1,4 @@
 import {
-  AAQ2_HIGH_AVOIDANCE_MIN,
-  AAQ2_LOW_AVOIDANCE_MAX,
   AAQ2_STRONG_MAX,
   ANXIETY_AVERAGE_MAX,
   ANXIETY_STRONG_MAX,
@@ -22,22 +20,19 @@ import {
   PSYCHOMETRIC_MODIFIER_BELOW_AVERAGE,
   PSYCHOMETRIC_MODIFIER_ISOLATED,
   PSYCHOMETRIC_MODIFIER_LOW,
+  PSYCHOMETRIC_MODIFIER_MIN,
   PSYCHOMETRIC_MODIFIER_POOR,
   PSYCHOMETRIC_MODIFIER_STRONG,
   RFQ_AVERAGE_MIN,
-  RFQ_MENTALIZING_HIGH_SELF_REPORT_MIN,
-  RFQ_MENTALIZING_LOW_SELF_REPORT_MAX,
   RFQ_POOR_MIN,
   RFQ_STRONG_MIN,
   RSES_AVERAGE_MIN,
-  RSES_LOW_MIN,
   RSES_LOW_SELF_ESTEEM_MAX,
   RSES_STRONG_MIN,
   SCS_ORIENTATION_BALANCED_DIFF_MIN,
   SCS_ORIENTATION_STRONG_DIFF_MIN,
   SCS_ORIENTATION_STRONGLY_EXTERNAL_DIFF_MAX,
   SCS_SF_BELOW_AVERAGE_MIN,
-  SCS_SF_LOW_MIN,
   SCS_SF_STRONG_MIN,
   SD3_AVERAGE_MAX,
   SD3_CONTEMPT_DIVERGENCE_MIN,
@@ -49,17 +44,13 @@ import {
   INTERVIEW_CONTEMPT_WEAK_MAX,
   INTERVIEW_EGO_DEVELOPMENT_STRONG_MIN,
   INTERVIEW_EGO_DEVELOPMENT_WEAK_MAX,
-  INTERVIEW_MENTALIZING_STRONG_MIN,
-  INTERVIEW_MENTALIZING_WEAK_MAX,
-  INTERVIEW_REGULATION_STRONG_MIN,
-  INTERVIEW_REGULATION_WEAK_MAX,
-  INTERVIEW_VOCAB_DENSITY_HEALTHY_MIN,
   INTERVIEW_VOCAB_DENSITY_STRONG_MIN,
 } from '../../../src/config/psychometrics/interviewSignalConsistency.ts';
 import {
   AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD,
-  ANXIETY_TRAIT_HIGH_FLOOR_THRESHOLD,
   BRS_LOW_RESILIENCE_FLOOR_THRESHOLD,
+  RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD,
+  SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD,
   SD3_NARCISSISM_FLOOR_THRESHOLD,
 } from '../../../src/config/psychometrics/floors.ts';
 import { GASP_EXTREME_EXTERNALIZATION_FLOOR_THRESHOLD } from './psychometricFloorBreaches.ts';
@@ -191,10 +182,11 @@ export function computeGaspExternalizationModifier(
 }
 
 /**
- * Sums per-instrument three-tier band penalties into a single psychometric modifier applied to the final gate score.
- * Each instrument uses strong (0), average (-0.10), or poor (-0.25) bands; extreme scores are handled by floor
- * breaches, not additional modifier tiers. Range is [worst-case negative sum, 0] — never a positive boost.
- * Worst-case total across 9 active instruments: -2.10 (8 × -0.25 poor bands + NPI average -0.10).
+ * Sums per-instrument band penalties into a single psychometric modifier applied to the final gate score.
+ * Live instruments: BRS, trait anxiety, SCS-SF, GASP, RSES.
+ * Floor breaches fail the gate independently and contribute 0 for that instrument (never floor + extra penalty).
+ * The summed modifier is clamped to {@link PSYCHOMETRIC_MODIFIER_MIN} (−0.35), an Amoraea heuristic.
+ * Range is [PSYCHOMETRIC_MODIFIER_MIN, 0] — never a positive boost.
  */
 export function computePsychometricModifier(
   scores: PsychometricScores,
@@ -268,12 +260,9 @@ export function computePsychometricModifier(
     } else if (s < ANXIETY_AVERAGE_MAX) {
       anxietyTraitComponent = PSYCHOMETRIC_MODIFIER_AVERAGE;
       anxietyTraitBand = 'average anxiety';
-    } else if (s < ANXIETY_TRAIT_HIGH_FLOOR_THRESHOLD) {
+    } else {
       anxietyTraitComponent = PSYCHOMETRIC_MODIFIER_POOR;
       anxietyTraitBand = 'poor — high anxiety';
-    } else {
-      anxietyTraitComponent = PSYCHOMETRIC_MODIFIER_STRONG;
-      anxietyTraitBand = 'floor breach';
     }
     modifier += anxietyTraitComponent;
   }
@@ -281,21 +270,18 @@ export function computePsychometricModifier(
   let scsSfBand = 'not assessed';
   if (scores.scsSfScore !== null) {
     const s = scores.scsSfScore;
-    // SCS-SF recalibrated: scores above midpoint (3.5+) should not trigger modifier penalties.
-    // A score of 3.875 represents average-to-good self-compassion and is not a relational risk signal.
-    // Penalty bands begin below 3.5, meaningful penalty below 2.5.
-    if (s >= SCS_SF_STRONG_MIN) {
+    if (s < SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD) {
+      scsSfComponent = PSYCHOMETRIC_MODIFIER_STRONG;
+      scsSfBand = 'floor breach';
+    } else if (s >= SCS_SF_STRONG_MIN) {
       scsSfComponent = PSYCHOMETRIC_MODIFIER_STRONG;
       scsSfBand = 'strong self-compassion';
     } else if (s >= SCS_SF_BELOW_AVERAGE_MIN) {
       scsSfComponent = PSYCHOMETRIC_MODIFIER_BELOW_AVERAGE;
       scsSfBand = 'below average self-compassion';
-    } else if (s >= SCS_SF_LOW_MIN) {
+    } else {
       scsSfComponent = PSYCHOMETRIC_MODIFIER_AVERAGE;
       scsSfBand = 'low self-compassion';
-    } else {
-      scsSfComponent = PSYCHOMETRIC_MODIFIER_STRONG;
-      scsSfBand = 'floor breach';
     }
     modifier += scsSfComponent;
   }
@@ -340,7 +326,7 @@ export function computePsychometricModifier(
       dweckComponent = PSYCHOMETRIC_MODIFIER_STRONG;
       dweckBand = 'floor breach';
     }
-    modifier += dweckComponent;
+    // Historical Dweck combined score is not applied to new-user modifiers.
   }
 
   let aaq2Band = 'not assessed';
@@ -356,49 +342,25 @@ export function computePsychometricModifier(
       aaq2Component = PSYCHOMETRIC_MODIFIER_STRONG;
       aaq2Band = 'floor breach';
     }
-    modifier += aaq2Component;
-
-    if (interviewSignals) {
-      const highAvoidance = s >= AAQ2_HIGH_AVOIDANCE_MIN;
-      const lowAvoidance = s <= AAQ2_LOW_AVOIDANCE_MAX;
-      const behavioralAvoidance =
-        interviewSignals.disclosureCalibration === 'underdisclosure' ||
-        interviewSignals.moment5Concreteness === 'low' ||
-        interviewSignals.moment5Concreteness === 'absent' ||
-        (interviewSignals.personalMomentVocabDensity != null &&
-          interviewSignals.personalMomentVocabDensity < INTERVIEW_VOCAB_DENSITY_HEALTHY_MIN) ||
-        (interviewSignals.regulationPillar != null && interviewSignals.regulationPillar <= INTERVIEW_REGULATION_WEAK_MAX);
-      const behavioralHealth =
-        interviewSignals.disclosureCalibration === 'calibrated' &&
-        (interviewSignals.moment5Concreteness === 'high' ||
-          interviewSignals.moment5Concreteness === 'moderate') &&
-        (interviewSignals.personalMomentVocabDensity ?? 0) >= INTERVIEW_VOCAB_DENSITY_HEALTHY_MIN &&
-        (interviewSignals.regulationPillar ?? 0) >= INTERVIEW_REGULATION_STRONG_MIN;
-
-      if (highAvoidance && behavioralHealth) consistencyFlags.push('aaq2_consistency_review');
-      if (lowAvoidance && behavioralAvoidance) consistencyFlags.push('aaq2_consistency_review');
-    }
+    // AAQ-II is retired from the active battery; do not apply a new-user modifier or AAQ consistency flags.
   }
 
   let rsesBand = 'not assessed';
   if (scores.rsesScore !== null) {
     const s = scores.rsesScore;
-    // RSES recalibrated: score of 26/40 sits at the bottom of the normal range,
-    // not in clinical low-esteem territory. The -0.25 penalty is reserved for
-    // scores below 20 where self-esteem is genuinely problematic for relational functioning.
-    // Mild penalty (-0.10) begins below 30, meaningful penalty (-0.15) below 25.
-    if (s >= RSES_STRONG_MIN) {
+    // RSES ≤ 20 is the Amoraea admissions threshold (hard fail), not a modifier band.
+    if (s <= RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD) {
+      rsesComponent = PSYCHOMETRIC_MODIFIER_STRONG;
+      rsesBand = 'floor breach';
+    } else if (s >= RSES_STRONG_MIN) {
       rsesComponent = PSYCHOMETRIC_MODIFIER_STRONG;
       rsesBand = 'healthy self-esteem';
     } else if (s >= RSES_AVERAGE_MIN) {
       rsesComponent = PSYCHOMETRIC_MODIFIER_AVERAGE;
       rsesBand = 'below average self-esteem';
-    } else if (s >= RSES_LOW_MIN) {
+    } else {
       rsesComponent = PSYCHOMETRIC_MODIFIER_LOW;
       rsesBand = 'low self-esteem';
-    } else {
-      rsesComponent = PSYCHOMETRIC_MODIFIER_POOR;
-      rsesBand = 'very low self-esteem';
     }
     modifier += rsesComponent;
 
@@ -431,7 +393,7 @@ export function computePsychometricModifier(
       scsComponent = PSYCHOMETRIC_MODIFIER_POOR;
       scsOrientation = 'poor — externally oriented';
     }
-    modifier += scsComponent;
+    // Retired SCS public/private orientation is historical-only — do not apply a new-user modifier.
 
     if (interviewSignals) {
       const stronglyExternal = diff <= SCS_ORIENTATION_STRONGLY_EXTERNAL_DIFF_MAX;
@@ -461,7 +423,7 @@ export function computePsychometricModifier(
       mspssComponent = PSYCHOMETRIC_MODIFIER_ISOLATED;
       mspssBand = 'isolated — high dependency risk';
     }
-    modifier += mspssComponent;
+    // MSPSS is retired from the active battery — do not apply a new-user modifier.
   }
 
   let sd3NarcissismBand = 'not assessed';
@@ -485,7 +447,7 @@ export function computePsychometricModifier(
       sd3NarcissismComponent = PSYCHOMETRIC_MODIFIER_STRONG;
       sd3NarcissismBand = 'floor breach';
     }
-    modifier += sd3NarcissismComponent;
+    // SD3 narcissism is retired from the active battery — do not apply a new-user modifier.
 
     if (interviewSignals && s > SD3_CONTEMPT_DIVERGENCE_MIN && (interviewSignals.contemptPillar ?? 10) < INTERVIEW_CONTEMPT_WEAK_MAX) {
       consistencyFlags.push('sd3_narcissism_contempt_divergence');
@@ -508,22 +470,11 @@ export function computePsychometricModifier(
       rfqComponent = PSYCHOMETRIC_MODIFIER_STRONG;
       rfqBand = 'floor breach';
     }
-    modifier += rfqComponent;
-
-    if (interviewSignals) {
-      const mentalizing = interviewSignals.mentalizingPillar ?? null;
-      if (mentalizing !== null) {
-        if (s < RFQ_MENTALIZING_LOW_SELF_REPORT_MAX && mentalizing >= INTERVIEW_MENTALIZING_STRONG_MIN) {
-          consistencyFlags.push('rfq_mentalizing_divergence_low_self_report');
-        }
-        if (s >= RFQ_MENTALIZING_HIGH_SELF_REPORT_MIN && mentalizing <= INTERVIEW_MENTALIZING_WEAK_MAX) {
-          consistencyFlags.push('rfq_mentalizing_divergence_high_self_report');
-        }
-      }
-    }
+    // RFQ-8 is retired from the active battery; do not apply a new-user modifier or RFQ consistency flags.
   }
 
   modifier = Math.min(0, Math.round(modifier * 100) / 100);
+  modifier = Math.max(PSYCHOMETRIC_MODIFIER_MIN, modifier);
 
   const straightLineFlags = detectPsychometricStraightLineFlags(
     {

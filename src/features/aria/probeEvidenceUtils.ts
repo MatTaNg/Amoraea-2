@@ -153,7 +153,9 @@ export function isNoEvidenceText(text: string | null | undefined): boolean {
     /\bnot scored\b.*\bskip\b.*\bfrustration\b/i.test(t) ||
     /rubric excerpt omitted in model json/i.test(t) ||
     /moment 4 incomplete model output/i.test(t) ||
-    /score present, evidence not returned by model/i.test(t)
+    /score present, evidence not returned by model/i.test(t) ||
+    /no assessable repair evidence/i.test(t) ||
+    /repair (was )?not (meaningfully )?assessed/i.test(t)
   );
 }
 

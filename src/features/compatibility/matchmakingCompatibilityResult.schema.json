@@ -47,13 +47,7 @@
         "attachment": { "type": "number", "minimum": 0, "maximum": 1 },
         "values": { "type": "number", "minimum": 0, "maximum": 1 },
         "style": { "type": "number", "minimum": 0, "maximum": 1 },
-        "semantic": { "type": "number", "minimum": 0, "maximum": 1 },
-        "sexualCommunicationAdjustment": {
-          "type": "number",
-          "minimum": -0.1,
-          "maximum": 0.1,
-          "description": "Soft adjustment: +0.03 if sexual comm means within 0.5, -0.05 if diff > 1.5."
-        }
+        "semantic": { "type": "number", "minimum": 0, "maximum": 1 }
       }
     },
     "dealbreakerMultiplier": { "type": "number", "minimum": 0, "maximum": 1 },

@@ -13,6 +13,7 @@ import {
   looksLikeSkipConfirmationConnectivityGreeting,
   resolveMetaCommentForInterviewTurn,
 } from '@features/aria/metaCommentClassification';
+import { looksLikeClearSkipRequestPhrase } from '@features/aria/metaCommentPatternScoring';
 import type { PreClaudeFrustrationSkipGateState } from '@features/aria/resolvePreClaudeFrustrationSkipGates';
 import type { PreClaudeTurnSkipAndMetaGateResult } from '@features/aria/resolvePreClaudeTurnSkipAndMetaGates';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
@@ -64,6 +65,19 @@ export async function resolvePreClaudeMetaCommentGateState(
     micStopTelemetry: deps.lastUserTurnMicStopTelemetryRef.current,
     interviewSessionId: deps.interviewSessionIdRef.current,
   });
+  // Phrase-first restore: LLM must never leave "Can I skip this question?" as confusion.
+  if (
+    looksLikeClearSkipRequestPhrase(trimmed) &&
+    metaResolved.raw?.type !== 'skip_request' &&
+    !metaResolved.exemptMetaCommentTurn
+  ) {
+    const skipClass = { type: 'skip_request' as const, confidence: 0.95 };
+    metaResolved = {
+      ...metaResolved,
+      raw: skipClass,
+      effective: skipClass,
+    };
+  }
   void remoteLog('meta_comment_classification_result', {
     transcript_text: trimmed,
     word_count: wcForMetaExempt,
@@ -93,6 +107,12 @@ export async function resolvePreClaudeMetaCommentGateState(
     } else if (priorMetaKind === 'sufficiency_check_in') {
       metaCommentClassification = { type: 'checking_in', confidence: 0.72 };
     }
+  }
+  if (
+    looksLikeClearSkipRequestPhrase(trimmed) &&
+    metaCommentClassification?.type !== 'skip_request'
+  ) {
+    metaCommentClassification = { type: 'skip_request', confidence: 0.95 };
   }
   let skipConfirmationGreetingReconnectInjection = false;
   if (

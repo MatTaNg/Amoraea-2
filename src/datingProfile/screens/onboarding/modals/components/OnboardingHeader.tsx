@@ -55,6 +55,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     flex: 1,
     flexShrink: 1,
+    minWidth: 0,
     fontSize: 17,
     fontWeight: '700',
     color: theme.colors.text,

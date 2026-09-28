@@ -2,10 +2,11 @@ import {
   promoteMoment5LegacyContemptForScoringResult,
   sanitizeMoment5PersonalScoresForAggregate,
   sanitizePersonalMomentScoresForAggregate,
+  sanitizeSupportMomentScoresForAggregate,
 } from '../personalMomentSliceSanitize';
 
 describe('sanitizePersonalMomentScoresForAggregate', () => {
-  it('strips non-assessed keys from Moment 4 (including spurious repair)', () => {
+  it('strips leaked Moment 4 repair without spontaneous evidence', () => {
     const out = sanitizePersonalMomentScoresForAggregate({
       pillarScores: { repair: 7, mentalizing: 8, attunement: 2 },
       keyEvidence: { repair: 'x', mentalizing: 'y' },
@@ -13,6 +14,22 @@ describe('sanitizePersonalMomentScoresForAggregate', () => {
     expect(out?.pillarScores.repair).toBeUndefined();
     expect(out?.pillarScores.mentalizing).toBe(8);
     expect(out?.keyEvidence?.repair).toBeUndefined();
+  });
+
+  it('keeps Moment 4 regulation when the model scored it', () => {
+    const out = sanitizePersonalMomentScoresForAggregate({
+      pillarScores: { mentalizing: 8, regulation: 6, repair: 7 },
+    });
+    expect(out?.pillarScores.regulation).toBe(6);
+    expect(out?.pillarScores.repair).toBeUndefined();
+  });
+
+  it('keeps Moment 4 repair when evidence is assessable spontaneous process', () => {
+    const out = sanitizePersonalMomentScoresForAggregate({
+      pillarScores: { mentalizing: 8, repair: 7 },
+      keyEvidence: { repair: 'spontaneous: I apologized and we talked it through.' },
+    });
+    expect(out?.pillarScores.repair).toBe(7);
   });
 
   it('strips Moment 4 keys case-insensitively (model may echo Repair)', () => {
@@ -70,5 +87,30 @@ describe('promoteMoment5LegacyContemptForScoringResult', () => {
     promoteMoment5LegacyContemptForScoringResult(row);
     expect(row.pillarScores.contempt_expression).toBe(7);
     expect(row.keyEvidence?.contempt_expression).toBe('legacy evidence');
+  });
+});
+
+describe('sanitizeSupportMomentScoresForAggregate', () => {
+  it('keeps responsiveness slices and drops leaked repair without process evidence', () => {
+    const out = sanitizeSupportMomentScoresForAggregate({
+      pillarScores: {
+        responsiveness_support: 8,
+        need_recognition: 7,
+        attunement: 6,
+        repair: 9,
+      },
+    });
+    expect(out?.pillarScores.responsiveness_support).toBe(8);
+    expect(out?.pillarScores.need_recognition).toBe(7);
+    expect(out?.pillarScores.attunement).toBe(6);
+    expect(out?.pillarScores.repair).toBeUndefined();
+  });
+
+  it('keeps support-moment repair when spontaneous process evidence is present', () => {
+    const out = sanitizeSupportMomentScoresForAggregate({
+      pillarScores: { responsiveness_support: 8, repair: 6 },
+      keyEvidence: { repair: 'I apologized and we talked it through after I showed up late.' },
+    });
+    expect(out?.pillarScores.repair).toBe(6);
   });
 });

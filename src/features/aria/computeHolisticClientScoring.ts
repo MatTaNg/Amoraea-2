@@ -38,7 +38,7 @@ import { resolveMoment4UserTextForGate } from '@features/aria/personalMomentSlic
 import type { ResponseConcretenessLevel } from '@features/aria/personalMomentConcreteness';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
-import { resolveWeightedPassMinAfterReferralEffects } from '@features/referrals/referralInterview';
+import { GATE_PASS_WEIGHTED_MIN } from '@features/aria/computeGateResult';
 import { remoteLog } from '@utilities/remoteLog';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
 import { withRetry } from '@utilities/withRetry';
@@ -131,7 +131,7 @@ export async function computeHolisticClientScoring(
   }
 
   let parsed: InterviewResults = holisticParsed ?? EMPTY_HOLISTIC_RESULT;
-  const weightedMin = await resolveWeightedPassMinAfterReferralEffects(deps.userId);
+  const weightedMin = GATE_PASS_WEIGHTED_MIN;
   const gateBlockedHolistic = false;
 
   const m4HolisticSlEarly = markerSliceFromStoredScenarioMoment(holisticStoredPatterns?.moment_4_scores);
@@ -179,9 +179,10 @@ export async function computeHolisticClientScoring(
         keyEvidence: deps.scenarioScoresRef.current[3]!.keyEvidence,
         mentalizing_overcertainty: deps.scenarioScoresRef.current[3]!.mentalizing_overcertainty === true,
       },
-      m4RollupSl,
-      m5RollupSl,
-    ];
+    m4RollupSl,
+    m5RollupSl,
+    markerSliceFromStoredScenarioMoment(holisticStoredPatterns?.moment_support_scores),
+  ];
     const mergedPillars = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesForPillars, {
       egoDevelopmentLevel: extractEgoDevelopmentLevel(parsed),
       defensePatternTranscript: msgs,
@@ -218,6 +219,7 @@ export async function computeHolisticClientScoring(
       : null,
     m4HolisticSl,
     m5HolisticSl,
+    markerSliceFromStoredScenarioMoment(holisticStoredPatterns?.moment_support_scores),
   ];
   const holisticDisclosureCalibration = disclosureCalibrationFromMarkerSlices(
     markerSlicesHolisticForDisclosure,

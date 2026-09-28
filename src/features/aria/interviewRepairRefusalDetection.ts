@@ -37,7 +37,9 @@ import {
   scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent,
 } from './scenarioBProbeLogic';
 import { looksLikeInterviewClosingAssistantMessage } from './elongatingProbe';
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
 import { isShortAckOnlySentence } from './interviewerFrameworkPrompt';
+import { scenarioAContemptConstructReadyForRetiredRepairHandoff } from './scenarioAContemptProbeCoverage';
 
 export type RepairRefusalTriggerReason =
   | 'explicit_refusal'
@@ -460,6 +462,63 @@ export function shouldAdvanceScenarioAAfterSatisfiedRepair(
 ): boolean {
   if (interviewMoment !== 1) return false;
 
+  // Repair probe is retired: after contempt is answered / covered in Q1 (or a legacy repair answer), advance.
+  if (isInterviewCanonicalProbeRetired('s1_repair')) {
+    let contemptAnswered = false;
+    for (let i = 0; i < messages.length; i += 1) {
+      if (messages[i].role !== 'assistant') continue;
+      if (!looksLikeScenarioAContemptProbeQuestion(messages[i].content ?? '')) continue;
+      for (let j = i + 1; j < messages.length; j += 1) {
+        if (messages[j].role === 'user' && (messages[j].content ?? '').trim()) {
+          contemptAnswered = true;
+          break;
+        }
+      }
+      if (contemptAnswered) break;
+    }
+    const contemptCoveredInQ1 = scenarioAContemptConstructReadyForRetiredRepairHandoff(messages);
+    const repairContext = findLastUserWithPriorScenarioARepairContext(messages);
+    const repairSatisfied =
+      !!repairContext.lastUserContent &&
+      !!repairContext.priorRepairAssistantContent &&
+      (userAnswerSatisfiesScenarioARepairPrompt(
+        repairContext.lastUserContent,
+        repairContext.priorRepairAssistantContent,
+      ) ||
+        userAnswerIncludesExplicitScenarioARepairAsRyan(repairContext.lastUserContent));
+    if (!contemptAnswered && !contemptCoveredInQ1 && !repairSatisfied) return false;
+
+    const draft = strippedAssistantDraft.trim();
+    if (!draft) return true;
+    if (isShortAckOnlySentence(draft)) return true;
+    if (hasScenarioBoundaryWrapPhrase(draft) && !textContainsScenarioBVignetteBody(draft)) {
+      return true;
+    }
+    if (isScenarioABoundaryReflectionWithoutNextVignette(draft)) return true;
+    if (looksLikeInterviewClosingAssistantMessage(draft)) return true;
+    if (isScenarioAHandoffWithoutNextVignette(draft) || isTruncatedScenarioAHandoffFragment(draft)) {
+      return true;
+    }
+    if (
+      looksLikeScenarioARepairQuestion(draft) ||
+      looksLikeScenarioARepairStreamFragment(draft) ||
+      looksLikeScenarioARepairReAskQuestion(draft) ||
+      looksLikeScenarioARepairWordingFollowUp(draft) ||
+      looksLikeUnauthorizedScenarioAPreventiveRyanFollowUp(draft) ||
+      looksLikeScenarioAContemptProbeQuestion(draft) ||
+      scenarioAEmmaVeryClearContemptReask(draft) ||
+      isIncompleteScenarioAContemptProbeLeadSentence(draft) ||
+      isScenarioANonScriptedModalParaphrase(draft)
+    ) {
+      return true;
+    }
+    // "Got it. things" / other truncated repair-bleed leftovers after strip.
+    if (/^got it\b/i.test(draft) && !textContainsScenarioBVignetteBody(draft)) {
+      return true;
+    }
+    return false;
+  }
+
   const repairContext = findLastUserWithPriorScenarioARepairContext(messages);
   let lastUserContent = repairContext.lastUserContent;
   let priorRepairAssistantContent = repairContext.priorRepairAssistantContent;
@@ -541,6 +600,8 @@ export function shouldAdvanceScenarioAAfterSatisfiedRepair(
  * model paraphrases a boundary wrap without the Scenario C vignette, re-asks Q3, or wrongly
  * returns to Q1.
  *
+ * When Q3 is retired: after James-differently is answered, advance on brief ack / wrap / Q3 bleed.
+ *
  * Do **not** advance when the user jumped ahead with a James-style plan on **Q1** (vignette).
  * Q2 (what James could have done differently) is still mandatory — coerce that prompt instead.
  */
@@ -550,6 +611,72 @@ export function shouldAdvanceScenarioBAfterSatisfiedRepair(
   currentScenario: number,
 ): boolean {
   if (currentScenario !== 2) return false;
+
+  // Repair-as-James is retired: after James-differently is answered (or a legacy repair answer),
+  // advance on brief ack / wrap / residual Q3 asks.
+  if (isInterviewCanonicalProbeRetired('s2_james_repair')) {
+    let jamesDifferentlyAnswered = false;
+    for (let i = 0; i < messages.length; i += 1) {
+      if (messages[i].role !== 'assistant') continue;
+      const content = messages[i].content ?? '';
+      if (
+        !looksLikeScenarioBJamesDifferentlyQuestion(content) ||
+        looksLikeScenarioBRepairAsJamesQuestion(content)
+      ) {
+        continue;
+      }
+      for (let j = i + 1; j < messages.length; j += 1) {
+        if (messages[j].role === 'user' && (messages[j].content ?? '').trim()) {
+          jamesDifferentlyAnswered = true;
+          break;
+        }
+      }
+      if (jamesDifferentlyAnswered) break;
+    }
+    const jamesRepairContext = findLastUserWithPriorScenarioBJamesRepairContext(messages);
+    let lastUserContent = jamesRepairContext.lastUserContent;
+    let priorAssistantContent = jamesRepairContext.priorJamesRepairAssistantContent;
+    if (!priorAssistantContent) {
+      const direct = findLastUserWithPriorAssistantContent(messages);
+      lastUserContent = direct.lastUserContent;
+      priorAssistantContent = direct.priorAssistantContent;
+    }
+    const repairSatisfied =
+      !!lastUserContent &&
+      !!priorAssistantContent &&
+      (looksLikeScenarioBRepairAsJamesQuestion(priorAssistantContent) ||
+        (looksLikeScenarioBJamesDifferentlyQuestion(priorAssistantContent) &&
+          !looksLikeScenarioBRepairAsJamesQuestion(priorAssistantContent))) &&
+      userAnswerSatisfiesScenarioBJamesRepairPrompt(lastUserContent, priorAssistantContent);
+
+    if (!jamesDifferentlyAnswered && !repairSatisfied) return false;
+
+    const draft = strippedAssistantDraft.trim();
+    if (!draft) return true;
+    if (isShortAckOnlySentence(draft)) return true;
+    if (hasScenarioBoundaryWrapPhrase(draft) && !textContainsScenarioCVignetteBody(draft)) {
+      return true;
+    }
+    if (isScenarioBBoundaryReflectionWithoutNextVignette(draft)) return true;
+    if (looksLikeInterviewClosingAssistantMessage(draft)) return true;
+    if (
+      looksLikeScenarioBRepairAsJamesQuestion(draft) ||
+      looksLikeScenarioBJamesDifferentlyQuestion(draft) ||
+      isIncompleteScenarioBBoundaryClosureLeadSentence(draft) ||
+      priorAssistantIsScenarioBQ1OrRedirect(draft) ||
+      looksLikeScenarioBQ1Question(draft) ||
+      isIncompleteScenarioBQ1LeadSentence(draft) ||
+      isIncompleteScenarioBPrematureRepairRedirectLeadSentence(draft) ||
+      isScenarioBQ1Prompt(draft) ||
+      /\bi'?ll get to that\b/i.test(draft)
+    ) {
+      return true;
+    }
+    if (/^(got it|makes sense)\b/i.test(draft) && !textContainsScenarioCVignetteBody(draft)) {
+      return true;
+    }
+    return false;
+  }
 
   const jamesRepairContext = findLastUserWithPriorScenarioBJamesRepairContext(messages);
   let lastUserContent = jamesRepairContext.lastUserContent;

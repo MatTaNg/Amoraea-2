@@ -103,12 +103,48 @@ describe('InviteCodeRepository', () => {
       expect(insertedPayload).toMatchObject({
         id: 'u-new',
         email: 'a@b.com',
+        sms_marketing_opt_in: false,
       });
       expect(insertedPayload).not.toHaveProperty('age');
       expect(insertedPayload).not.toHaveProperty('gender');
       expect(profilesRepo.updateProfile).toHaveBeenCalledWith('u-new', {
         age: 29,
         gender: 'woman',
+      });
+    });
+
+    it('persists sms_marketing_opt_in true when signup checkbox was checked', async () => {
+      let fromCalls = 0;
+      let insertedPayload: Record<string, unknown> | null = null;
+      (supabase.from as jest.Mock).mockImplementation((table: string) => {
+        expect(table).toBe('users');
+        fromCalls += 1;
+        if (fromCalls === 1 || fromCalls === 2) {
+          return {
+            select: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                maybeSingle: jest.fn(() =>
+                  Promise.resolve({ data: null, error: null })
+                ),
+              })),
+            })),
+          };
+        }
+        return {
+          insert: jest.fn((payload: Record<string, unknown>) => {
+            insertedPayload = payload;
+            return Promise.resolve({ error: null });
+          }),
+        };
+      });
+
+      await repo.ensureUserWithInviteCode('u-sms', {
+        email: 'sms@example.com',
+        smsMarketingOptIn: true,
+      });
+      expect(insertedPayload).toMatchObject({
+        id: 'u-sms',
+        sms_marketing_opt_in: true,
       });
     });
 

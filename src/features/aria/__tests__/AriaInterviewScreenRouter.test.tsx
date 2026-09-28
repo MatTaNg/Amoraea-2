@@ -69,4 +69,11 @@ describe('AriaInterviewScreenRouter', () => {
     );
     expect(result).toBeNull();
   });
+
+  it('keeps applicants on preparing results instead of the admin completion dashboard', () => {
+    render(<>{AriaInterviewScreenRouter(baseProps({ interviewStatus: 'congratulations' }))}</>);
+    expect(screen.getByText('Preparing your results')).toBeTruthy();
+    expect(screen.queryByText(/You may review your interview results below/)).toBeNull();
+    expect(screen.queryByText('◆ Admin panel')).toBeNull();
+  });
 });

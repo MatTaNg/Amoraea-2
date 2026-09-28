@@ -11,11 +11,19 @@ import {
 } from '@features/aria/interviewProceduralMoments';
 import { isIntroBriefingReadinessOnlySentence } from '@features/aria/interviewPreambleBriefing';
 import {
-  looksLikeMoment4GrudgePrompt,
-  looksLikeMoment4ThresholdQuestion,
-  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  isIncompleteMoment4OrientationLeadSentence,
   isIncompleteMoment4ThresholdLeadSentence,
+  isIncompleteMomentSupportLeadSentence,
+  looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
+  looksLikeMoment4ThresholdQuestion,
   looksLikeMoment4ThresholdParaphraseInProgress,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportQuestion,
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
+  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_QUESTION_CARD_BODY,
 } from '@features/aria/moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from '@features/aria/moment4SpecificityFollowUp';
 import {
@@ -134,7 +142,8 @@ export function isScenarioModalPureTransitionTurn(text: string | null | undefine
     lower.includes('good work getting through all of this') ||
     lower.includes("now we'll shift to something more personal") ||
     lower.includes('now for the first of two personal questions') ||
-    lower.includes("here's one more question about you");
+    lower.includes("here's one more question about you") ||
+    lower.includes("here's another question about you");
   if (!hasTransitionPhrase) return false;
   if (raw.includes('?')) {
     const hasSubstantiveQuestionCue =
@@ -325,6 +334,21 @@ export function resolveMoment4ShowScenarioReferenceCard(
     if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(content)) {
       return { active: false };
     }
+    if (looksLikeMomentSupportConditionalProbe(content)) {
+      return { active: true, cardBodyText: MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY };
+    }
+    if (
+      looksLikeMomentSupportQuestion(content) ||
+      isIncompleteMomentSupportLeadSentence(content)
+    ) {
+      return { active: true, cardBodyText: MOMENT_SUPPORT_QUESTION_CARD_BODY };
+    }
+    if (
+      looksLikeMoment4OrientationQuestion(content) ||
+      isIncompleteMoment4OrientationLeadSentence(content)
+    ) {
+      return { active: true, cardBodyText: MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY };
+    }
     if (looksLikeMoment4ThresholdQuestion(content)) {
       return { active: true, cardBodyText: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY };
     }
@@ -447,6 +471,9 @@ export function isScenarioModalEligibleScenarioQuestionPrompt(text: string | nul
   const raw = (text ?? '').trim();
   if (!raw || !raw.includes('?')) return false;
   if (looksLikeScenarioCSophiePerspectiveQuestion(raw)) return true;
+  if (looksLikeMoment4OrientationQuestion(raw)) return true;
+  if (looksLikeMomentSupportQuestion(raw)) return true;
+  if (looksLikeMomentSupportConditionalProbe(raw)) return true;
   if (isScenarioModalFollowUpProbe(raw)) return false;
   if (isScenarioModalExcludedAssistantPrompt(raw)) return false;
   if (isResumeReentryWelcomePrompt(raw)) return false;

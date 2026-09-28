@@ -3,7 +3,8 @@ import {
   truncateTranscriptTurnsForMoment4Scoring,
   MOMENT4_MAX_USER_TURN_CHARS_FOR_SCORING,
 } from '../personalMomentScoringPrompt';
-import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '../moment4ProbeLogic';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT, MOMENT_SUPPORT_QUESTION_TEXT } from '../moment4ProbeLogic';
+import { buildSupportMomentScoringPrompt } from '../supportMomentScoringPrompt';
 
 describe('buildPersonalMomentScoringPrompt', () => {
   it('calibrates ambiguous "moved on" phrasing by surrounding context', () => {
@@ -59,5 +60,18 @@ describe('buildPersonalMomentScoringPrompt', () => {
     ]);
     expect(truncated[1]!.content.length).toBeLessThan(long.length);
     expect(truncated[1]!.content).toContain('[truncated for Moment 4 scoring context length]');
+  });
+});
+
+describe('buildSupportMomentScoringPrompt', () => {
+  it('scores responsiveness_support as the primary pillar with experimental slices', () => {
+    const prompt = buildSupportMomentScoringPrompt([
+      { role: 'assistant', content: MOMENT_SUPPORT_QUESTION_TEXT },
+      { role: 'user', content: 'When they were overwhelmed I asked what would actually help, then sat with them instead of fixing it.' },
+    ]);
+    expect(prompt).toContain('PRIMARY PILLAR: responsiveness_support');
+    expect(prompt).toContain('need_recognition');
+    expect(prompt).toContain(MOMENT_SUPPORT_QUESTION_TEXT);
+    expect(prompt).toContain('CONTEXTUAL REASONING');
   });
 });

@@ -75,7 +75,12 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
       >
         <View style={styles.container}>
           {description ? <Text style={styles.description}>{description}</Text> : null}
-          <SingleChoiceOptionList options={options} value={value} onSelect={handleSelect} />
+          <SingleChoiceOptionList
+            options={options}
+            value={value}
+            onSelect={handleSelect}
+            deferSelectUntilPaint={autoAdvanceOnSelect && !hasSecondaryQuestion}
+          />
           {hasSecondaryQuestion ? (
             <View style={styles.secondaryQuestionBlock}>
               <Text style={styles.secondaryQuestionTitle}>

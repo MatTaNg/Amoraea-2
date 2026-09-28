@@ -136,6 +136,8 @@ export function AriaInterviewUnderReviewScreen({
             </Pressable>
           ) : null}
 
+          {isAdminAccount ? (
+            <>
           <Text style={[styles.introHint, { textAlign: 'left', marginTop: 16, marginBottom: 8, color: '#D6E6F7' }]}>
             Retaking the interview will not replace these scores.
           </Text>
@@ -181,15 +183,19 @@ export function AriaInterviewUnderReviewScreen({
               </Text>
             </Pressable>
           </View>
+            </>
+          ) : null}
 
-          <View style={{ width: '100%', marginTop: 16 }}>
-            <Text style={[styles.introHint, { textAlign: 'left', marginBottom: 12, color: '#D6E6F7' }]}>
-              You may review your interview results below. Please use the feedback button to let me know if you feel this
-              information is a fair assessment of you.
-            </Text>
-            <AdminAttemptTabsView attemptId={analysisAttemptId} userId={userId} />
-            <UserCommunicationStyleSection userId={userId} />
-          </View>
+          {isAdminAccount ? (
+            <View style={{ width: '100%', marginTop: 16 }}>
+              <Text style={[styles.introHint, { textAlign: 'left', marginBottom: 12, color: '#D6E6F7' }]}>
+                You may review your interview results below. Please use the feedback button to let me know if you feel this
+                information is a fair assessment of you.
+              </Text>
+              <AdminAttemptTabsView attemptId={analysisAttemptId} userId={userId} />
+              <UserCommunicationStyleSection userId={userId} />
+            </View>
+          ) : null}
         </View>
       </ScrollView>
       <Modal

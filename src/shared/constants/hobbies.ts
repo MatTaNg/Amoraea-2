@@ -6,11 +6,21 @@ export type Hobby = {
   legacy?: boolean;
 };
 
-export const HOBBY_DEFINITION =
-  'A hobby is something you do because you genuinely enjoy it — not because it\'s practical or expected. Cooking counts if you love experimenting in the kitchen; it doesn\'t if you\'re just making dinner to save money.';
-
 export const MIN_HOBBY_SELECTIONS = 2;
 export const MAX_HOBBY_SELECTIONS = 5;
+
+export const HOBBY_DEFINITION_LEAD =
+  'We define a hobby as something you do because you genuinely enjoy it.';
+
+export const HOBBY_DEFINITION_EXAMPLE =
+  'For example, if you cook alot but its for practical reasons (saving money/time, etc) rather than for the pure enjoyment of cooking then it is not a hobby.';
+
+export const HOBBY_DEFINITION = `${HOBBY_DEFINITION_LEAD}\n\n${HOBBY_DEFINITION_EXAMPLE}`;
+
+export const HOBBY_SELECTION_HINT = `Choose ${MIN_HOBBY_SELECTIONS}–${MAX_HOBBY_SELECTIONS} hobbies.`;
+
+export const HOBBY_PROFESSIONAL_LABEL =
+  'If you met someone amazing who didn\'t share your most important hobby with you, how much of a dealbreaker would that be? If so, which one would that be?';
 
 export const HOBBY_CATEGORIES = [
   'Fitness & Movement',

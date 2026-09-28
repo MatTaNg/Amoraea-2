@@ -37,6 +37,7 @@ import {
   stampMoment5ScoringMetadata,
 } from '@features/aria/probeAndScoringUtils';
 import { MOMENT_4_HANDOFF } from '@features/aria/scoreInterviewModuleConstants';
+import { scoreAndPersistSupportMomentSlice } from '@features/aria/scoreAndPersistSupportMomentSlice';
 import {
   finalizePersonalMomentMentalizingOvercertaintyFromModel,
   normalizePersonalMomentContemptTierBreakdown,
@@ -267,6 +268,17 @@ export async function scoreAlphaPersonalMoments(
       moment4SpecificityScoringRef.current,
     );
   }
+
+  const support = await scoreAndPersistSupportMomentSlice({
+    apiUrl,
+    headers,
+    msgs: finalMessages,
+    userId,
+    attemptId: attemptIdForIncremental,
+    scoringBaseline,
+    supabase,
+  });
+  scoringBaseline = support.scoringBaseline;
 
   const scorePersonalMoment5 = async (
     slice: { role: string; content: string }[],

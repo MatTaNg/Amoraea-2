@@ -2,6 +2,7 @@ import {
   deliverClientOwnedScenario2OpeningAfterS1Repair,
   deliverClientOwnedScenario3OpeningAfterS2Repair,
 } from '@features/aria/deliverClientOwnedScenarioHandoffOpening';
+import { deliverMoment4CommitmentOrientationProbe } from '@features/aria/deliverMoment4CommitmentOrientationProbe';
 import { deliverMoment4CommitmentThresholdProbe } from '@features/aria/deliverMoment4CommitmentThresholdProbe';
 import { scenarioALastAssistantIsRepairProbeOrFollowUp } from '@features/aria/interviewDisengagementProbes';
 import {
@@ -9,7 +10,11 @@ import {
   userAnswerSatisfiesScenarioBJamesRepairPrompt,
 } from '@features/aria/interviewRepairRefusalDetection';
 import { looksLikeScenarioBRepairAsJamesQuestion } from '@features/aria/scenarioBProbeLogic';
-import { transcriptIncludesMoment4ThresholdAssistant } from '@features/aria/moment4ProbeLogic';
+import {
+  looksLikeMoment4OrientationQuestion,
+  transcriptIncludesAssistantMatch,
+  transcriptIncludesMoment4ThresholdAssistant,
+} from '@features/aria/moment4ProbeLogic';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import {
   resolvePreClaudeAssistantTurnContext,
@@ -85,6 +90,7 @@ export type PreClaudeLateInterceptGatesPass = {
   lastAssistantContent: string;
   lastInterviewerContent: string;
   isPersonalOpening: boolean;
+  shouldForceMoment4OrientationProbe: boolean;
   shouldForceMoment4ThresholdProbe: boolean;
   moment4ThresholdHintInAnswer: boolean;
   moment5CombinedUserText: string;
@@ -147,6 +153,7 @@ export async function runPreClaudeLateInterceptGates(
   if (moment4SpecificityGate.handled) {
     return { handled: true };
   }
+  const shouldForceMoment4OrientationProbe = moment4SpecificityGate.shouldForceMoment4OrientationProbe;
   const shouldForceMoment4ThresholdProbe = moment4SpecificityGate.shouldForceMoment4ThresholdProbe;
   const moment4ThresholdHintInAnswer = moment4SpecificityGate.moment4ThresholdHintInAnswer;
 
@@ -312,6 +319,23 @@ export async function runPreClaudeLateInterceptGates(
   if (
     !orchestratorExecute.handled &&
     orchestratorOwnsPersonalMomentDelivery &&
+    shouldForceMoment4OrientationProbe &&
+    !transcriptIncludesAssistantMatch(messagesToUse, looksLikeMoment4OrientationQuestion)
+  ) {
+    const delivered = await deliverMoment4CommitmentOrientationProbe({
+      deps,
+      trimmed,
+      messagesToUse,
+      logTag: '[M4_COMMITMENT_ORIENTATION_ORCHESTRATOR_FALLBACK]',
+    });
+    if (delivered) {
+      return { handled: true };
+    }
+  }
+
+  if (
+    !orchestratorExecute.handled &&
+    orchestratorOwnsPersonalMomentDelivery &&
     shouldForceMoment4ThresholdProbe &&
     !deps.moment4ThresholdProbeAskedRef.current &&
     !transcriptIncludesMoment4ThresholdAssistant(messagesToUse)
@@ -386,6 +410,7 @@ export async function runPreClaudeLateInterceptGates(
     lastAssistantContent,
     lastInterviewerContent,
     isPersonalOpening,
+    shouldForceMoment4OrientationProbe,
     shouldForceMoment4ThresholdProbe,
     moment4ThresholdHintInAnswer,
     moment5CombinedUserText,

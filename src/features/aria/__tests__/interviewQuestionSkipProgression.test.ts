@@ -69,6 +69,20 @@ describe('resolveQuestionSkipProgression', () => {
     expect(result.nextPrompt).not.toBe(SCENARIO_B_Q1_CANONICAL);
   });
 
+  it('marks Scenario B complete after James-differently (retired repair is not next)', () => {
+    const messages = [
+      { role: 'assistant', content: SCENARIO_B_Q1_CANONICAL, scenarioNumber: 2 },
+      { role: 'user', content: 'Sarah needed celebration, not logistics.', scenarioNumber: 2 },
+      { role: 'assistant', content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, scenarioNumber: 2 },
+      { role: 'user', content: 'Can we skip this?', scenarioNumber: 2 },
+    ];
+
+    const result = resolveQuestionSkipProgression(messages, 2, 2);
+
+    expect(result.scenarioMomentComplete).toBe(true);
+    expect(result.nextPrompt).toBe('');
+  });
+
   it('advances past unanswered Scenario A Q1 to contempt probe', () => {
     const messages = [
       {

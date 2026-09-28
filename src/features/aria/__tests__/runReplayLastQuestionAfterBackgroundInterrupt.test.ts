@@ -210,23 +210,23 @@ describe('runReplayLastQuestionAfterBackgroundInterrupt', () => {
     );
   });
 
-  it('rebuilds welcome with S2 repair prompt when cached welcome still embeds James-differently', async () => {
+  it('rebuilds welcome with James-differently when cached welcome embeds retired S2 repair', async () => {
     const speakTextSafe = jest.fn(async () => undefined);
     const staleWelcome = buildResumeWelcomeMessage({
       mode: 'replay_incomplete',
       resumeScenario: 2,
-      lastQuestionText: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+      lastQuestionText: SCENARIO_B_JAMES_REPAIR_CANONICAL,
     });
     const expectedWelcome = buildResumeWelcomeMessage({
       mode: 'replay_incomplete',
       resumeScenario: 2,
-      lastQuestionText: SCENARIO_B_JAMES_REPAIR_CANONICAL,
+      lastQuestionText: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     });
     const deps = baseDeps({
       speakTextSafe,
       currentScenarioRef: { current: 2 },
       lastQuestionTextRef: { current: SCENARIO_B_JAMES_REPAIR_CANONICAL },
-      resumeLastAssistantTextRef: { current: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL },
+      resumeLastAssistantTextRef: { current: SCENARIO_B_JAMES_REPAIR_CANONICAL },
       resumeWelcomeMessageRef: { current: staleWelcome },
       currentMessagesRef: {
         current: [
@@ -246,11 +246,11 @@ describe('runReplayLastQuestionAfterBackgroundInterrupt', () => {
       expect.objectContaining({ telemetrySource: 'greeting' }),
     );
     expect(speakTextSafe).not.toHaveBeenCalledWith(
-      expect.stringMatching(/differently/i),
+      expect.stringMatching(/how would you repair/i),
       expect.objectContaining({ telemetrySource: 'greeting' }),
     );
     expect(deps.resumeWelcomeMessageRef.current).toBe(expectedWelcome);
-    expect(deps.resumeLastAssistantTextRef.current).toBe(SCENARIO_B_JAMES_REPAIR_CANONICAL);
+    expect(deps.resumeLastAssistantTextRef.current).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
   });
 
   it('releases stale resume playback lock and flushes deferred user speech after foreground replay', async () => {

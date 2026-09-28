@@ -10,6 +10,10 @@ import {
 } from '@features/admin/interviewDashboard/adminInterviewAttemptAdminUtils';
 import { detailTabStyles as styles } from '@features/admin/interviewDashboard/adminInterviewDetailTabStyles';
 import {
+  adminNarrativeFailureKindLabel,
+  parseAdminNarrativeFailureTimeline,
+} from '@features/admin/interviewDashboard/adminNarrativeFailureDisplay';
+import {
   coerceScoreNumber,
   formatScoreCell,
   getString,
@@ -29,7 +33,9 @@ export function AdminInterviewReasoningTab({
   const reasoningPending = adminAiNarrativeStillPending(attempt);
 
   const reasoning = parseObject(attempt.ai_reasoning);
-  if (!reasoning && !reasoningPending) {
+  const narrativeFailure = parseAdminNarrativeFailureTimeline(reasoning);
+  const showFailureBanner = reasoningPending || narrativeFailure.failed;
+  if (!reasoning && !showFailureBanner) {
     return (
       <View style={styles.emptyState}>
         <Text style={styles.emptyText}>AI reasoning is not available for this test.</Text>
@@ -70,14 +76,37 @@ export function AdminInterviewReasoningTab({
 
   return (
     <ScrollView style={styles.innerTabContent}>
-      {reasoningPending ? (
+      {showFailureBanner ? (
         <View style={[styles.block, { borderLeftWidth: 3, borderLeftColor: '#D4A84B', marginBottom: 12 }]}>
-          <Text style={[styles.blockTitle, { color: '#E8D49A' }]}>Narrative reasoning pending or failed</Text>
-          <Text style={styles.blockText}>
-            Scores and transcript were saved, but the full AI narrative was not generated in-session
-            {reasoning?.last_error != null ? ` (${String(reasoning.last_error)})` : ''}. Retry to call the model again
-            from this dashboard.
+          <Text style={[styles.blockTitle, { color: '#E8D49A' }]}>
+            {narrativeFailure.failed ? 'Narrative generation failed' : 'Narrative reasoning pending'}
           </Text>
+          {narrativeFailure.primaryKind ? (
+            <Text style={[styles.blockText, { color: '#F0B86E', fontWeight: '600', marginBottom: 6 }]}>
+              {adminNarrativeFailureKindLabel(narrativeFailure.primaryKind)}
+            </Text>
+          ) : null}
+          {narrativeFailure.primaryError ? (
+            <Text style={[styles.blockText, { fontFamily: 'monospace', marginBottom: 6 }]}>
+              last_error: {narrativeFailure.primaryError}
+            </Text>
+          ) : (
+            <Text style={styles.blockText}>
+              Scores and transcript were saved, but the full AI narrative was not generated in-session. Retry to call
+              the model again from this dashboard.
+            </Text>
+          )}
+          {narrativeFailure.events.length > 1 ? (
+            <View style={{ marginTop: 8, marginBottom: 8 }}>
+              <Text style={[styles.blockTitle, { fontSize: 12, marginBottom: 4 }]}>Retry / failure timeline</Text>
+              {narrativeFailure.events.map((event, index) => (
+                <Text key={`${event.source}-${index}`} style={[styles.blockText, { marginBottom: 4 }]}>
+                  {event.at ? `${new Date(event.at).toLocaleString()} · ` : ''}
+                  {adminNarrativeFailureKindLabel(event.kind)} · {event.error}
+                </Text>
+              ))}
+            </View>
+          ) : null}
           <TouchableOpacity
             disabled={reasoningRetrying}
             onPress={() => {

@@ -579,17 +579,19 @@ export async function runPostClaudeNaturalLanguageSpeakAndComplete(
               currentInterviewMoment: deps.currentInterviewMomentRef.current,
               moment5ResolutionDelivered: deps.moment5ResolutionDeliveredRef.current,
             });
-            const prematureM5ClosingSpeak =
-              deps.currentInterviewMomentRef.current === 5 &&
+            const prematureInterviewClosingSpeak =
               looksLikeInterviewClosingAssistantMessage(coercedDisplayText) &&
               !m5CloseGateForSpeak.moment5CloseAllowed;
-            if (prematureM5ClosingSpeak) {
+            if (prematureInterviewClosingSpeak) {
               void remoteLog('[M5_CLOSING_SPEAK_SUPPRESSED_POST_CLAUDE]', {
                 interviewSessionId: deps.interviewSessionIdRef.current,
+                interviewMoment: deps.currentInterviewMomentRef.current,
                 accountabilityProbeStillRequired:
                   m5CloseGateForSpeak.accountabilityProbeStillRequired,
                 resolutionFollowUpStillRequired:
                   m5CloseGateForSpeak.resolutionFollowUpStillRequired,
+                hasMoment5PrimaryAnchorInTranscript:
+                  m5CloseGateForSpeak.hasMoment5PrimaryAnchorInTranscript,
                 preview: coercedDisplayText.slice(0, 220),
               });
               deps.setVoiceState('idle');

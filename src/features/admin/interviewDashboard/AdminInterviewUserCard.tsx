@@ -130,6 +130,7 @@ export function AdminInterviewUserCard({
   const override = userData.user.interview_passed_admin_override;
   const showRevealButtons = adminShowEarlyRevealPassFail(latest) && typeof override !== 'boolean';
   const launchPhone = trimLaunchNotificationPhone(userData.user.launch_notification_phone);
+  const inProgress = userHasInProgressInterview(userData.user, userData.latestAttempt);
 
   const applyRevealOverride = async (pass: boolean) => {
     if (!latest?.id || !userData.user.id) return;
@@ -160,10 +161,11 @@ export function AdminInterviewUserCard({
   };
 
   return (
-    <View style={styles.userCardRow}>
+    <View style={styles.userCard}>
       <Pressable
         onPress={onPress}
-        style={({ pressed }) => [styles.userCard, styles.userCardFlex, pressed && styles.userCardPressed]}
+        style={({ pressed }) => [styles.userCardMainPress, pressed && styles.userCardPressed]}
+        accessibilityRole="button"
       >
         <View style={styles.userCardNameRow}>
           <Text style={styles.userCardIntroName}>{resolveAdminInterviewIntroDisplayName(userData.user)}</Text>
@@ -187,8 +189,77 @@ export function AdminInterviewUserCard({
         {userData.attempts.length > 1 ? (
           <Text style={styles.userCardTests}>{userData.attempts.length} interview runs</Text>
         ) : null}
-        {latest && !userHasInProgressInterview(userData.user, userData.latestAttempt) ? (
-          <View style={styles.userCardSignalRow}>
+      </Pressable>
+
+      <View style={styles.userCardStatusBlock}>
+        <Text style={[styles.userCardStatusPrimary, { color: outcome.color }]}>{outcome.word}</Text>
+        {inProgress ? <Text style={styles.userCardInProgress}>In progress</Text> : null}
+        {override != null ? (
+          <Text style={styles.userCardOverrideHint}>
+            Admin override: {formatAdminPassFailLabel(override)}
+          </Text>
+        ) : null}
+        {outcome.detail ? (
+          <Text style={styles.userCardGateDetailSecondary} numberOfLines={4}>
+            {outcome.detail}
+          </Text>
+        ) : null}
+      </View>
+
+      <View style={styles.userCardActionsRow}>
+        <View style={styles.bookmarkToggleRow}>
+          <Text style={styles.bookmarkLabel}>Bookmark</Text>
+          <Switch
+            value={bookmarked}
+            onValueChange={(v) => onToggleBookmarked(v)}
+            trackColor={{ false: 'rgba(82,142,220,0.2)', true: 'rgba(42,140,106,0.5)' }}
+            thumbColor={bookmarked ? '#2A8C6A' : '#7A9ABE'}
+          />
+        </View>
+        {showRevealButtons ? (
+          <View style={styles.userCardOverrideRow}>
+            <TouchableOpacity
+              style={[styles.userCardOverrideChip, overrideBusy && { opacity: 0.5 }]}
+              disabled={overrideBusy}
+              onPress={() => void applyRevealOverride(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Pass applicant now"
+            >
+              <Text style={styles.overrideChipText}>Pass</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.userCardOverrideChip, overrideBusy && { opacity: 0.5 }]}
+              disabled={overrideBusy}
+              onPress={() => void applyRevealOverride(false)}
+              accessibilityRole="button"
+              accessibilityLabel="Fail applicant now"
+            >
+              <Text style={styles.overrideChipText}>Fail</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+        {canDelete ? (
+          <TouchableOpacity
+            style={styles.userCardDeleteBtn}
+            onPress={() => void onDelete()}
+            disabled={deleting}
+            accessibilityRole="button"
+            accessibilityLabel="Delete account"
+          >
+            <Text style={[styles.userCardDeleteText, deleting && styles.userCardDeleteTextDisabled]}>
+              {deleting ? '…' : 'Delete'}
+            </Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      <HumanVerifiedCheckboxes
+        value={userData.user.admin_human_verified_pass}
+        onChange={(next) => onSetHumanVerified(next)}
+      />
+
+      {latest && !inProgress ? (
+        <View style={styles.userCardSecondaryRow}>
             {typeof latest.ego_development_level === 'number' &&
             Number.isFinite(latest.ego_development_level) &&
             latest.ego_development_level >= 1 &&
@@ -290,97 +361,36 @@ export function AdminInterviewUserCard({
                   </View>
                 );
               }
-              return null;
-            })()}
-          </View>
-        ) : null}
-        <View style={styles.userCardMetaRow}>
-          <View style={styles.userCardMetaLeft}>
-            <Text style={[styles.userCardStatus, { color: outcome.color }]}>{outcome.word}</Text>
-            {outcome.detail ? (
-              <Text style={styles.userCardGateDetail} numberOfLines={5}>
-                {outcome.detail}
-              </Text>
-            ) : null}
-            {override != null ? (
-              <Text style={styles.userCardOverrideHint}>
-                Admin override: {formatAdminPassFailLabel(override)}
-              </Text>
-            ) : null}
-            {userHasInProgressInterview(userData.user, userData.latestAttempt) ? (
-              <Text style={styles.userCardInProgress}>In progress</Text>
-            ) : null}
-          </View>
+            return null;
+          })()}
         </View>
-      </Pressable>
-      <View style={styles.userCardSideCol}>
-        <View style={styles.bookmarkToggleRow}>
-          <Text style={styles.bookmarkLabel}>Bookmark</Text>
-          <Switch
-            value={bookmarked}
-            onValueChange={(v) => onToggleBookmarked(v)}
-            trackColor={{ false: 'rgba(82,142,220,0.2)', true: 'rgba(42,140,106,0.5)' }}
-            thumbColor={bookmarked ? '#2A8C6A' : '#7A9ABE'}
-          />
-        </View>
-        <HumanVerifiedCheckboxes
-          value={userData.user.admin_human_verified_pass}
-          onChange={(next) => onSetHumanVerified(next)}
-        />
-        {showRevealButtons ? (
-          <View style={styles.userCardOverrideRow}>
-            <TouchableOpacity
-              style={[styles.userCardOverrideChip, overrideBusy && { opacity: 0.5 }]}
-              disabled={overrideBusy}
-              onPress={() => void applyRevealOverride(true)}
-              accessibilityRole="button"
-              accessibilityLabel="Pass applicant now"
-            >
-              <Text style={styles.overrideChipText}>Pass</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.userCardOverrideChip, overrideBusy && { opacity: 0.5 }]}
-              disabled={overrideBusy}
-              onPress={() => void applyRevealOverride(false)}
-              accessibilityRole="button"
-              accessibilityLabel="Fail applicant now"
-            >
-              <Text style={styles.overrideChipText}>Fail</Text>
-            </TouchableOpacity>
-          </View>
-        ) : null}
-        {canDelete ? (
-          <TouchableOpacity
-            style={styles.userCardDelete}
-            onPress={() => void onDelete()}
-            disabled={deleting}
-            accessibilityRole="button"
-            accessibilityLabel="Delete account"
-          >
-            <Text style={[styles.userCardDeleteText, deleting && styles.userCardDeleteTextDisabled]}>
-              {deleting ? '…' : 'Delete'}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-      </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  userCardRow: {
-    flexDirection: 'row',
-    alignItems: 'stretch',
+  userCard: {
+    backgroundColor: 'rgba(13,17,32,0.8)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.12)',
+    borderRadius: 10,
+    padding: 14,
+    marginBottom: 10,
   },
-  userCardFlex: {
-    flex: 1,
-    minWidth: 0,
+  userCardMainPress: {
+    marginBottom: 8,
   },
-  userCardDelete: {
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(82,142,220,0.12)',
+  userCardPressed: {
+    opacity: 0.92,
+  },
+  userCardDeleteBtn: {
+    borderWidth: 1,
+    borderColor: 'rgba(232, 122, 122, 0.35)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(232, 122, 122, 0.08)',
   },
   userCardDeleteText: {
     color: '#E87A7A',
@@ -390,19 +400,9 @@ const styles = StyleSheet.create({
   userCardDeleteTextDisabled: {
     opacity: 0.5,
   },
-  userCard: {
-    backgroundColor: 'rgba(13,17,32,0.8)',
-    borderWidth: 1,
-    borderColor: 'rgba(82,142,220,0.12)',
-    borderRadius: 10,
-    padding: 14,
-  },
-  userCardPressed: {
-    backgroundColor: 'rgba(30,111,217,0.08)',
-  },
   userCardIntroName: {
     color: '#E8F0F8',
-    fontSize: 18,
+    fontSize: 17,
     fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
   },
   userCardEmail: {
@@ -422,40 +422,62 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   userCardFlagMark: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#D97A3A',
     fontWeight: '700',
   },
-  userCardSignalRow: {
+  userCardStatusBlock: {
+    marginBottom: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.22)',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.14)',
+  },
+  userCardStatusPrimary: {
+    fontSize: 22,
+    fontWeight: '800',
+    textTransform: 'capitalize',
+    letterSpacing: 0.3,
+  },
+  userCardGateDetailSecondary: {
+    marginTop: 6,
+    color: 'rgba(155, 176, 204, 0.82)',
+    fontSize: 10,
+    lineHeight: 14,
+  },
+  userCardSecondaryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    marginTop: 6,
+    gap: 5,
+    marginTop: 8,
     alignItems: 'center',
+    opacity: 0.88,
   },
   userCardMicroChip: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 5,
+    backgroundColor: 'rgba(255,255,255,0.04)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   userCardMicroChipText: {
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '600',
-    color: 'rgba(200, 215, 235, 0.9)',
+    color: 'rgba(200, 215, 235, 0.75)',
   },
   userCardScoreStrike: {
     textDecorationLine: 'line-through',
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 11,
+    color: 'rgba(255,255,255,0.35)',
+    fontSize: 9,
   },
   userCardScoreModified: {
     color: '#E87A7A',
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: '700',
-    marginLeft: 6,
+    marginLeft: 4,
   },
   userCardOverrideHint: {
     color: '#D4A84B',
@@ -463,37 +485,34 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '600',
   },
-  userCardSideCol: {
-    justifyContent: 'flex-start',
-    alignItems: 'stretch',
-    paddingLeft: 14,
-    paddingRight: 6,
-    paddingVertical: 8,
-    borderLeftWidth: 1,
-    borderLeftColor: 'rgba(82,142,220,0.12)',
-    minWidth: 168,
-    width: 168,
-    gap: 12,
+  userCardActionsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10,
+    marginBottom: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(82,142,220,0.1)',
   },
   bookmarkToggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 2,
+    gap: 8,
   },
   bookmarkLabel: {
     color: '#7A9ABE',
     fontSize: 10,
-    marginBottom: 4,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
   humanVerifiedCol: {
     gap: 6,
+    marginBottom: 4,
   },
   humanVerifiedLabel: {
     color: '#7A9ABE',
-    fontSize: 10,
+    fontSize: 9,
     textTransform: 'uppercase',
     letterSpacing: 0.4,
   },
@@ -524,61 +543,36 @@ const styles = StyleSheet.create({
   },
   adminCheckboxLabel: {
     color: '#C8E4FF',
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '500',
   },
   userCardOverrideRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    justifyContent: 'space-between',
   },
   userCardOverrideChip: {
-    flex: 1,
-    minWidth: 68,
+    minWidth: 56,
     borderWidth: 1,
     borderColor: 'rgba(82,142,220,0.35)',
     borderRadius: 8,
     paddingHorizontal: 10,
-    paddingVertical: 8,
+    paddingVertical: 7,
     backgroundColor: 'rgba(30,111,217,0.12)',
     alignItems: 'center',
   },
-  userCardMetaRow: {
-    marginTop: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  userCardMetaLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    flex: 1,
-    minWidth: 0,
-  },
   userCardInProgress: {
     color: '#D4A84B',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-  },
-  userCardStatus: {
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'lowercase',
-  },
-  userCardGateDetail: {
     marginTop: 4,
-    color: '#9BB0CC',
-    fontSize: 11,
-    lineHeight: 15,
   },
   userCardTests: {
     color: '#7A9ABE',
-    fontSize: 12,
+    fontSize: 11,
+    marginTop: 2,
   },
   launchNotificationPhoneBold: {
     fontWeight: '700',

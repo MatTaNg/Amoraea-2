@@ -212,6 +212,8 @@ export interface OverviewAnalytics {
     avgModifier: number;
     modifierDistribution: ModifierBucket[];
   };
+  /** Ranked depth-signal triggers: cohort hit rate + average modifier impact where applied. */
+  depthSignalHitRateRanking: DepthSignalHitRateRow[];
   convergentValidity: {
     sufficient: boolean;
     correlations: ConvergentCorrelation[];
@@ -255,6 +257,15 @@ export interface ModifierImpactRow {
   basePass: boolean;
   modifiedPass: boolean;
   flipped: boolean;
+}
+
+/** Depth signal / modifier trigger ranked by cohort hit rate (Algorithm overview). */
+export interface DepthSignalHitRateRow {
+  id: string;
+  label: string;
+  hitCount: number;
+  hitRatePct: number;
+  avgScoreImpact: number | null;
 }
 
 export interface EraStats {
@@ -389,6 +400,128 @@ function scenarioComposite(
 function depthModifierForAttempt(a: AttemptRecord): number | null {
   const v = a.depth_signal_modifier ?? a.score_modifier;
   return v != null && Number.isFinite(v) ? v : null;
+}
+
+function emotionRecognitionCorrectFromAttempt(a: AttemptRecord): number | null {
+  const raw = a.emotion_recognition_raw_score;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  const rounded = Math.round(raw);
+  if (rounded >= 0 && rounded <= 3) return rounded;
+  return null;
+}
+
+function immatureDefensePatternCount(a: AttemptRecord): number {
+  const dp = a.defense_patterns;
+  if (!dp) return 0;
+  return [
+    dp.rationalization_detected,
+    dp.splitting_detected,
+    dp.denial_detected,
+  ].filter(Boolean).length;
+}
+
+export function computeDepthSignalHitRateRanking(
+  completed: AttemptRecord[],
+): DepthSignalHitRateRow[] {
+  const cohortSize = completed.length;
+  if (cohortSize === 0) return [];
+
+  const signals: Array<{
+    id: string;
+    label: string;
+    matches: (a: AttemptRecord) => boolean;
+  }> = [
+    {
+      id: 'ego_level_1',
+      label: 'Ego development level 1',
+      matches: (a) => a.ego_development_level === 1,
+    },
+    {
+      id: 'ego_level_2',
+      label: 'Ego development level 2 (review)',
+      matches: (a) => a.ego_development_level === 2,
+    },
+    {
+      id: 'defense_rationalization',
+      label: 'Defense: rationalization',
+      matches: (a) => a.defense_patterns?.rationalization_detected === true,
+    },
+    {
+      id: 'defense_splitting',
+      label: 'Defense: splitting',
+      matches: (a) => a.defense_patterns?.splitting_detected === true,
+    },
+    {
+      id: 'defense_denial',
+      label: 'Defense: denial',
+      matches: (a) => a.defense_patterns?.denial_detected === true,
+    },
+    {
+      id: 'defense_stack_2plus',
+      label: 'Defense stack (2+ immature patterns)',
+      matches: (a) => immatureDefensePatternCount(a) >= 2,
+    },
+    {
+      id: 'disclosure_underdisclosure',
+      label: 'Disclosure underdisclosure',
+      matches: (a) => a.disclosure_calibration === 'underdisclosure',
+    },
+    {
+      id: 'moment4_concreteness_low',
+      label: 'Moment 4 concreteness absent/low',
+      matches: (a) => a.moment_4_concreteness === 'absent' || a.moment_4_concreteness === 'low',
+    },
+    {
+      id: 'moment5_concreteness_low',
+      label: 'Moment 5 concreteness absent/low',
+      matches: (a) => a.moment_5_concreteness === 'absent' || a.moment_5_concreteness === 'low',
+    },
+    {
+      id: 'mentalizing_overcertainty',
+      label: 'Mentalizing overcertainty (2+ flags)',
+      matches: (a) => (a.mentalizing_overcertainty_count ?? 0) >= 2,
+    },
+    {
+      id: 'emotion_recognition_0',
+      label: 'Emotion recognition 0/3',
+      matches: (a) => emotionRecognitionCorrectFromAttempt(a) === 0,
+    },
+    {
+      id: 'emotion_recognition_1',
+      label: 'Emotion recognition 1/3 (review)',
+      matches: (a) => emotionRecognitionCorrectFromAttempt(a) === 1,
+    },
+    {
+      id: 'emotion_recognition_2',
+      label: 'Emotion recognition 2/3 (review)',
+      matches: (a) => emotionRecognitionCorrectFromAttempt(a) === 2,
+    },
+    {
+      id: 'any_depth_modifier',
+      label: 'Any non-zero depth modifier',
+      matches: (a) => {
+        const mod = depthModifierForAttempt(a);
+        return mod != null && mod !== 0;
+      },
+    },
+  ];
+
+  const rows: DepthSignalHitRateRow[] = signals.map(({ id, label, matches }) => {
+    const affected = completed.filter(matches);
+    const modifiers = affected
+      .map((a) => depthModifierForAttempt(a))
+      .filter((v): v is number => v != null);
+    return {
+      id,
+      label,
+      hitCount: affected.length,
+      hitRatePct: Math.round((affected.length / cohortSize) * 1000) / 10,
+      avgScoreImpact:
+        modifiers.length > 0 ? Math.round(mean(modifiers) * 1000) / 1000 : null,
+    };
+  });
+
+  return rows.sort((a, b) => b.hitCount - a.hitCount || a.label.localeCompare(b.label));
 }
 
 function roundAverage(values: number[]): number | null {
@@ -1161,7 +1294,6 @@ export function computeOverviewAnalytics(
     null: 0,
   };
   const defensePatternRates: Record<string, number> = {
-    projection: 0,
     splitting: 0,
     rationalization: 0,
     denial: 0,
@@ -1169,7 +1301,6 @@ export function computeOverviewAnalytics(
   const disclosureDistribution: Record<string, number> = {
     underdisclosure: 0,
     calibrated: 0,
-    overdisclosure: 0,
     null: 0,
   };
   const concretenessDistribution: Record<string, number> = {
@@ -1185,13 +1316,18 @@ export function computeOverviewAnalytics(
     egoDistribution[egoKey] = (egoDistribution[egoKey] ?? 0) + 1;
 
     if (a.defense_patterns) {
-      if (a.defense_patterns.projection_detected) defensePatternRates.projection++;
       if (a.defense_patterns.splitting_detected) defensePatternRates.splitting++;
       if (a.defense_patterns.rationalization_detected) defensePatternRates.rationalization++;
       if (a.defense_patterns.denial_detected) defensePatternRates.denial++;
     }
 
-    const disc = a.disclosure_calibration ?? 'null';
+    const discRaw = a.disclosure_calibration ?? 'null';
+    const disc =
+      discRaw === 'underdisclosure'
+        ? 'underdisclosure'
+        : discRaw === 'calibrated' || discRaw === 'overdisclosure'
+          ? 'calibrated'
+          : 'null';
     disclosureDistribution[disc] = (disclosureDistribution[disc] ?? 0) + 1;
 
     const m4 = a.moment_4_concreteness ?? 'null';
@@ -1376,6 +1512,7 @@ export function computeOverviewAnalytics(
     algorithmVersionAnalysis: { eras, alphaDrift },
     scoreRecoveryAnalysis,
     depthSignalSummary,
+    depthSignalHitRateRanking: computeDepthSignalHitRateRanking(completed),
     convergentValidity: {
       sufficient: psychometricPairs.length >= 5,
       correlations: convergentCorrelations,

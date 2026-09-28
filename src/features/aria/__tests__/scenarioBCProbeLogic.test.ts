@@ -16,8 +16,11 @@ import {
   looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion,
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBJamesSayToJamesRolePlayQuestion,
+  looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion,
+  looksLikeScenarioBRepairAsJamesQuestion,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
+  stripScenarioBRepairAsJamesQuestion,
   isScenarioBBoundaryReflectionWithoutNextVignette,
   isScenarioBQ1Prompt,
   scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent,
@@ -763,11 +766,20 @@ describe('scenarioBProbeLogic', () => {
     ).toBe(false);
   });
 
-  it('coerces truncated James-repair streaming cutoff from session logs', () => {
+  it('remaps truncated James-repair streaming cutoff to brief ack when Q3 is retired', () => {
     const truncated = 'Got it. And if you were James, how would you repair things now that';
     expect(isIncompleteScenarioBJamesRepairLeadSentence(truncated)).toBe(true);
-    expect(coerceScenarioBJamesRepairQuestionForTts(truncated)).toBe(
-      `Got it. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`,
+    expect(coerceScenarioBJamesRepairQuestionForTts(truncated)).toBe('Got it');
+  });
+
+  it('detects session-log James repair paraphrase after James-differently', () => {
+    const paraphrase =
+      'If James wanted to repair this with Sarah the next day, what would that actually look like — what would he say?';
+    expect(looksLikeScenarioBRepairAsJamesQuestion(paraphrase)).toBe(true);
+    expect(looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(paraphrase)).toBe(true);
+    expect(coerceScenarioBJamesRepairQuestionForTts(paraphrase)).toBe('');
+    expect(stripScenarioBRepairAsJamesQuestion(`Makes sense. ${paraphrase}`).trim()).toBe(
+      'Makes sense',
     );
   });
 
@@ -780,11 +792,11 @@ describe('scenarioBProbeLogic', () => {
     );
   });
 
-  it('collapses truncated say-to-James plus repair duplicate into one canonical Q3', () => {
+  it('collapses truncated say-to-James plus repair duplicate into James-differently Q2', () => {
     const combined =
       'How would you actually say that to james what\n\nAnd if you were James, how would you repair?';
     expect(collapseScenarioBJamesSayToJamesWithRepairDuplicate(combined, true)).toBe(
-      SCENARIO_B_JAMES_REPAIR_CANONICAL,
+      SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     );
   });
 
@@ -797,11 +809,9 @@ describe('scenarioBProbeLogic', () => {
     );
   });
 
-  it('normalizes complete James-repair paraphrases to canonical Q3', () => {
+  it('strips complete James-repair paraphrases when Q3 is retired', () => {
     const paraphrase = 'Got it. And if you were James, how would you repair things now that things blew up?';
-    expect(coerceScenarioBJamesRepairQuestionForTts(paraphrase)).toBe(
-      `Got it. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`,
-    );
+    expect(coerceScenarioBJamesRepairQuestionForTts(paraphrase)).toBe('Got it');
   });
 
   it('userSidesEntirelyWithJames detects James-only-right reads', () => {
@@ -960,12 +970,10 @@ describe('duplicate question suppression', () => {
     expect(shouldSuppressScenarioCQ1VerbatimReplay(messages, scenarioCQ1)).toBe(true);
   });
 
-  it('coerceScenarioBJamesRepairQuestionForTts maps legacy third-person repair to canonical', () => {
+  it('coerceScenarioBJamesRepairQuestionForTts strips legacy third-person repair when Q3 is retired', () => {
     const legacy =
       'Got it. How would James go about repairing this with Sarah now that the fight has started?';
-    expect(coerceScenarioBJamesRepairQuestionForTts(legacy)).toBe(
-      `Got it. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`,
-    );
+    expect(coerceScenarioBJamesRepairQuestionForTts(legacy)).toBe('Got it');
   });
 });
 

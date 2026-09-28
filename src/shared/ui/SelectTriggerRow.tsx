@@ -1,11 +1,15 @@
 import React from 'react';
 import {
+  Platform,
   StyleSheet,
   Text,
   View,
   type StyleProp,
   type TextStyle,
 } from 'react-native';
+
+const webLabelWrap =
+  Platform.OS === 'web' ? ({ whiteSpace: 'normal' } as const) : null;
 
 /** Strip accidental chevrons copied into stored labels. */
 export function stripTrailingSelectChevron(label: string): string {
@@ -37,8 +41,9 @@ export const SelectTriggerRow: React.FC<SelectTriggerRowProps> = ({
         style={[
           styles.label,
           isPlaceholder ? [styles.placeholder, placeholderStyle] : labelStyle,
+          webLabelWrap,
         ]}
-        numberOfLines={1}
+        numberOfLines={3}
       >
         {display}
       </Text>
@@ -62,6 +67,7 @@ const styles = StyleSheet.create({
   label: {
     flex: 1,
     flexShrink: 1,
+    minWidth: 0,
     color: '#E8F0F8',
     fontSize: 15,
     fontWeight: '500',

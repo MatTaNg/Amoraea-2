@@ -4,8 +4,8 @@
 
 import React from 'react';
 import { View, Text } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import { Input } from '@/shared/ui/Input';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { styles } from './DualInputField.styled';
 
 interface DualInputFieldProps {
@@ -41,22 +41,16 @@ export const DualInputField: React.FC<DualInputFieldProps> = ({
           style={styles.input}
         />
         <View style={styles.unitPicker}>
-          <Picker
-            selectedValue={unit}
+          <AppSelect
+            bare
+            value={unit}
+            options={unitOptions}
             onValueChange={onUnitChange}
-            style={styles.picker}
-          >
-            {unitOptions.map((option) => (
-              <Picker.Item
-                key={option.value}
-                label={option.label}
-                value={option.value}
-              />
-            ))}
-          </Picker>
+            sheetTitle={`${label} unit`}
+            triggerStyle={styles.unitTrigger}
+          />
         </View>
       </View>
     </View>
   );
 };
-

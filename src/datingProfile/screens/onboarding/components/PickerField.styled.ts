@@ -14,14 +14,5 @@ export const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#333',
   },
-  pickerContainer: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  fullPicker: {
-    height: 50,
-  },
 });
 

@@ -49,7 +49,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     ).toBe(true);
   });
 
-  it('allows repair delivery when repair text is in transcript but user has not answered yet', () => {
+  it('does not allow retired S1 repair delivery when repair text is in transcript but user has not answered yet', () => {
     const msgs = [
       contemptAssistant,
       { role: 'user', content: "It's very condescending. She's very frustrated at Ryan." },
@@ -71,7 +71,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
         shouldForceScenarioAContemptProbe: false,
         messagesToUse: msgs,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('detects repair question and blocks duplicate repair delivery after user answered', () => {
@@ -182,6 +182,33 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
   });
 
+  it('scenarioAMinimumEngagementForHandoff is true when Q1 already covers Emma clear-line contempt (repair retired)', () => {
+    const msgs = [
+      {
+        role: 'assistant',
+        content: "What's going on between these two?",
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      },
+      {
+        role: 'user',
+        content:
+          "Ryan should not have taken that call during their date. Emma is being condescending when she says you've made that very clear.",
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff is true after the contempt probe is answered', () => {
+    const msgs = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      { role: 'user', content: 'That sounds dismissive and contemptuous to me.' },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
+  });
+
   it('scenarioAMinimumEngagementForHandoff is true after repair answer even when repair context finder misses', () => {
     const msgs = [
       { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
@@ -255,7 +282,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     ).toBe(true);
   });
 
-  it('shouldAllowScenarioARepairAfterContemptAnswer when contempt delivered via stream-only TTS', () => {
+  it('shouldAllowScenarioARepairAfterContemptAnswer is false when probe is retired', () => {
     const msgs = [
       { role: 'user', content: 'q1' },
       { role: 'user', content: 'contempt answer' },
@@ -272,7 +299,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
         messagesToUse: msgs,
         lastDeliveredQuestionText: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('scenarioAMinimumEngagementForHandoff after stream-only contempt when answer includes repair substance', () => {

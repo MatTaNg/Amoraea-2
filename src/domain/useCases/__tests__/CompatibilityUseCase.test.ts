@@ -86,8 +86,8 @@ describe('CompatibilityUseCase', () => {
     expect(score).toBeCloseTo(1, 12);
   });
 
-  it('computeCombinedCompatibilityScoreForPair applies sexual communication adjustment', async () => {
-    const withoutAdj = useCase.computeCombinedCompatibilityScore({
+  it('computeCombinedCompatibilityScoreForPair does not apply a sexual communication similarity bonus', async () => {
+    const withoutPair = useCase.computeCombinedCompatibilityScore({
       attachmentScore: 0.8,
       valuesScore: 0.8,
       semanticScore: 0.8,
@@ -95,7 +95,7 @@ describe('CompatibilityUseCase', () => {
       styleConfidence: 1,
       dealbreakerMultiplier: 1,
     });
-    const withAdj = await useCase.computeCombinedCompatibilityScoreForPair('a', 'b', {
+    const withPair = await useCase.computeCombinedCompatibilityScoreForPair('a', 'b', {
       attachmentScore: 0.8,
       valuesScore: 0.8,
       semanticScore: 0.8,
@@ -103,7 +103,7 @@ describe('CompatibilityUseCase', () => {
       styleConfidence: 1,
       dealbreakerMultiplier: 1,
     });
-    expect(withAdj).toBeCloseTo(withoutAdj + 0.03, 5);
+    expect(withPair).toBeCloseTo(withoutPair, 5);
   });
 
   it('computeStyleCompatibility returns neutral style when profiles are missing (Supabase empty)', async () => {

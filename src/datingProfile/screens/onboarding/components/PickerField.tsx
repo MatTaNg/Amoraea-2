@@ -4,7 +4,7 @@
 
 import React from 'react';
 import { View, Text } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { styles } from './PickerField.styled';
 import { ActivityIcon } from '@/shared/components/ActivityIcon';
 
@@ -19,7 +19,7 @@ interface PickerFieldProps<T extends string> {
   options: PickerOption<T>[];
   onValueChange: (value: T) => void;
   placeholder?: string;
-  activityType?: 'drinking' | 'smoking' | 'cannabis' | 'workout'; // Optional activity type to show icon
+  activityType?: 'drinking' | 'smoking' | 'cannabis' | 'workout';
 }
 
 export const PickerField = <T extends string>({
@@ -34,27 +34,19 @@ export const PickerField = <T extends string>({
     <View style={styles.fieldContainer}>
       <View style={styles.labelWithIcon}>
         <Text style={styles.fieldLabel}>{label}</Text>
-        {activityType && (
+        {activityType ? (
           <ActivityIcon frequency={value} activityType={activityType} size={18} />
-        )}
+        ) : null}
       </View>
-      <View style={styles.pickerContainer}>
-        <Picker
-          selectedValue={value}
-          onValueChange={onValueChange}
-          style={styles.fullPicker}
-        >
-          {placeholder && <Picker.Item label={placeholder} value="" />}
-          {options.map((option) => (
-            <Picker.Item
-              key={option.value}
-              label={option.label}
-              value={option.value}
-            />
-          ))}
-        </Picker>
-      </View>
+      <AppSelect
+        bare
+        value={value}
+        options={options}
+        onValueChange={(next) => onValueChange(next as T)}
+        placeholder={placeholder ?? 'Choose…'}
+        allowUnset={Boolean(placeholder)}
+        sheetTitle={label}
+      />
     </View>
   );
 };
-

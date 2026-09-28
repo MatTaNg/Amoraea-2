@@ -128,13 +128,14 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(deps.setVoiceState).toHaveBeenCalledWith('idle');
   });
 
-  it('forces M4 threshold probe when model paraphrase was stripped for forced inject', async () => {
+  it('forces M4 orientation probe when model paraphrase was stripped for forced inject', async () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
       moment4ThresholdProbeAskedRef: { current: false },
     });
     const params = createMockPostClaudeParams({
-      shouldForceMoment4ThresholdProbe: true,
+      shouldForceMoment4OrientationProbe: true,
+      shouldForceMoment4ThresholdProbe: false,
       elongatingSuppressedForUserTurn: true,
       trimmed:
         'I had a fight with my friend Devonciu. We talked it through and see eye to eye.',
@@ -158,9 +159,8 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     );
 
     expect(result.handled).toBe(true);
-    expect(deps.moment4ThresholdProbeAskedRef.current).toBe(true);
     expect(speak).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
     );
   });
@@ -191,11 +191,40 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(speak).not.toHaveBeenCalled();
   });
 
+  it('forces M4 orientation probe when shouldForceMoment4OrientationProbe is true', async () => {
+    const deps = createMockPostClaudeDeps({
+      moment4ThresholdProbeAskedRef: { current: false },
+    });
+    const params = createMockPostClaudeParams({
+      shouldForceMoment4OrientationProbe: true,
+      trimmed: 'I held a grudge against my roommate for years.',
+    });
+    const speak = createMockSpeakAssistantTurn();
+    const draft = createMockSanitizeDraftResult({ strippedText: '' });
+
+    const result = await runPostClaudeForcedConstructProbeGates(
+      deps,
+      params,
+      'Some model text',
+      draft,
+      false,
+      speak,
+    );
+
+    expect(result.handled).toBe(true);
+    expect(speak).toHaveBeenCalledWith(
+      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
+    );
+    expect(deps.setVoiceState).toHaveBeenCalledWith('idle');
+  });
+
   it('forces M4 threshold probe when shouldForceMoment4ThresholdProbe is true', async () => {
     const deps = createMockPostClaudeDeps({
       moment4ThresholdProbeAskedRef: { current: false },
     });
     const params = createMockPostClaudeParams({
+      shouldForceMoment4OrientationProbe: false,
       shouldForceMoment4ThresholdProbe: true,
       trimmed: 'I would walk away when trust is gone.',
     });
@@ -220,7 +249,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(deps.setVoiceState).toHaveBeenCalledWith('idle');
   });
 
-  it('forces M4 threshold probe after specificity inject when user answers specificity follow-up', async () => {
+  it('forces M4 orientation probe after specificity inject when user answers specificity follow-up', async () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
       moment4ThresholdProbeAskedRef: { current: false },
@@ -229,7 +258,8 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     const grudgeAnswer =
       'Yeah, I had a close friend who betrayed me by sharing something in confidence. We talked it out but it changed the friendship.';
     const params = createMockPostClaudeParams({
-      shouldForceMoment4ThresholdProbe: true,
+      shouldForceMoment4OrientationProbe: true,
+      shouldForceMoment4ThresholdProbe: false,
       trimmed: 'I just gave you one',
       messagesToUse: [
         { role: 'assistant', content: 'Think of someone you had a hard time with…' },
@@ -259,9 +289,8 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     );
 
     expect(result?.handled).toBe(true);
-    expect(deps.moment4ThresholdProbeAskedRef.current).toBe(true);
     expect(speak).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
     );
     expect(speak).not.toHaveBeenCalledWith(
@@ -270,13 +299,14 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     );
   });
 
-  it('defers M4 threshold probe when the model asked a grudge elaboration follow-up', async () => {
+  it('defers M4 orientation probe when the model asked a grudge elaboration follow-up', async () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
       moment4ThresholdProbeAskedRef: { current: false },
     });
     const params = createMockPostClaudeParams({
-      shouldForceMoment4ThresholdProbe: true,
+      shouldForceMoment4OrientationProbe: true,
+      shouldForceMoment4ThresholdProbe: false,
       trimmed:
         "my ex complete narcissist manipulative and selfish I have nothing to say to him ever again",
     });

@@ -162,7 +162,7 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
     expect(out).not.toMatch(/Sophie and Daniel/i);
   });
 
-  it('blocks premature S2→S3 after James differently but before repair Q3', () => {
+  it('allows S2→S3 after James differently without the retired repair probe', () => {
     const premature =
       "Here's the third situation.\n\nSophie and Daniel have had the same argument for the third time.";
     const messages = [
@@ -178,8 +178,8 @@ describe('coerceScenarioBoundaryHandoffDisplayText', () => {
       },
     ];
     const out = coerceScenarioBoundaryHandoffDisplayText(premature, 'Matt', messages, 2, 2);
-    expect(out).toBe('And if you were James, how would you repair?');
-    expect(out).not.toMatch(/Sophie and Daniel/i);
+    expect(out).toMatch(/Sophie and Daniel/i);
+    expect(out).not.toBe('And if you were James, how would you repair?');
   });
 
   it('coerces S2→S3 handoff when Sophie vignette present into short wrap', () => {

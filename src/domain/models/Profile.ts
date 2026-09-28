@@ -39,7 +39,7 @@ export interface Profile {
   inviteCode: string | null;
   /** True when account used the alpha tester referral code — sees scoring/analysis UX after interview. */
   isAlphaTester: boolean;
-  /** When true, weighted interview gate uses 5.5 instead of 6.0 (referral benefit; floors unchanged). */
+  /** True when account signed up via referral (discount eligibility; does not lower interview pass threshold). */
   referralBoostActive: boolean;
   /** One-shot notice when someone you referred completed their interview (cleared when dismissed). */
   referralNoticePending: string | null;

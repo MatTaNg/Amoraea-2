@@ -187,13 +187,8 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
       constructSatisfactionResolvedByProbe,
       orchestratorSkippedProbeId,
       probeId: 's1_repair',
-      eligible:
-        allowScenarioARepairAfterContemptAnswer &&
-        shouldDeliverScenarioFollowUpQuestion(
-          messagesToUse,
-          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-        ),
-      logTag: '[S1_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
+      eligible: false,
+      logTag: '[S1_REPAIR_RETIRED_SKIP]',
     })
   ) {
     return { handled: true };
@@ -238,10 +233,8 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
       constructSatisfactionResolvedByProbe,
       orchestratorSkippedProbeId,
       probeId: 's2_james_repair',
-      eligible:
-        shouldForceScenarioBJamesRepairProbe &&
-        shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_B_JAMES_REPAIR_CANONICAL),
-      logTag: '[S2_JAMES_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
+      eligible: false,
+      logTag: '[S2_JAMES_REPAIR_RETIRED_SKIP]',
       withBriefAck: true,
     })
   ) {

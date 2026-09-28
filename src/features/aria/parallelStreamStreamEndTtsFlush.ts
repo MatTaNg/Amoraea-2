@@ -466,6 +466,7 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       maybeQueueSentenceForTts(repairFlushText, false);
     }
   } else if (
+    false &&
     isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current) &&
     deps.scenarioAContemptProbeAskedRef.current &&
     !state.scenarioARepairQuestionSpokenThisStream &&
@@ -476,7 +477,10 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
     state.scenarioARepairQuestionSpokenThisStream = true;
     maybeQueueSentenceForTts(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY, false);
   }
-  if (state.deferredScenarioARepairShortAckSentence) {
+  if (
+    false &&
+    state.deferredScenarioARepairShortAckSentence
+  ) {
     const holdAck = state.deferredScenarioARepairShortAckSentence;
     state.deferredScenarioARepairShortAckSentence = null;
     if (
@@ -503,6 +507,7 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
     }
   }
   if (
+    false &&
     isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current) &&
     deps.scenarioAContemptProbeAskedRef.current &&
     !state.scenarioARepairQuestionSpokenThisStream &&

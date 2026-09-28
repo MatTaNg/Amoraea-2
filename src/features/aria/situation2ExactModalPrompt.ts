@@ -11,7 +11,6 @@ import {
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
-  SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 
 export type Situation2ModalDeliveryState = {
@@ -77,10 +76,7 @@ export function isSituation2ModalAdvancedPastOpening(
 function resolveSituation2ModalPromptFromSubstantiveQuestion(question: string): string | null {
   const q = question.trim();
   if (!q) return null;
-  if (looksLikeScenarioBRepairAsJamesQuestion(q)) {
-    return SCENARIO_B_JAMES_REPAIR_CANONICAL;
-  }
-  if (looksLikeScenarioBJamesDifferentlyQuestion(q)) {
+  if (looksLikeScenarioBRepairAsJamesQuestion(q) || looksLikeScenarioBJamesDifferentlyQuestion(q)) {
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }
   if (normalizeScenarioOpeningForCompare(q) === normalizeScenarioOpeningForCompare(SCENARIO_2_OPENING)) {
@@ -108,12 +104,11 @@ export function resolveSituation2ExactModalPrompt(
   }
 
   // Resume / delivery-ref fallback when transcript lacks explicit probe lines.
-  if (delivery?.repairQuestionAsked && (transcriptHasRepairAsJamesProbe(scoped) || !lastSubstantive)) {
-    return SCENARIO_B_JAMES_REPAIR_CANONICAL;
-  }
   if (
-    delivery?.jamesDifferentlyAsked &&
-    (transcriptHasJamesDifferentlyProbe(scoped) || !lastSubstantive)
+    (delivery?.repairQuestionAsked || delivery?.jamesDifferentlyAsked) &&
+    (transcriptHasJamesDifferentlyProbe(scoped) ||
+      transcriptHasRepairAsJamesProbe(scoped) ||
+      !lastSubstantive)
   ) {
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }

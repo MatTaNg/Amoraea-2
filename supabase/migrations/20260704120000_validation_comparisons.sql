@@ -78,18 +78,21 @@ WHERE c.user_id = r.user_id
 
 ALTER TABLE public.relationship_validation_comparisons ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS relationship_validation_comparisons_select_own ON public.relationship_validation_comparisons;
 CREATE POLICY relationship_validation_comparisons_select_own
   ON public.relationship_validation_comparisons
   FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS relationship_validation_comparisons_insert_own ON public.relationship_validation_comparisons;
 CREATE POLICY relationship_validation_comparisons_insert_own
   ON public.relationship_validation_comparisons
   FOR INSERT
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS relationship_validation_comparisons_update_own ON public.relationship_validation_comparisons;
 CREATE POLICY relationship_validation_comparisons_update_own
   ON public.relationship_validation_comparisons
   FOR UPDATE
@@ -97,6 +100,7 @@ CREATE POLICY relationship_validation_comparisons_update_own
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS relationship_validation_comparisons_select_admin ON public.relationship_validation_comparisons;
 CREATE POLICY relationship_validation_comparisons_select_admin
   ON public.relationship_validation_comparisons
   FOR SELECT

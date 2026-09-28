@@ -7,6 +7,7 @@ import { SingleChoiceOptionList } from '@/shared/components/profileFields/Single
 import type { ChoiceOption } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './EthnicityOnboardingModal.styled';
+import { ONBOARDING_ETHNICITY_DESCRIPTION } from './onboardingStepCopy';
 
 export interface EthnicityOnboardingModalProps {
   ethnicity: string;
@@ -40,11 +41,12 @@ export const EthnicityOnboardingModal: React.FC<EthnicityOnboardingModalProps> =
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
-          <Text style={styles.description}>Tell us about your background.</Text>
+          <Text style={styles.description}>{ONBOARDING_ETHNICITY_DESCRIPTION}</Text>
           <Text style={styles.sectionTitle}>Your ethnicity</Text>
           <SingleChoiceOptionList
             options={heritageOptions}
             value={ethnicity}
+            deferSelectUntilPaint
             onSelect={onHeritageSelect}
           />
         </View>

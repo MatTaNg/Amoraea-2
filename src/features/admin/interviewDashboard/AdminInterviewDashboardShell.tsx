@@ -10,8 +10,8 @@ export type AdminInterviewMainViewId =
   | 'validation';
 
 const MAIN_VIEW_TABS: { id: AdminInterviewMainViewId; label: string }[] = [
-  { id: 'overview', label: 'Overview' },
   { id: 'users', label: 'Users' },
+  { id: 'overview', label: 'Overview' },
   { id: 'feedback', label: 'Feedback' },
   { id: 'compatibility', label: 'Compatibility' },
   { id: 'validation', label: 'Validation' },

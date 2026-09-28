@@ -40,9 +40,10 @@ import { LocationPermissionService } from '@utilities/permissions/LocationPermis
 import {
   PROMPT_CATEGORIES,
   MAX_PROMPTS,
-  PROFILE_PROMPT_ANSWER_MAX_LENGTH,
+  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
   getPromptById,
   getPromptCategoryId,
+  promptAnswerHasMinimumLength,
 } from '@features/profile/promptsByCategory';
 import { wouldRemovalBreakRequiredCategoryFloor } from '@/features/profile/profilePromptValidation';
 import { WEIGHT_OPTIONS } from '@features/compatibility/compatibilityQuestions';
@@ -330,9 +331,16 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const saveNewPrompt = async () => {
     const trimmed = promptFlowAnswer.trim();
-    if (!promptFlowPrompt || !trimmed || trimmed.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH) return;
-    const categoryId = getPromptCategoryId(promptFlowPrompt.id);
-    if (!categoryId) return;
+    const categoryId = promptFlowPrompt
+      ? getPromptCategoryId(promptFlowPrompt.id)
+      : undefined;
+    if (!promptFlowPrompt || !trimmed || !categoryId) return;
+    if (
+      promptAnswerHasMinimumLength(categoryId) &&
+      trimmed.length < PROFILE_PROMPT_ANSWER_MIN_LENGTH
+    ) {
+      return;
+    }
     const next: ProfilePromptAnswer[] = [
       ...currentPrompts,
       { promptId: promptFlowPrompt.id, categoryId, answer: trimmed },
@@ -351,7 +359,15 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
 
   const updatePromptAnswer = async (index: number, newAnswer: string) => {
     const trimmed = newAnswer.trim();
-    if (!trimmed || trimmed.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH) return;
+    const row = currentPrompts[index];
+    const categoryId = row?.categoryId || getPromptCategoryId(row?.promptId ?? '') || '';
+    if (!trimmed) return;
+    if (
+      promptAnswerHasMinimumLength(categoryId) &&
+      trimmed.length < PROFILE_PROMPT_ANSWER_MIN_LENGTH
+    ) {
+      return;
+    }
     const next = [...currentPrompts];
     next[index] = { ...next[index], answer: trimmed };
     setPromptsSaving(true);
@@ -537,6 +553,7 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   const promptMeta = getPromptById(p.promptId);
                   const isEditing = editingPromptIndex === index;
                   const removalBlocked = wouldRemovalBreakRequiredCategoryFloor(currentPrompts, index);
+                  const usesMin = promptAnswerHasMinimumLength(p.categoryId);
                   return (
                     <View key={`${p.promptId}-${index}`} style={styles.promptCard}>
                       <Text style={styles.promptQuestion}>
@@ -546,12 +563,9 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                         <View style={styles.promptEditRow}>
                           <TextInput
                             value={editingAnswer}
-                            onChangeText={(t) =>
-                              setEditingAnswer(t.slice(0, PROFILE_PROMPT_ANSWER_MAX_LENGTH))
-                            }
+                            onChangeText={setEditingAnswer}
                             placeholder="Your answer"
                             multiline
-                            maxLength={PROFILE_PROMPT_ANSWER_MAX_LENGTH}
                             style={styles.promptAnswerInput}
                           />
                           <View style={styles.promptEditActions}>
@@ -560,7 +574,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                               onPress={() => updatePromptAnswer(index, editingAnswer)}
                               disabled={
                                 !editingAnswer.trim() ||
-                                editingAnswer.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH ||
+                                (usesMin &&
+                                  editingAnswer.trim().length < PROFILE_PROMPT_ANSWER_MIN_LENGTH) ||
                                 promptsSaving
                               }
                               variant="outline"
@@ -718,28 +733,32 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                   />
                 </>
               )}
-              {promptFlowStep === 'answer' && promptFlowPrompt && (
+              {promptFlowStep === 'answer' && promptFlowPrompt && (() => {
+                const flowMin = promptAnswerHasMinimumLength(
+                  getPromptCategoryId(promptFlowPrompt.id) ?? '',
+                );
+                return (
                 <>
                   <Text style={styles.promptQuestionDisplay}>{promptFlowPrompt.text}</Text>
                   <TextInput
                     value={promptFlowAnswer}
-                    onChangeText={(t) =>
-                      setPromptFlowAnswer(t.slice(0, PROFILE_PROMPT_ANSWER_MAX_LENGTH))
-                    }
+                    onChangeText={setPromptFlowAnswer}
                     placeholder="Type your answer..."
                     multiline
-                    maxLength={PROFILE_PROMPT_ANSWER_MAX_LENGTH}
                     style={styles.promptAnswerInputLarge}
                   />
-                  <Text style={styles.photoCount}>
-                    {promptFlowAnswer.length}/{PROFILE_PROMPT_ANSWER_MAX_LENGTH}
-                  </Text>
+                  {flowMin ? (
+                    <Text style={styles.photoCount}>
+                      {promptFlowAnswer.trim().length}/{PROFILE_PROMPT_ANSWER_MIN_LENGTH} min
+                    </Text>
+                  ) : null}
                   <Button
                     title={promptsSaving ? 'Saving…' : 'Save prompt'}
                     onPress={saveNewPrompt}
                     disabled={
                       !promptFlowAnswer.trim() ||
-                      promptFlowAnswer.length > PROFILE_PROMPT_ANSWER_MAX_LENGTH ||
+                      (flowMin &&
+                        promptFlowAnswer.trim().length < PROFILE_PROMPT_ANSWER_MIN_LENGTH) ||
                       promptsSaving
                     }
                     style={styles.promptFlowBack}
@@ -751,7 +770,8 @@ export const EditProfileModal: React.FC<EditProfileModalProps> = ({
                     style={styles.promptFlowBack}
                   />
                 </>
-              )}
+                );
+              })()}
             </ScrollView>
           </View>
         </View>

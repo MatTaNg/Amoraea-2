@@ -128,9 +128,6 @@ export function evaluatePostClaudeNaturalLanguageClosingHandoff(
       /\bthank you for being so open with me\b/gi,
     )?.length ?? 0;
   const streamSpokeClosingThankYou = streamThankYouSpeakCount >= 1;
-  const closingFlagMatchesAudibleClosing =
-    params.textToParallelStream.closingSpoken &&
-    (streamClosingAlreadyDelivered || streamSpokeClosingThankYou || streamSpokeAudibleClosing);
   const shouldFailsafeComplete =
     !resolutionFollowUpAwaitingAnswer &&
     !closeGateForFailsafe.resolutionFollowUpStillRequired &&
@@ -138,12 +135,9 @@ export function evaluatePostClaudeNaturalLanguageClosingHandoff(
     deps.isInterviewAppRoute &&
     !deps.isAdmin &&
     deps.status === 'active' &&
-    (closingLooksFinal || streamSpokeIncompleteClosingOnly) &&
-    (closeGateForFailsafe.moment5CloseAllowed ||
-      lenientCloseReady ||
-      streamClosingAlreadyDelivered ||
-      closingFlagMatchesAudibleClosing ||
-      streamSpokeIncompleteClosingOnly);
+    closeGateForFailsafe.hasMoment5PrimaryAnchorInTranscript &&
+    closeGateForFailsafe.moment5CloseAllowed &&
+    (closingLooksFinal || streamSpokeIncompleteClosingOnly || streamClosingAlreadyDelivered);
   void remoteLog('[M5_CLOSING_HANDOFF_EVAL]', {
     interviewSessionId: deps.interviewSessionIdRef.current,
     closingLooksFinal,

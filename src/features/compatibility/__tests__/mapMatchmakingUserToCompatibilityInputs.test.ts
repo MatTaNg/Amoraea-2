@@ -61,7 +61,9 @@ describe('mapMatchmakingUserToCompatibilityInputs', () => {
     expect(mapped.values).toBeNull();
     expect(mapped.conflictStyle).toBeNull();
     expect(mapped.interviewProcess).not.toBeNull();
-    expect(mapped.relationalCapacity.rfqScore).toBeNull();
+    expect(mapped.relationalCapacity.brsScore).toBeNull();
+    expect(mapped.relationalCapacity).not.toHaveProperty('rfqScore');
+    expect(mapped.relationalCapacity).not.toHaveProperty('dweckScore');
   });
 
   it('maps distinct kids preferences for blocked pair fixtures', () => {

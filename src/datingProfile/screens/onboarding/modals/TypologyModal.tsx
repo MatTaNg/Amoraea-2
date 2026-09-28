@@ -6,6 +6,7 @@ import { Button } from "@/shared/ui/Button";
 import { TypologyPickerFields, type TypologyPickerValue } from "@/shared/components/profileFields/TypologyPickerFields";
 import { OnboardingHeader } from "./components/OnboardingHeader";
 import { styles } from "./TypologyModal.styled";
+import { ONBOARDING_TYPOLOGY_DESCRIPTION } from "./onboardingStepCopy";
 
 interface TypologyModalProps {
   typology?: TypologyPickerValue;
@@ -30,8 +31,7 @@ export const TypologyModal: React.FC<TypologyModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            Optional: add any typology details you would like to share. Skip any field and tap Next
-            when you are ready.
+            {ONBOARDING_TYPOLOGY_DESCRIPTION}
           </Text>
           <TypologyPickerFields
             variant="onboarding"

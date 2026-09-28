@@ -1,28 +1,27 @@
 import React, { useCallback } from 'react';
-import { View, Text, TouchableOpacity, Pressable, StyleSheet } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { HobbiesPicker } from '@/shared/components/HobbiesPicker';
 import { hobbiesStringToIds, hobbiesIdsToString } from '@/shared/utils/hobbiesHelpers';
 import {
   getHobbiesByIds,
-  MAX_HOBBY_SELECTIONS,
-  MIN_HOBBY_SELECTIONS,
-  HOBBY_DEFINITION,
+  HOBBY_DEFINITION_EXAMPLE,
+  HOBBY_DEFINITION_LEAD,
+  HOBBY_SELECTION_HINT,
 } from '@/shared/constants/hobbies';
 import { theme } from '@/shared/theme/theme';
 
 export type HobbiesFieldsProps = {
   hobbies: string;
-  professionalHobbyId: string | null | undefined;
   onHobbiesChange: (hobbies: string) => void;
-  onProfessionalHobbyIdChange: (id: string | null) => void;
+  /** Hide step lead copy when the parent section already shows onboarding subtext. */
+  variant?: 'default' | 'editProfile';
 };
 
-/** Shared hobbies picker + optional professional-hobby marker (onboarding + edit profile). */
+/** Shared hobbies picker (onboarding + edit profile). */
 export const HobbiesFields: React.FC<HobbiesFieldsProps> = ({
   hobbies,
-  professionalHobbyId,
   onHobbiesChange,
-  onProfessionalHobbyIdChange,
+  variant = 'default',
 }) => {
   const selectedIds = hobbiesStringToIds(hobbies);
   const selectedHobbies = getHobbiesByIds(selectedIds);
@@ -30,11 +29,8 @@ export const HobbiesFields: React.FC<HobbiesFieldsProps> = ({
   const handleSelectedIdsChange = useCallback(
     (ids: string[]) => {
       onHobbiesChange(hobbiesIdsToString(ids));
-      if (professionalHobbyId && !ids.includes(professionalHobbyId)) {
-        onProfessionalHobbyIdChange(null);
-      }
     },
-    [onHobbiesChange, onProfessionalHobbyIdChange, professionalHobbyId],
+    [onHobbiesChange],
   );
 
   const removeSelected = useCallback(
@@ -46,10 +42,13 @@ export const HobbiesFields: React.FC<HobbiesFieldsProps> = ({
 
   return (
     <View style={styles.root}>
-      <Text style={styles.description}>{HOBBY_DEFINITION}</Text>
-      <Text style={styles.selectionHint}>
-        Choose {MIN_HOBBY_SELECTIONS}–{MAX_HOBBY_SELECTIONS} hobbies.
-      </Text>
+      {variant === 'default' ? (
+        <>
+          <Text style={styles.description}>{HOBBY_DEFINITION_LEAD}</Text>
+          <Text style={styles.example}>{HOBBY_DEFINITION_EXAMPLE}</Text>
+          <Text style={styles.selectionHint}>{HOBBY_SELECTION_HINT}</Text>
+        </>
+      ) : null}
 
       <Text style={styles.selectedHeading}>Your selections</Text>
       {selectedHobbies.length === 0 ? (
@@ -72,39 +71,6 @@ export const HobbiesFields: React.FC<HobbiesFieldsProps> = ({
       )}
 
       <HobbiesPicker selectedIds={selectedIds} onSelectedIdsChange={handleSelectedIdsChange} />
-
-      {selectedIds.length > 0 ? (
-        <>
-          <Text style={styles.proLabel}>
-            Optionally, mark one as your "professional hobby" (you spend 20+ hours a week on it — the
-            center of your life).
-          </Text>
-          <View style={styles.proOptions}>
-            <TouchableOpacity
-              style={[
-                styles.proOption,
-                (professionalHobbyId === null || professionalHobbyId === undefined) &&
-                  styles.proOptionSelected,
-              ]}
-              onPress={() => onProfessionalHobbyIdChange(null)}
-            >
-              <Text style={styles.proOptionText}>None</Text>
-            </TouchableOpacity>
-            {selectedHobbies.map((h) => (
-              <TouchableOpacity
-                key={h.id}
-                style={[
-                  styles.proOption,
-                  professionalHobbyId === h.id ? styles.proOptionSelected : undefined,
-                ]}
-                onPress={() => onProfessionalHobbyIdChange(h.id)}
-              >
-                <Text style={styles.proOptionText}>{h.name}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </>
-      ) : null}
     </View>
   );
 };
@@ -114,6 +80,12 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   description: {
+    fontSize: 14,
+    color: theme.colors.textSecondary,
+    marginBottom: 8,
+    lineHeight: 20,
+  },
+  example: {
     fontSize: 14,
     color: theme.colors.textSecondary,
     marginBottom: 8,
@@ -166,33 +138,5 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     color: theme.colors.textSecondary,
     fontWeight: '600',
-  },
-  proLabel: {
-    fontSize: 13,
-    color: theme.colors.textSecondary,
-    marginTop: 8,
-    marginBottom: 12,
-    lineHeight: 18,
-  },
-  proOptions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  proOption: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 8,
-    borderWidth: 2,
-    borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-  },
-  proOptionSelected: {
-    borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.surfaceElevated,
-  },
-  proOptionText: {
-    fontSize: 14,
-    color: theme.colors.text,
   },
 });

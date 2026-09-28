@@ -1,4 +1,5 @@
 import { S1_CONTEMPT_FIX_VERSION } from '@features/aria/interviewAdminConfig';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import { deriveMoment4PostGrudgeSpecificityResolvedFromMessages } from '@features/aria/moment4SpecificityFollowUp';
 import { looksLikeMoment4ThresholdQuestion } from '@features/aria/moment4ProbeLogic';
@@ -170,11 +171,16 @@ export function hydrateResumeProbeFlagsFromTranscript(
   };
   deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef.current = playbackConfirmedKinds;
   const scenarioOneFollowUp = scenarioOneFollowUpFlagsFromTranscript(transcriptMessages);
-  deps.scenarioARepairQuestionAskedRef.current = scenarioOneFollowUp.repairQuestionAsked;
-  deps.s2RepairProbeDeliveredRef.current = transcriptMessages.some(
-    (m) =>
-      m.role === 'assistant' && looksLikeScenarioBRepairAsJamesQuestion(m.content ?? ''),
-  );
+  // Retired probe: never hydrate a sticky repair-asked flag from phantom transcript tails.
+  deps.scenarioARepairQuestionAskedRef.current = isInterviewCanonicalProbeRetired('s1_repair')
+    ? false
+    : scenarioOneFollowUp.repairQuestionAsked;
+  deps.s2RepairProbeDeliveredRef.current = isInterviewCanonicalProbeRetired('s2_james_repair')
+    ? false
+    : transcriptMessages.some(
+        (m) =>
+          m.role === 'assistant' && looksLikeScenarioBRepairAsJamesQuestion(m.content ?? ''),
+      );
   deps.s3RepairProbeDeliveredRef.current = transcriptMessages.some(
     (m) => m.role === 'assistant' && isScenarioCRepairAssistantPrompt(m.content ?? ''),
   );

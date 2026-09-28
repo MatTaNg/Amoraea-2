@@ -102,34 +102,30 @@ import {
   PREF_PARTNER_POLITICAL_SHARING_OPTIONS,
   PREF_PARTNER_SAME_RELIGION_OPTIONS,
 } from '@/screens/profile/editProfile/constants';
+import { partnerAlignmentImportancePickerValue } from '@/shared/constants/partnerAlignmentImportance';
 import {
   buildHeightWeightProfileFields,
   mapRelationshipStyleUiToDb,
   mapRelationshipStyleUiToRelationshipType,
 } from '@/screens/profile/editProfile/editProfileService';
 import { OnboardingHeaderExitContext } from './components/onboardingHeaderExitContext';
+import {
+  ONBOARDING_PSYCHEDELICS_DESCRIPTION,
+  ONBOARDING_RECREATIONAL_DRUGS_DESCRIPTION,
+} from './onboardingStepCopy';
 
 export type { OnboardingStep } from './onboardingStepOrder';
 
 const TOTAL_STEPS = ONBOARDING_STEPS_ORDER.filter(
   (s) => s !== 'complete' && s !== 'profileComplete',
 ).length;
-const PARTNER_SUBSTANCE_ALIGNMENT_CHOICES = PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS.map((label) => ({
-  label,
-  value: label,
-}));
-const PARTNER_POLITICAL_SHARING_CHOICES = PREF_PARTNER_POLITICAL_SHARING_OPTIONS.map((label) => ({
-  label,
-  value: label,
-}));
+const PARTNER_SUBSTANCE_ALIGNMENT_CHOICES = [...PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS];
+const PARTNER_POLITICAL_SHARING_CHOICES = [...PREF_PARTNER_POLITICAL_SHARING_OPTIONS];
 const PARTNER_HAS_CHILDREN_CHOICES = PREF_PARTNER_HAS_CHILDREN_OPTIONS.map((label) => ({
   label,
   value: label,
 }));
-const PARTNER_SAME_RELIGION_CHOICES = PREF_PARTNER_SAME_RELIGION_OPTIONS.map((label) => ({
-  label,
-  value: label,
-}));
+const PARTNER_SAME_RELIGION_CHOICES = [...PREF_PARTNER_SAME_RELIGION_OPTIONS];
 
 function OnboardingProgressBar({
   currentStep,
@@ -1209,7 +1205,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'hobbies' && (
         <HobbiesOnboardingModal
           hobbies={onboardingData.hobbies || ''}
-          professionalHobbyId={onboardingData.professionalHobbyId}
           onHobbiesChange={(hobbies) => {
             const nextIds = hobbiesStringToIds(hobbies);
             const prevIds = hobbiesStringToIds(onboardingData.hobbies);
@@ -1228,9 +1223,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
                 : {}),
             });
           }}
-          onProfessionalHobbyIdChange={(professionalHobbyId) =>
-            updateData({ professionalHobbyId })
-          }
           onNext={goToNextStep}
           onBack={goToPrevStep}
         />
@@ -1435,7 +1427,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
-          value={String(onboardingData.matchPreferences?.partnerAlignmentTobacco ?? '')}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.matchPreferences?.partnerAlignmentTobacco,
+          )}
           onValueChange={(v) =>
             setChoice({
               matchPreferences: {
@@ -1464,7 +1458,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_ALIGNMENT_ALCOHOL_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
-          value={String(onboardingData.matchPreferences?.partnerAlignmentAlcohol ?? '')}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.matchPreferences?.partnerAlignmentAlcohol,
+          )}
           onValueChange={(v) =>
             setChoice({
               matchPreferences: {
@@ -1481,7 +1477,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'recreationalDrugsSocial' && (
         <SingleChoiceModal
           title="Do you use recreational drugs socially (MDMA, cocaine, etc)"
-          description="Examples include MDMA, cocaine, or similar in social settings. Cannabis and psychedelics/plant medicines are asked separately."
+          description={ONBOARDING_RECREATIONAL_DRUGS_DESCRIPTION}
           options={recreationalDrugsSocialOptions}
           value={onboardingData.recreationalDrugsSocial || ''}
           onValueChange={(v) => setChoice({ recreationalDrugsSocial: v })}
@@ -1494,7 +1490,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_ALIGNMENT_RECREATIONAL_DRUGS_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
-          value={String(onboardingData.matchPreferences?.partnerAlignmentRecreationalDrugs ?? '')}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.matchPreferences?.partnerAlignmentRecreationalDrugs,
+          )}
           onValueChange={(v) =>
             setChoice({
               matchPreferences: {
@@ -1511,7 +1509,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'relationshipPsychedelics' && (
         <SingleChoiceModal
           title="What's your relationship with psychedelics or plant medicines?"
-          description="Psychedelics and traditional plant medicines (e.g. ayahuasca, peyote in lawful ceremonial contexts). This is separate from alcohol and cannabis."
+          description={ONBOARDING_PSYCHEDELICS_DESCRIPTION}
           options={psychedelicsRelationshipOptions}
           value={onboardingData.relationshipWithPsychedelics || ''}
           onValueChange={(v) => setChoice({ relationshipWithPsychedelics: v })}
@@ -1524,7 +1522,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_ALIGNMENT_PSYCHEDELICS_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
-          value={String(onboardingData.matchPreferences?.partnerAlignmentPsychedelics ?? '')}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.matchPreferences?.partnerAlignmentPsychedelics,
+          )}
           onValueChange={(v) =>
             setChoice({
               matchPreferences: {
@@ -1553,7 +1553,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_ALIGNMENT_CANNABIS_DEALBREAKER_QUESTION}
           options={PARTNER_SUBSTANCE_ALIGNMENT_CHOICES}
-          value={String(onboardingData.matchPreferences?.partnerAlignmentCannabis ?? '')}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.matchPreferences?.partnerAlignmentCannabis,
+          )}
           onValueChange={(v) =>
             setChoice({
               matchPreferences: {
@@ -1615,7 +1617,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_POLITICAL_VIEWS_DEALBREAKER_QUESTION}
           options={PARTNER_POLITICAL_SHARING_CHOICES}
-          value={onboardingData.prefPartnerPoliticalAlignmentImportance || ''}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.prefPartnerPoliticalAlignmentImportance,
+          )}
           onValueChange={(v) => setChoice({ prefPartnerPoliticalAlignmentImportance: v })}
           onNext={goToNextStep}
           onBack={goToPrevStep}
@@ -1637,7 +1641,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         <SingleChoiceModal
           title={PARTNER_SAME_RELIGION_DEALBREAKER_QUESTION}
           options={PARTNER_SAME_RELIGION_CHOICES}
-          value={String(onboardingData.matchPreferences?.partnerSameReligionRequired ?? '')}
+          value={partnerAlignmentImportancePickerValue(
+            onboardingData.matchPreferences?.partnerSameReligionRequired,
+          )}
           onValueChange={(v) =>
             setChoice({
               matchPreferences: {

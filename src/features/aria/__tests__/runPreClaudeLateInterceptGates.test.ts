@@ -30,6 +30,9 @@ jest.mock('@features/aria/prefetchInterviewTurnOrchestratorLlmForTurn', () => ({
 jest.mock('@features/aria/runPreClaudeOrchestratorExecuteGate', () => ({
   runPreClaudeOrchestratorExecuteGate: jest.fn(),
 }));
+jest.mock('@features/aria/deliverMoment4CommitmentOrientationProbe', () => ({
+  deliverMoment4CommitmentOrientationProbe: jest.fn(),
+}));
 jest.mock('@features/aria/deliverMoment4CommitmentThresholdProbe', () => ({
   deliverMoment4CommitmentThresholdProbe: jest.fn(),
 }));
@@ -39,6 +42,7 @@ import { resolveInterviewTurnOrchestratorDecisionForTurn } from '@features/aria/
 import { runPreClaudeOrchestratorExecuteGate } from '@features/aria/runPreClaudeOrchestratorExecuteGate';
 import { runPreClaudeOrchestratorEarlyScoreGoBackGate } from '@features/aria/runPreClaudeOrchestratorEarlyScoreGoBackGate';
 import { runPreClaudeCheckingInAckGate } from '@features/aria/runPreClaudeCheckingInAckGate';
+import { deliverMoment4CommitmentOrientationProbe } from '@features/aria/deliverMoment4CommitmentOrientationProbe';
 import { deliverMoment4CommitmentThresholdProbe } from '@features/aria/deliverMoment4CommitmentThresholdProbe';
 
 const mockMoment4 = jest.mocked(runPreClaudeMoment4SpecificityGate);
@@ -54,6 +58,7 @@ const mockCheckingInAck = jest.mocked(runPreClaudeCheckingInAckGate);
 const mockPrefetchConstructSatisfaction = jest.mocked(prefetchConstructSatisfactionLlmForPendingProbe);
 const mockResolveOrchestrator = jest.mocked(resolveInterviewTurnOrchestratorDecisionForTurn);
 const mockOrchestratorExecute = jest.mocked(runPreClaudeOrchestratorExecuteGate);
+const mockDeliverMoment4Orientation = jest.mocked(deliverMoment4CommitmentOrientationProbe);
 const mockDeliverMoment4Threshold = jest.mocked(deliverMoment4CommitmentThresholdProbe);
 
 const orchestratorDecision = {
@@ -84,6 +89,7 @@ function moment4Pass() {
   return {
     handled: false as const,
     answeringAfterMoment4SpecificityProbe: false,
+    shouldForceMoment4OrientationProbe: false,
     shouldForceMoment4ThresholdProbe: false,
     moment4ThresholdHintInAnswer: false,
   };
@@ -244,15 +250,16 @@ describe('runPreClaudeLateInterceptGates', () => {
     expect(mockClientOwned).not.toHaveBeenCalled();
   });
 
-  it('falls back to client M4 threshold delivery when orchestrator execute does not handle', async () => {
+  it('falls back to client M4 orientation delivery when orchestrator execute does not handle', async () => {
     mockMoment4.mockResolvedValue({
       handled: false,
       answeringAfterMoment4SpecificityProbe: false,
-      shouldForceMoment4ThresholdProbe: true,
+      shouldForceMoment4OrientationProbe: true,
+      shouldForceMoment4ThresholdProbe: false,
       moment4ThresholdHintInAnswer: false,
     });
     mockOrchestratorExecute.mockResolvedValue({ handled: false });
-    mockDeliverMoment4Threshold.mockResolvedValue(true);
+    mockDeliverMoment4Orientation.mockResolvedValue(true);
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
       moment4ThresholdProbeAskedRef: { current: false },
@@ -271,9 +278,9 @@ describe('runPreClaudeLateInterceptGates', () => {
     );
 
     expect(result).toEqual({ handled: true });
-    expect(mockDeliverMoment4Threshold).toHaveBeenCalledWith(
+    expect(mockDeliverMoment4Orientation).toHaveBeenCalledWith(
       expect.objectContaining({
-        logTag: '[M4_COMMITMENT_THRESHOLD_ORCHESTRATOR_FALLBACK]',
+        logTag: '[M4_COMMITMENT_ORIENTATION_ORCHESTRATOR_FALLBACK]',
       }),
     );
   });

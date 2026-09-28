@@ -1,9 +1,10 @@
-import React from 'react';
-import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
+import React, { useState } from 'react';
+import { ONBOARDING_STEP_SCREEN_EDGES } from './onboardingStepScreenEdges';
 import { View, Text, TouchableOpacity, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { OnboardingHeader } from './components/OnboardingHeader';
+import { afterOnboardingSelectionFeedback } from '@/datingProfile/screens/onboarding/onboardingSelectionFeedback';
 import { styles } from './GenderModal.styled';
 
 interface GenderModalProps {
@@ -22,6 +23,9 @@ export const GenderModal: React.FC<GenderModalProps> = ({
   onNext,
   onBack,
 }) => {
+  const [pendingGender, setPendingGender] = useState<string | null>(null);
+  const displayedGender = pendingGender ?? gender;
+
   return (
     <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Gender" onBack={onBack} />
@@ -36,16 +40,17 @@ export const GenderModal: React.FC<GenderModalProps> = ({
               key={option}
               style={[
                 styles.option,
-                gender === option && styles.optionSelected,
+                displayedGender === option && styles.optionSelected,
               ]}
               onPress={() => {
+                setPendingGender(option);
                 onGenderChange(option);
-                onNext();
+                afterOnboardingSelectionFeedback(onNext);
               }}
             >
               <Text style={[
                 styles.optionText,
-                gender === option && styles.optionTextSelected,
+                displayedGender === option && styles.optionTextSelected,
               ]}>
                 {option}
               </Text>

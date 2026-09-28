@@ -12,6 +12,7 @@ import {
   SHOW_SCENARIO_1_VIGNETTE_EXACT,
 } from '@features/aria/interviewShowScenarioExactCopy';
 import { buildScenario1VignetteIntroBundle } from '@features/aria/interviewTransitionBundles';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import {
   looksLikeScenarioAContemptProbeQuestion,
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
@@ -25,6 +26,14 @@ import {
   looksLikeScenarioBJamesDifferentlyQuestion,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
+
+/** Scripted Situation 1 footer when a retired Ryan repair ask would otherwise surface. */
+function situation1ModalPromptForRepairBleed(): string {
+  if (isInterviewCanonicalProbeRetired('s1_repair')) {
+    return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+  }
+  return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+}
 
 /** Model meta-narration instead of the Situation 1 vignette (often after tab restore / readiness). */
 export function looksLikeScenario1MetaPlayNarration(text: string | null | undefined): boolean {
@@ -154,14 +163,14 @@ export function isSituation1ModalAdvancedPastOpening(
 }
 
 /**
- * Situation 1 Show scenario footer — exact scripted copy only (opening → contempt → repair).
+ * Situation 1 Show scenario footer — exact scripted copy only (opening → contempt; repair retired).
  * Never surfaces model paraphrases in the modal.
  */
 function resolveSituation1ModalPromptFromSubstantiveQuestion(question: string): string | null {
   const q = question.trim();
   if (!q) return null;
   if (looksLikeScenarioARepairQuestion(q) || looksLikeScenarioARepairStreamFragment(q)) {
-    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+    return situation1ModalPromptForRepairBleed();
   }
   if (looksLikeScenarioAContemptProbeQuestion(q)) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
@@ -193,7 +202,7 @@ export function resolveSituation1ExactModalPrompt(
   }
 
   if (delivery?.repairQuestionAsked) {
-    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+    return situation1ModalPromptForRepairBleed();
   }
   if (delivery?.contemptProbeAsked) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
@@ -220,7 +229,7 @@ export function coerceExactScenarioModalQuestionDisplay(
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
   }
   if (looksLikeScenarioARepairQuestion(raw) || looksLikeScenarioARepairStreamFragment(raw)) {
-    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+    return situation1ModalPromptForRepairBleed();
   }
   if (looksLikeScenarioBJamesDifferentlyQuestion(raw)) {
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;

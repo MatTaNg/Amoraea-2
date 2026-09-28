@@ -155,6 +155,7 @@ export function coerceInterviewAssistantDraftForSpeak(
     ) {
       t = coerceScenarioAContemptProbeForTts(t);
     } else if (!shouldSkipScenarioARepairDraftNormalization(t)) {
+      const beforeRepairCoerce = t;
       if (
         looksLikeScenarioARepairQuestion(t) ||
         looksLikeScenarioARepairStreamFragment(t) ||
@@ -163,6 +164,23 @@ export function coerceInterviewAssistantDraftForSpeak(
         t = coerceScenarioARepairQuestionForTts(t);
       } else {
         t = normalizeScenarioARepairQuestionInAssistantDraft(t);
+      }
+      // Retired S1 repair coerces to empty — promote to S1→S2 instead of speaking nothing.
+      if (
+        !t.trim() &&
+        beforeRepairCoerce.trim() &&
+        shouldAdvanceScenarioAAfterSatisfiedRepair(ctx.messages, beforeRepairCoerce, 1)
+      ) {
+        const bundle = applyPostClaudeScenarioAdvanceBundleOverride(
+          beforeRepairCoerce,
+          ctx.firstName,
+          ctx.messages,
+          1,
+          ctx.currentScenario ?? 1,
+        );
+        if (bundle) {
+          t = stripControlTokens(bundle);
+        }
       }
     }
   }

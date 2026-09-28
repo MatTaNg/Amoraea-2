@@ -15,6 +15,7 @@ import { useAuth } from './src/features/authentication/hooks/useAuth';
 import { LoginScreen } from './src/app/screens/LoginScreen';
 import { RegisterScreen } from './src/app/screens/RegisterScreen';
 import { ForgotPasswordScreen } from './src/app/screens/ForgotPasswordScreen';
+import { LinkPhoneScreen } from './src/app/screens/LinkPhoneScreen';
 import { SetNewPasswordScreen } from './src/app/screens/SetNewPasswordScreen';
 import { PostInterviewLaunchScreen } from '@app/screens/onboarding/PostInterviewLaunchScreen';
 import { PostInterviewScreen } from '@app/screens/onboarding/PostInterviewScreen';
@@ -60,6 +61,10 @@ import { hydrateUserEnteredInterviewFlowFromStorage } from '@utilities/interview
 import { OnboardingHeader } from './src/ui/components/OnboardingHeader';
 import { ProfileRepository } from './src/data/repositories/ProfileRepository';
 import { InviteCodeRepository } from './src/data/repositories/InviteCodeRepository';
+import {
+  claimStoredSignupLeadIfPresent,
+  normalizeSignupLeadToken,
+} from './src/features/authentication/signupLead';
 import { OnboardingUseCase } from './src/domain/useCases/OnboardingUseCase';
 import { AsyncStorageService } from './src/utilities/storage/AsyncStorageService';
 import { supabase } from './src/data/supabase/client';
@@ -142,6 +147,7 @@ const AuthNavigator = ({ initialRouteName = 'Login' }: { initialRouteName?: stri
   <Stack.Navigator screenOptions={{ headerShown: false }} initialRouteName={initialRouteName}>
     <Stack.Screen name="Login" component={LoginScreen} />
     <Stack.Screen name="Register" component={RegisterScreen} />
+    <Stack.Screen name="LinkPhone" component={LinkPhoneScreen} />
     <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
     <Stack.Screen name="SetNewPassword" component={SetNewPasswordScreen} />
   </Stack.Navigator>
@@ -463,13 +469,20 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
           data: { session },
         } = await supabase.auth.getSession();
         const metadata = session?.user?.user_metadata as
-          | { referral_code?: string; age?: number; gender?: 'Man' | 'Woman' | 'Non-binary' }
+          | {
+              referral_code?: string;
+              age?: number;
+              gender?: 'Man' | 'Woman' | 'Non-binary';
+              sms_marketing_opt_in?: boolean;
+            }
           | undefined;
         await inviteCodeRepository.ensureUserWithInviteCode(userId, {
           email: session?.user?.email ?? undefined,
+          phone: session?.user?.phone ?? undefined,
           referralCode: metadata?.referral_code,
           age: typeof metadata?.age === 'number' ? metadata.age : undefined,
           gender: metadata?.gender,
+          smsMarketingOptIn: metadata?.sms_marketing_opt_in === true,
         });
         p = await profileRepository.getProfile(userId);
       }
@@ -736,7 +749,13 @@ const INTERVIEW_STACK_LINKING_SCREENS = {
 
 const AUTH_STACK_LINKING_SCREENS = {
   Login: '',
-  Register: 'register',
+  Register: {
+    path: 'register',
+    parse: {
+      lead: (value: string | undefined) => normalizeSignupLeadToken(value) ?? undefined,
+    },
+  },
+  LinkPhone: 'link-phone',
   ForgotPassword: 'forgot-password',
   /** Email confirmation callbacks (`getAuthEmailRedirectTo`). */
   EmailConfirm: 'auth/confirm',
@@ -746,7 +765,7 @@ const AUTH_STACK_LINKING_SCREENS = {
 const RootNavigator = () => {
   const { user, loading, passwordRecoveryPending } = useAuth();
 
-  const isLoggedIn = user?.email != null && user.email !== '';
+  const isLoggedIn = user != null;
   const onEmailConfirmCallback =
     Platform.OS === 'web' &&
     typeof window !== 'undefined' &&
@@ -859,7 +878,7 @@ const RootNavigator = () => {
     );
   }
 
-  return <LoggedInRootShell userId={user!.id} userEmail={user!.email ?? null} navTheme={navTheme} />;
+  return <LoggedInRootShell userId={user!.id} userEmail={user!.email ?? null} userPhone={user!.phone ?? null} navTheme={navTheme} />;
 };
 
 const loggedInNavTheme = {
@@ -877,10 +896,12 @@ const loggedInNavTheme = {
 const LoggedInRootShell = ({
   userId,
   userEmail,
+  userPhone,
   navTheme = loggedInNavTheme,
 }: {
   userId: string;
   userEmail: string | null;
+  userPhone: string | null;
   navTheme?: typeof loggedInNavTheme;
 }) => {
   const { user } = useAuth();
@@ -890,20 +911,31 @@ const LoggedInRootShell = ({
     let cancelled = false;
     void (async () => {
       const metadata = user?.user_metadata as
-        | { referral_code?: string; age?: number; gender?: 'Man' | 'Woman' | 'Non-binary' }
+        | {
+            referral_code?: string;
+            age?: number;
+            gender?: 'Man' | 'Woman' | 'Non-binary';
+            sms_marketing_opt_in?: boolean;
+          }
         | undefined;
       await inviteCodeRepository.ensureUserWithInviteCode(userId, {
         email: userEmail ?? undefined,
+        phone: userPhone ?? undefined,
         referralCode: metadata?.referral_code,
         age: typeof metadata?.age === 'number' ? metadata.age : undefined,
         gender: metadata?.gender,
+        smsMarketingOptIn: metadata?.sms_marketing_opt_in === true,
       });
+      const claimResult = await claimStoredSignupLeadIfPresent();
+      if (claimResult && !claimResult.ok && __DEV__) {
+        console.warn('[SignupLead] claim failed after bootstrap', claimResult.error);
+      }
       if (!cancelled) setUserBootstrapped(true);
     })();
     return () => {
       cancelled = true;
     };
-  }, [userId, userEmail, user?.user_metadata]);
+  }, [userId, userEmail, userPhone, user?.user_metadata]);
 
   const { data: validationShellRouting, isPending: validationShellRoutingPending } = useQuery({
     queryKey: ['validationShellRouting', userId],
@@ -978,6 +1010,17 @@ export default function App() {
       * {
         -ms-overflow-style: none !important;
         scrollbar-width: none !important;
+      }
+      /* RN-web Pressable is a <button>; UA nowrap clips choice labels like "1–2 times a week". */
+      button[data-allow-wrap="true"],
+      [data-allow-wrap="true"] {
+        white-space: normal !important;
+        overflow: visible !important;
+        height: auto !important;
+      }
+      button[data-allow-wrap="true"] *,
+      [data-allow-wrap="true"] * {
+        white-space: normal !important;
       }
     `;
     document.head.appendChild(style);

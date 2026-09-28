@@ -225,6 +225,29 @@ export function looksLikeScenarioAContemptProbeAssessableShortAnswer(userText: s
 }
 
 /**
+ * When the S1 Ryan-repair probe is retired, contempt coverage from Q1
+ * is enough engagement to hand off to Situation 2 — do not reinject the retired repair ask.
+ */
+export function scenarioAContemptConstructReadyForRetiredRepairHandoff(
+  messages: readonly Scenario1Moment1UserMessageLike[],
+): boolean {
+  let agg = aggregateScenario1Moment1UserTextForContemptGate(messages);
+  if (!agg) {
+    // Untagged early-turn transcripts still count (scenarioNumber may be omitted).
+    const parts: string[] = [];
+    for (const m of messages) {
+      if (m.role !== 'user') continue;
+      if (m.interviewMoment !== undefined && m.interviewMoment !== 1) continue;
+      if (m.scenarioNumber != null && m.scenarioNumber !== 1) continue;
+      const c = String(m.content ?? '').trim();
+      if (c) parts.push(c);
+    }
+    agg = parts.join('\n').trim();
+  }
+  return agg.length >= 8 && hasScenarioAQ1ContemptProbeCoverage(agg);
+}
+
+/**
  * Scenario A Q1: user already showed a **contempt-quality** read of Emma's "you've made that very clear" line —
  * hostile, dismissive, verdict-issuing, or relationally closing — not mere indirectness or minimization.
  *

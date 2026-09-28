@@ -98,6 +98,9 @@ export type AttemptRow = {
   personal_moment_emotional_vocab_low?: boolean | null;
   personal_moment_emotional_vocab_density?: number | null;
   disclosure_calibration?: string | null;
+  repair_source_signals?: import('@features/aria/aggregateMarkerScoresFromSlices').RepairSourceSignals | null;
+  regulation_source_signals?: import('@features/aria/aggregateMarkerScoresFromSlices').RegulationSourceSignals | null;
+  weighted_score_breakdown?: import('@features/aria/computeGateResultCore').WeightedScoreBreakdown | null;
   emotion_recognition_raw_score?: number | null;
   emotion_recognition_score?: number | null;
   emotion_recognition_responses?: string[] | null;

@@ -11,6 +11,7 @@ import {
   RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD,
   SCS_SF_LOW_SELF_COMPASSION_FLOOR_THRESHOLD,
 } from '@features/psychometrics/psychometricFloorBreaches';
+import { filterDeprecatedAdminReviewFlags } from '@features/admin/interviewDashboard/adminDeprecatedDepthConstructs';
 
 const FLAG_DESCRIPTIONS: Record<string, string> = {
   gasp_accountability_divergence:
@@ -42,22 +43,20 @@ const FLAG_DESCRIPTIONS: Record<string, string> = {
   brs_low_resilience_floor:
     `BRS resilience score is at or below the automatic fail threshold (≤ ${BRS_LOW_RESILIENCE_FLOOR_THRESHOLD.toFixed(1)}).`,
   anxiety_trait_high_floor:
-    `Anxiety Trait score meets the automatic fail threshold (≥ ${ANXIETY_TRAIT_HIGH_FLOOR_THRESHOLD.toFixed(1)}).`,
+    `Anxiety Trait is elevated (≥ ${ANXIETY_TRAIT_HIGH_FLOOR_THRESHOLD.toFixed(1)}). Historical detector only — not a new-user auto-fail.`,
   aaq2_high_experiential_avoidance_floor:
-    `AAQ-II experiential avoidance sum score meets the automatic fail threshold (≥ ${AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD.toFixed(0)}).`,
+    `AAQ-II is elevated (≥ ${AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_THRESHOLD.toFixed(0)}). Historical detector only — not a new-user auto-fail.`,
   rses_low_self_esteem_floor:
-    `Rosenberg Self-Esteem sum score is at or below the automatic fail threshold (≤ ${RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD.toFixed(0)}).`,
+    `Rosenberg Self-Esteem sum is at or below the Amoraea admissions threshold (≤ ${RSES_LOW_SELF_ESTEEM_FLOOR_THRESHOLD.toFixed(0)}; range 10–40).`,
   rfq_mentalizing_divergence_low_self_report:
     'Limited reflective functioning self-report but strong mentalizing signals in the interview.',
   rfq_mentalizing_divergence_high_self_report:
     'Strong reflective functioning self-report but weak mentalizing signals in the interview — possible performance effect.',
   mentalizing_overcertainty: 'Multiple moments flagged for mentalizing overcertainty.',
-  projection_detected: 'Projection defense pattern detected in interview scoring.',
   defense_possible_false_negative:
     'Psychometric profile suggests possible missed defense detection in the interview.',
   ego_development_review: 'Ego development level flagged for manual review.',
   underdisclosure: 'Disclosure calibration suggests underdisclosure.',
-  overdisclosure: 'Disclosure calibration suggests overdisclosure.',
   reasoning_pending: 'AI narrative reasoning still pending at scoring time.',
 };
 
@@ -77,10 +76,10 @@ function describeFlag(flag: string): string {
     return 'Psychometric responses show implausible straight-line patterns.';
   }
   if (flag.startsWith('gaming_correction_level')) {
-    return 'Graduated gaming correction applied — significant data quality concerns with psychometric self-report.';
+    return 'Graduated gaming correction applied — straight-line response quality on live instruments.';
   }
   if (flag === 'gaming_correction_severe') {
-    return 'Severe gaming correction (level 3) — all positive psychometric contributions stripped plus penalty.';
+    return 'Severe gaming correction (level 3) — positive live-instrument contributions stripped; no extra penalty.';
   }
   if (flag.startsWith('defense_cross_reference_contradiction')) {
     return 'Defense pattern NLP detection contradicts self-report psychometric profile — possible false positive.';
@@ -159,7 +158,9 @@ export function UncertaintyScoreCard({ uncertaintyScore, breakdown }: Props) {
       {breakdown?.activeFlags?.length ? (
         <View style={styles.flagsSection}>
           <Text style={styles.sectionLabel}>Active flags</Text>
-          {breakdown.activeFlags.map((flag) => (
+          {filterDeprecatedAdminReviewFlags(breakdown.activeFlags)
+            .filter((flag) => flag !== 'projection_detected' && flag !== 'overdisclosure')
+            .map((flag) => (
             <View key={flag} style={styles.flagRow}>
               <Text style={styles.flagCode}>{flag}</Text>
               <Text style={styles.flagDesc}>{describeFlag(flag)}</Text>

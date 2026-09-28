@@ -1,7 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { ensureGateFailReasonsForFailedInterviewGate } from '@features/psychometrics/gateFailReasonsNormalize';
-import { GATE_PASS_WEIGHTED_MIN, REFERRAL_WEIGHTED_PASS_MIN } from '../computeGateResultCore';
+import { GATE_PASS_WEIGHTED_MIN } from '../computeGateResultCore';
 import {
   buildScenarioCompositesTriple,
   readPillarScoresFromScenarioBundle,
@@ -24,12 +24,12 @@ describe('ensureGateFailReasonsForFailedInterviewGate', () => {
     expect(out.gateFailDetail.psychometric_floors).toEqual({});
   });
 
-  it('uses canonical requiredMin even when referral weightedPassMin is lower', () => {
+  it('uses canonical requiredMin even when a lower weightedPassMin option is supplied', () => {
     const out = ensureGateFailReasonsForFailedInterviewGate({
       gateFailReasons: [],
       depthSignalModifiedScore: 6.1,
       finalGatePass: false,
-      weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN,
+      weightedPassMin: 6.0,
       gateFailDetail: {},
     });
     expect(out.gateFailReasons).toEqual(['weighted_score']);

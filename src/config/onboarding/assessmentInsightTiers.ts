@@ -11,6 +11,6 @@ export const PVQ_INSIGHT_HIGH_DEVIATION_MIN = 0.35;
 export const DSIR_INSIGHT_HIGH_MIN = 4.2;
 export const DSIR_INSIGHT_LOW_MAX = 2.8;
 
-/** Brief Resilience Scale insight tiers (1–6). */
+/** Brief Resilience Scale insight tiers (production BRS is 1–5 Likert). */
 export const BRS_INSIGHT_HIGH_MIN = 3.5;
 export const BRS_INSIGHT_LOW_MAX = 2.5;

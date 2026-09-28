@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { SexInterestCheckboxList } from '@/shared/components/profileFields/SexInterestCheckboxList';
+import { afterOnboardingSelectionFeedback } from '@/datingProfile/screens/onboarding/onboardingSelectionFeedback';
 import { styles } from './SexualCompatibilityModal.styled';
 
 interface Props {
@@ -30,7 +31,7 @@ export const SexInterestsOnboardingModal: React.FC<Props> = ({
     (next: string[]) => {
       onCategoriesChange(next);
       if (next.length === 1) {
-        onNext();
+        afterOnboardingSelectionFeedback(onNext);
       }
     },
     [onCategoriesChange, onNext],

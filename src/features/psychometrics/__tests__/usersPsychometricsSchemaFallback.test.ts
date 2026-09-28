@@ -11,7 +11,7 @@ import {
   collectPsychometricFloorGateFailReasons,
   RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
 } from '../psychometricFloorBreaches';
-import { ACTIVE_NARCISSISM_FLOOR_CODE, NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED } from '../narcissismInstrumentTestFixtures';
+import { ACTIVE_NARCISSISM_FLOOR_CODE } from '../narcissismInstrumentTestFixtures';
 import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
 
 describe('usersPsychometricsSchemaFallback', () => {
@@ -52,7 +52,7 @@ describe('usersPsychometricsSchemaFallback', () => {
     ).toBe(4.2);
   });
 
-  it('triggers RFQ and active narcissism floors when user row scores are strings (attempt 84e8909e shape)', () => {
+  it('coerces string RFQ/NPI scores from user rows without applying retired new-user floors', () => {
     const scores = psychometricFloorScoresFromUserRow(
       NPI_ENTITLEMENT_ENABLED
         ? {
@@ -64,17 +64,14 @@ describe('usersPsychometricsSchemaFallback', () => {
             psychometrics_sd3_narcissism_score: '4.889',
           },
     );
+    expect(scores.rfqScore).toBe(1.625);
     const floors = collectPsychometricFloorGateFailReasons(scores, [
       'aaq2_straight_line',
       'rses_straight_line',
       'scs_straight_line',
     ]);
-    expect(floors).toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
-    if (NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED) {
-      expect(floors).toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
-    } else {
-      expect(floors).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
-    }
+    expect(floors).not.toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
+    expect(floors).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
   });
 
   it('SD3 floor scoring uses SD3 column only — legacy NARQ score does not trigger floor', () => {

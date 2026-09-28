@@ -121,6 +121,11 @@ describe('classifyUserMetaComment', () => {
     expect(r?.type).toBe('ambiguous_short');
   });
 
+  it('does not classify support need-recognition answers like "I asked her" as ambiguous_short', () => {
+    expect(classifyUserMetaComment('I asked her.')).toBeNull();
+    expect(classifyUserMetaComment('I asked her')).toBeNull();
+  });
+
   it('does not classify go-back asks as ambiguous_short meta', () => {
     expect(classifyUserMetaComment('Can we go back?')).toBeNull();
     expect(classifyUserMetaComment('I want to go back to the previous scenario')).toBeNull();
@@ -199,6 +204,10 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment("I'll pass on this one")?.type).toBe('skip_request');
     expect(classifyUserMetaComment('skip this')?.type).toBe('skip_request');
     expect(classifyUserMetaComment("can we move on")?.type).toBe('skip_request');
+    expect(classifyUserMetaComment('Can I skip this question?')?.type).toBe('skip_request');
+    expect(classifyUserMetaComment('Can I skip this question?')!.confidence).toBeGreaterThanOrEqual(
+      0.95,
+    );
   });
 
   it('classifies refusal language as skip_request', () => {

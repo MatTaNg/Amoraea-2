@@ -19,9 +19,17 @@ describe('SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY', () => {
     expect(() => assertScenarioARepairQuestionCompleteness()).not.toThrow();
   });
 
-  it('normalizes truncated transcript fragments before persist', () => {
-    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. this with Emma?')).toBe(
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-    );
+  it('strips truncated transcript fragments when S1 repair probe is retired', () => {
+    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. this with Emma?')).toBe('');
+  });
+
+  it('strips orphan Emma tails left after incomplete repair stem strip when retired', () => {
+    expect(
+      normalizeScenarioARepairQuestionInAssistantDraft(
+        'Got it. If you were Ryan, how would you repair this with Emma?',
+      ),
+    ).toBe('Got it.');
+    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. with Emma?')).toBe('');
+    expect(normalizeScenarioARepairQuestionInAssistantDraft('with Emma?')).toBe('');
   });
 });

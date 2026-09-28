@@ -9,10 +9,7 @@ import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateType
 import {
   lastAssistantPromptIsScenarioBQ1OrPrematureRedirect,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
-  SCENARIO_B_JAMES_REPAIR_CANONICAL,
-  scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent,
   userAnswerLooksLikeAheadOfScheduleScenarioBOnQ1,
-  userAnswerLooksLikeAheadOfScheduleScenarioBJamesDifferentlyOnQ1,
 } from '@features/aria/scenarioBProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 
@@ -25,16 +22,10 @@ function latestAssistantText(messages: PreClaudeTurnGateDeps['messages']): strin
 }
 
 function buildScenarioBAheadOfScheduleAcceptanceResponse(
-  userAnswer: string,
+  _userAnswer: string,
   messages: readonly MessageWithScenario[],
 ): string {
   const ack = chooseBriefScenarioAck(recentAssistantMessagesForAck([...messages]));
-  if (scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(userAnswer)) {
-    return `${ack} ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}`;
-  }
-  if (userAnswerLooksLikeAheadOfScheduleScenarioBJamesDifferentlyOnQ1(userAnswer)) {
-    return `${ack} ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`;
-  }
   return `${ack} ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}`;
 }
 

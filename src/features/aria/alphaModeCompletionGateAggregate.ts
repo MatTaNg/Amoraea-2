@@ -4,8 +4,12 @@ import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
   disclosureCalibrationFromMarkerSlices,
   extractEgoDevelopmentLevel,
+  extractRepairSourceSignalsFromSlices,
+  extractRegulationSourceSignalsFromSlices,
   personalMomentWordCountsForDisclosure,
   type MarkerScoreSlice,
+  type RepairSourceSignals,
+  type RegulationSourceSignals,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
 import type { AlphaPersonalMomentAggregate } from '@features/aria/alphaModeCompletionScenarioPrep';
 import {
@@ -44,6 +48,8 @@ export type AlphaGateAggregateResult = {
   moment5ConcretenessForAttempt: ResponseConcretenessLevel | null;
   mentalizingOvercertaintyCountForAttempt: number;
   scoringBaseline: AttemptScoringBaseline;
+  repairSourceSignals: RepairSourceSignals | null;
+  regulationSourceSignals: RegulationSourceSignals | null;
 };
 
 export async function computeAlphaModeGateAndPillars(params: {
@@ -99,6 +105,8 @@ export async function computeAlphaModeGateAndPillars(params: {
   let finalGateResult: GateResult;
   let pillarScores: Record<string, number>;
   let pillarContributorCounts: Record<string, number>;
+  let repairSourceSignals: RepairSourceSignals | null = null;
+  let regulationSourceSignals: RegulationSourceSignals | null = null;
 
   if (!gateBlockedAlpha) {
     const mergedPillar = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesForAggregate, {
@@ -113,6 +121,8 @@ export async function computeAlphaModeGateAndPillars(params: {
     const aggregatedPillarScores = mergedPillar.scores;
     egoLevelForAttempt = mergedPillar.egoDevelopmentLevel ?? extractEgoDevelopmentLevel(parsed) ?? null;
     mentalizingOvercertaintyCountForAttempt = mergedPillar.mentalizingOvercertaintyCount;
+    repairSourceSignals = mergedPillar.repairSourceSignals;
+    regulationSourceSignals = mergedPillar.regulationSourceSignals;
     if (alphaAttemptIdForIncremental && deps.userId) {
       scoringBaseline = await persistHolisticModifiersImmediate(
         supabase,
@@ -226,6 +236,8 @@ export async function computeAlphaModeGateAndPillars(params: {
       markerSlicesForAggregate,
       finalMessages,
     );
+    repairSourceSignals = extractRepairSourceSignalsFromSlices(markerSlicesForAggregate);
+    regulationSourceSignals = extractRegulationSourceSignalsFromSlices(markerSlicesForAggregate);
   }
 
   return {
@@ -240,5 +252,7 @@ export async function computeAlphaModeGateAndPillars(params: {
     moment5ConcretenessForAttempt,
     mentalizingOvercertaintyCountForAttempt,
     scoringBaseline,
+    repairSourceSignals,
+    regulationSourceSignals,
   };
 }

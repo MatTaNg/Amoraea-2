@@ -1,5 +1,6 @@
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
+  markerSliceFromStoredScenarioMoment,
 } from '@features/aria/aggregateMarkerScoresFromSlices';
 import type { MarkerScoreSlice } from '@features/aria/aggregateMarkerScoresFromSlices';
 import { attachSkipPenaltyGateOptions } from '@features/aria/interviewSessionUtilities';
@@ -17,7 +18,7 @@ import {
   sanitizePersonalMomentScoresForAggregate,
 } from '@features/aria/personalMomentSliceSanitize';
 import { normalizeGateFailDetailForPersist } from '@features/psychometrics/gateFailDetailForPersist';
-import { resolveWeightedPassMinAfterReferralEffects } from '@features/referrals/referralInterview';
+import { GATE_PASS_WEIGHTED_MIN } from '@features/aria/computeGateResult';
 import type { AttemptScoringBaseline } from '@utilities/persistPersonalMomentScoresIncremental';
 import { remoteLog } from '@utilities/remoteLog';
 
@@ -56,7 +57,7 @@ export async function buildDeferredPersistGateModifierSnapshot(
     emotionResponsesForGate,
   } = params;
 
-  const weightedMinDeferred = await resolveWeightedPassMinAfterReferralEffects(deps.userId);
+  const weightedMinDeferred = GATE_PASS_WEIGHTED_MIN;
   const skipOptsDeferred = attachSkipPenaltyGateOptions(deps.scenarioSkipConfirmedCountRef.current);
   let deferredModifierPayload: Record<string, unknown> = {};
   if (!completionGateOk) {
@@ -106,6 +107,7 @@ export async function buildDeferredPersistGateModifierSnapshot(
               response_concreteness: normalizeResponseConcreteness(moment5ForAggregate.response_concreteness),
             }
           : null,
+        markerSliceFromStoredScenarioMoment(scoringBaseline.patterns.moment_support_scores),
       ];
       const mergedDeferredGate = aggregatePillarScoresWithCommitmentMergeDetailed(markerSlicesDeferredGate, {
         egoDevelopmentLevel: egoLevelForDeferredAggregate,
@@ -174,6 +176,9 @@ export async function buildDeferredPersistGateModifierSnapshot(
           mergedDeferredGate.egoDevelopmentLevel ??
           egoLevelForDeferredAggregate ??
           scoringBaseline.ego_development_level,
+        repair_source_signals: mergedDeferredGate.repairSourceSignals,
+        regulation_source_signals: mergedDeferredGate.regulationSourceSignals,
+        weighted_score_breakdown: gateDeferredSnap.weightedScoreBreakdown ?? null,
       };
       console.log('[Modifier] persisting (deferred attempt row):', deferredModifierPayload);
   } catch (e) {

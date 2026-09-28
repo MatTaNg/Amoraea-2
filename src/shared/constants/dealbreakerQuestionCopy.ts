@@ -2,7 +2,7 @@ export const DEALBREAKER_QUESTION_HIGHLIGHT_PHRASE = 'dealbreaker';
 
 /** Shared dealbreaker framing for partner-alignment questions (onboarding + edit profile). */
 export function partnerAlignmentDealbreakerQuestion(shareSubject: string): string {
-  return `If you met someone amazing who didn't share ${shareSubject} with you, would it still be a dealbreaker?`;
+  return `If you met someone amazing who didn't share ${shareSubject} with you, how much of a dealbreaker would that be?`;
 }
 
 export const PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION =

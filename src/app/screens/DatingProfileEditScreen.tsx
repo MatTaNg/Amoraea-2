@@ -15,13 +15,13 @@ import {
   Platform,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
+  BackHandler,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
 import { useNavigation } from '@react-navigation/native';
-import type { NavigationAction } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { profilesRepo } from '@data/repos/profilesRepo';
@@ -36,14 +36,10 @@ import {
   parseStoredWeightKg,
 } from '@/shared/utils/unitConversions';
 import {
-  LifeDomainDistribution,
   DEFAULT_ONBOARDING_LIFE_DOMAINS,
   ONBOARDING_LIFE_DOMAIN_KEYS,
-  type LifeDomainAnswerCount,
-  type OnboardingLifeDomainKey,
   type OnboardingLifeDomainValues,
 } from '@/shared/components/LifeDomainDistribution';
-import { countAnsweredInDomain } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
   RECENT_DATING_EARLY_WEEKS_OPTIONS,
   RECENT_DATING_EARLY_WEEKS_QUESTION,
@@ -83,14 +79,12 @@ import {
   PREF_RELOCATION_OPTIONS,
 } from '@/screens/profile/editProfile/constants';
 import { MatchPreferencesEmbedded } from '@/shared/components/profileFields/MatchPreferencesEmbedded';
-import type { AssessmentId } from '@/data/services/assessmentService';
-import { AssessmentInsightResultsPanel } from '@/shared/components/assessments/AssessmentInsightResultsPanel';
-import { ConflictStyleResultsPanel } from '@/shared/components/assessments/ConflictStyleResultsPanel';
+import type { TypologyPickerValue } from '@/shared/components/profileFields/TypologyPickerFields';
 import {
-  TypologyPickerFields,
-  type TypologyPickerValue,
-} from '@/shared/components/profileFields/TypologyPickerFields';
-import { TYPOLOGY_ONBOARDING_SECTIONS } from '@/shared/constants/typologyOnboardingOptions';
+  resolveEditProfileTypologyValues,
+  readTypologyValuesFromProfile,
+  TYPOLOGY_ONBOARDING_ROW_KEYS,
+} from '@/shared/utils/typologyPickerValue';
 import { MatchPreferences } from '@/shared/hooks/filterPreferences/types';
 import { mapGenderToDb, mapGenderToUi } from '@/shared/utils/genderMapper';
 import {
@@ -100,7 +94,6 @@ import {
 import { calculateAgeFromBirthdate, MIN_USER_AGE } from '@/shared/utils/ageCalculator';
 import { useLocationAutocomplete } from '@/shared/hooks/useLocationAutocomplete';
 import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers';
-import { theme } from '@/shared/theme/theme';
 import { DatePicker } from '@/shared/components/DatePicker';
 import {
   BirthTimeQuarterHourPicker,
@@ -110,17 +103,12 @@ import { OnboardingHeader } from '@ui/components/OnboardingHeader';
 import {
   FormField,
   FormTextInput,
-  formControlStyles,
 } from '@/shared/ui/FormField';
-import {
-  BottomSheet,
-  OptionPickerTrigger,
-  type OptionAnchor,
-} from '@/screens/profile/editProfile/BottomSheet';
-import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
-import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { ArchetypeSelector } from '@/shared/components/profileFields/ArchetypeSelector';
 import { HobbiesFields } from '@/shared/components/profileFields/HobbiesFields';
+import { HobbyDealbreakerField } from '@/shared/components/profileFields/HobbyDealbreakerField';
+import { hobbiesStringToIds } from '@/shared/utils/hobbiesHelpers';
 import { ProfilePromptsFields } from '@/shared/components/profileFields/ProfilePromptsFields';
 import {
   loadEditProfileSnapshot,
@@ -132,32 +120,60 @@ import { normalizePhotoFileNameKey } from '@/shared/components/ModeratedPhotoUpl
 import {
   normalizeArchetypesFromProfile,
   isCompleteArchetypeSelection,
-  MAX_PROFILE_ARCHETYPES,
-  MIN_PROFILE_ARCHETYPES,
   type ArchetypeId,
 } from '@/shared/constants/archetypes';
-import type { LifeDomainId } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
-  onboardingLifeDomainKeyToId,
   saveLifeDomainAnswersFromOnboarding,
   syncLifeDomainImportanceFromOnboarding,
   type LifeDomainAnswersMap,
 } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import {
+  invalidateEditProfileQueries,
   patchEditProfileQueryCache,
   useEditProfileBlobQuery,
   useEditProfileLifeDomainAnswersQuery,
   useEditProfileLifeDomainSlidersQuery,
   useEditProfileMatchPrefsQuery,
 } from '@/screens/profile/editProfile/editProfileQueries';
-import { LifeDomainQuestionsEditModal } from '@/screens/profile/editProfile/LifeDomainQuestionsEditModal';
-import { LifeDomainRequiredQuestionsSection } from '@/screens/profile/editProfile/LifeDomainRequiredQuestionsSection';
+import {
+  EditProfileOverline,
+  EditProfileSectionLabel,
+  EditProfileStrengthBar,
+  EditProfileSubsectionTitle,
+  EditProfileTabBar,
+  EditProfileTabHeader,
+  type EditProfileTabId,
+} from '@/screens/profile/editProfile/EditProfileUi';
+import { computeEditProfileStrength, parseLifeDomainStrengthItemId } from '@/screens/profile/editProfile/editProfileStrength';
+import type { ProfileStrengthItem } from '@/screens/profile/editProfile/editProfileStrength';
+import {
+  EditProfileCompatibilityDeepDiveView,
+} from '@/screens/profile/editProfile/EditProfileCompatibilityDeepDiveView';
+import type { LifeDomainId } from '@/shared/constants/lifeDomainOnboardingQuestions';
+import {
+  EditProfileTypologyView,
+} from '@/screens/profile/editProfile/EditProfileTypologyView';
+import { EditProfileMyResultsView } from '@/screens/profile/editProfile/EditProfileMyResultsView';
+import { ep } from '@/screens/profile/editProfile/editProfileTheme';
+import {
+  ONBOARDING_DEALBREAKERS_LEAD,
+  ONBOARDING_SEXUAL_COMPATIBILITY_LEAD,
+  EDIT_PROFILE_DEEP_DIVE_LEAD,
+  EDIT_PROFILE_PAGE_LEAD,
+  EDIT_PROFILE_STRENGTH_COMPLETE_HINT,
+  EDIT_PROFILE_STRENGTH_TAP_HINT,
+  ONBOARDING_ETHNICITY_DESCRIPTION,
+  ONBOARDING_HEIGHT_WEIGHT_NOTE,
+  ONBOARDING_HOBBIES_DESCRIPTION,
+  ONBOARDING_LOCATION_DESCRIPTION,
+  ONBOARDING_PHOTOS_DESCRIPTION,
+  ONBOARDING_PROFILE_PROMPTS_SETUP_LEAD,
+} from '@/datingProfile/screens/onboarding/modals/onboardingStepCopy';
 import {
   jsonSnapshotEqual,
   photoUrlsNeedUpload,
   resolvePhotoUrlsForSave,
 } from '@/screens/profile/editProfile/editProfileSaveHelpers';
-import { EditProfileUnsavedChangesModal } from '@/screens/profile/editProfile/EditProfileUnsavedChangesModal';
 import {
   buildEditProfileFormSnapshot,
   editProfileFormSnapshotsEqual,
@@ -166,35 +182,17 @@ import {
   type EditProfileFormSnapshotInput,
 } from '@/screens/profile/editProfile/editProfileDraftSnapshot';
 
-const BG = '#0a0a0f';
+const BG = ep.colors.void;
 const MIN_PROFILE_AGE = MIN_USER_AGE;
-const ACCENT = '#3b82f6';
-const FONT_BODY =
-  Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
+const FONT_BODY = ep.fonts.body;
+const FONT_UI = ep.fonts.ui;
+const FONT_DISPLAY = ep.fonts.display;
 
 const GENDER_UI_OPTIONS = ['Man', 'Woman', 'Non-binary'] as const;
 
 const ATTRACTION_UI = ['Men', 'Women', 'Non-binary'] as const;
 
-const EDIT_PROFILE_TABS = [
-  { id: 'basics', label: 'Basics' },
-  { id: 'lifestyle', label: 'Lifestyle' },
-  { id: 'compatibility', label: 'Compatibility' },
-  { id: 'dealbreakers', label: 'Dealbreakers' },
-] as const;
-
-const TYPOLOGY_RESULT_TABS: { id: AssessmentId; label: string }[] = [
-  { id: 'ECR-36', label: 'Attachment' },
-  { id: 'CONFLICT-30', label: 'Conflict' },
-  { id: 'PVQ-21', label: 'Schwartz values' },
-  { id: 'SEXUAL_COMMUNICATION', label: 'Sexual communication' },
-];
-
-type EditProfileTabId = (typeof EDIT_PROFILE_TABS)[number]['id'];
-
-const TYPOLOGY_KEYS = TYPOLOGY_ONBOARDING_SECTIONS.flatMap((s) =>
-  s.rows.map((r) => r.key),
-);
+const TYPOLOGY_KEYS = TYPOLOGY_ONBOARDING_ROW_KEYS;
 
 const STRIP_FROM_SAVE = [
   'diet',
@@ -322,13 +320,7 @@ function resolvePhotoUrlsFromProfile(pb: Record<string, unknown>): string[] {
 }
 
 function profileToTypology(p: Record<string, unknown>): TypologyPickerValue {
-  const qa = (p.questionAnswers as Record<string, unknown>) || {};
-  const out: TypologyPickerValue = {};
-  for (const key of TYPOLOGY_KEYS) {
-    const v = qa[key];
-    if (typeof v === 'string' && v.trim()) out[key] = v.trim();
-  }
-  return out;
+  return readTypologyValuesFromProfile(p);
 }
 
 function buildEditProfileBaselineInputFromProfile(
@@ -366,9 +358,6 @@ function buildEditProfileBaselineInputFromProfile(
   };
 }
 
-function SectionTitle({ children }: { children: string }) {
-  return <Text style={styles.sectionTitle}>{children}</Text>;
-}
 
 function Field({
   label,
@@ -395,74 +384,6 @@ function Field({
   );
 }
 
-function ChoiceDropdown({
-  label,
-  value,
-  options,
-  onValueChange,
-  allowUnset,
-}: {
-  label: string;
-  value: string;
-  options: { label: string; value: string }[];
-  onValueChange: (v: string) => void;
-  /** When true, empty value is valid; no auto-coercion to first option; web sheet lists only `options`. */
-  allowUnset?: boolean;
-}) {
-  const [sheetAnchor, setSheetAnchor] = useState<OptionAnchor | null>(null);
-  const unsetOk = Boolean(allowUnset) && value === '';
-  const validSelection =
-    unsetOk || options.some((o) => o.value === value);
-  const selectedValue = validSelection ? value : (options[0]?.value ?? '');
-  const selectedLabel =
-    unsetOk
-      ? 'Choose…'
-      : options.find((o) => o.value === selectedValue)?.label ?? 'Choose…';
-
-  useLayoutEffect(() => {
-    if (!options.length) return;
-    if (allowUnset) return;
-    if (!validSelection && options[0]) {
-      onValueChange(options[0].value);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- coerce empty/unknown DB values once options exist; avoid churn from unstable callbacks
-  }, [value, options, validSelection, allowUnset]);
-
-  if (!options.length) return null;
-
-  return (
-    <FormField label={label}>
-      <OptionPickerTrigger
-        style={[formControlStyles.control, formControlStyles.controlSelectLike]}
-        onOpen={(anchor) => setSheetAnchor(anchor)}
-      >
-        <SelectTriggerRow
-          label={selectedLabel}
-          isPlaceholder={unsetOk}
-          labelStyle={formControlStyles.valueText}
-          placeholderStyle={formControlStyles.placeholderText}
-          chevronStyle={styles.dropdownChevron}
-        />
-      </OptionPickerTrigger>
-      <BottomSheet
-        visible={!!sheetAnchor}
-        title={label}
-        anchor={sheetAnchor}
-        onClose={() => setSheetAnchor(null)}
-      >
-        <SingleChoiceOptionList
-          options={options}
-          value={selectedValue}
-          onSelect={(v) => {
-            onValueChange(String(v));
-            setSheetAnchor(null);
-          }}
-        />
-      </BottomSheet>
-    </FormField>
-  );
-}
-
 export const DatingProfileEditScreen: React.FC<{
   navigation: { goBack: () => void };
   route: { params: { userId: string } };
@@ -475,18 +396,13 @@ export const DatingProfileEditScreen: React.FC<{
   const { user } = useAuth();
   const effectiveUserId = user?.id ?? userId;
 
-  const allowExitWithoutPromptRef = useRef(false);
-  const pendingNavigationActionRef = useRef<NavigationAction | null>(null);
   const serverBaselineRef = useRef<EditProfileFormSnapshotInput | null>(null);
-  const baselineCommittedRef = useRef(false);
-  const pendingEditBeforeBaselineRef = useRef(false);
   const handleBackPressRef = useRef<() => void>(() => {});
-  const hasUnsavedChangesRef = useRef(false);
-  const completePendingExitRef = useRef<() => void>(() => {});
-  const handleUnsavedPromptSaveRef = useRef<() => void>(() => {});
+  const onSaveRef = useRef<(options?: { silent?: boolean }) => Promise<boolean>>(
+    async () => false,
+  );
 
   const exitEditProfileToPostInterview = useCallback(() => {
-    allowExitWithoutPromptRef.current = true;
     exitDatingProfileOnboardingToPostInterview(navigation, userId.trim() || undefined);
   }, [navigation, userId]);
 
@@ -494,9 +410,6 @@ export const DatingProfileEditScreen: React.FC<{
     null,
   );
   const [baselineReady, setBaselineReady] = useState(false);
-  const [formDirty, setFormDirty] = useState(false);
-  const [unsavedPromptVisible, setUnsavedPromptVisible] = useState(false);
-  const [unsavedPromptSaving, setUnsavedPromptSaving] = useState(false);
   const qc = useQueryClient();
   const [draft, setDraft] = useState<Record<string, unknown>>({});
   /** Avoid replacing the whole form from `profileBlob` on every refetch — that wipes unsaved edits (e.g. typing birth location). */
@@ -532,12 +445,11 @@ export const DatingProfileEditScreen: React.FC<{
     prefPartnerPoliticalAlignmentImportance,
     setPrefPartnerPoliticalAlignmentImportance,
   ] = useState('');
-  const [activeTab, setActiveTab] = useState<EditProfileTabId>('basics');
-  const [typologyResultId, setTypologyResultId] = useState<AssessmentId | null>(
-    null,
-  );
+  const [activeTab, setActiveTab] = useState<EditProfileTabId>('essentials');
+  const [openLifeDomainQuestionsId, setOpenLifeDomainQuestionsId] =
+    useState<LifeDomainId | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
   const [saving, setSaving] = useState(false);
-  const [saveSucceeded, setSaveSucceeded] = useState(false);
   const [birthLocationSuggestions, setBirthLocationSuggestions] = useState<
     Array<{ label: string }>
   >([]);
@@ -547,43 +459,27 @@ export const DatingProfileEditScreen: React.FC<{
   const [archetypeSelection, setArchetypeSelection] = useState<ArchetypeId[]>([]);
   const [profilePrompts, setProfilePrompts] = useState<ProfilePromptAnswer[]>([]);
   const [lifeDomainAnswers, setLifeDomainAnswers] = useState<LifeDomainAnswersMap>({});
-  const [lifeDomainQuestionsDomainId, setLifeDomainQuestionsDomainId] =
-    useState<LifeDomainId | null>(null);
-
-  const { data: profileBlob } = useEditProfileBlobQuery(userId);
-  const { data: hydratedLifeDomainSliders } = useEditProfileLifeDomainSlidersQuery(
+  const { data: profileBlob, isError: profileBlobError } = useEditProfileBlobQuery(userId);
+  const { data: hydratedLifeDomainSliders, isError: lifeDomainSlidersError } =
+    useEditProfileLifeDomainSlidersQuery(userId, profileBlob);
+  const { data: hydratedMatchPrefs, isError: matchPrefsError } = useEditProfileMatchPrefsQuery(
     userId,
     profileBlob,
   );
-  const { data: hydratedMatchPrefs } = useEditProfileMatchPrefsQuery(userId, profileBlob);
-  const { data: hydratedLifeDomainAnswers } = useEditProfileLifeDomainAnswersQuery(userId);
-  const { data: interviewEditSnapshot } = useQuery({
+  const { data: hydratedLifeDomainAnswers, isError: lifeDomainAnswersError } =
+    useEditProfileLifeDomainAnswersQuery(userId);
+  const { data: interviewEditSnapshot, isError: interviewFieldsError } = useQuery({
     queryKey: ['editProfileInterviewFields', userId],
     queryFn: () => loadEditProfileSnapshot(userId),
     enabled: Boolean(userId),
   });
 
-  const clearFormDirty = useCallback(() => {
-    pendingEditBeforeBaselineRef.current = false;
-    setFormDirty(false);
-  }, []);
-
-  const markFormDirty = useCallback(() => {
-    if (baselineCommittedRef.current) {
-      setFormDirty(true);
-      return;
-    }
-    pendingEditBeforeBaselineRef.current = true;
-  }, []);
-
   useLayoutEffect(() => {
     if (!userId) {
       draftHydratedForUserIdRef.current = null;
       serverBaselineRef.current = null;
-      baselineCommittedRef.current = false;
       setSavedSnapshot(null);
       setBaselineReady(false);
-      clearFormDirty();
       return;
     }
     if (!profileBlob || hydratedLifeDomainSliders == null || hydratedMatchPrefs == null) {
@@ -600,10 +496,8 @@ export const DatingProfileEditScreen: React.FC<{
     }
     draftHydratedForUserIdRef.current = userId;
     serverBaselineRef.current = null;
-    baselineCommittedRef.current = false;
     setSavedSnapshot(null);
     setBaselineReady(false);
-    clearFormDirty();
 
     const pb = profileBlob as Record<string, unknown>;
     const resolvedPhotos = resolvePhotoUrlsFromProfile(pb);
@@ -648,17 +542,11 @@ export const DatingProfileEditScreen: React.FC<{
     setLifeDomainAnswers(hydratedLifeDomainAnswers);
     setProfilePrompts(interviewEditSnapshot.prompts);
 
-    baselineCommittedRef.current = true;
     setSavedSnapshot(
       buildEditProfileFormSnapshot(serverBaselineRef.current),
     );
     setBaselineReady(true);
-    if (pendingEditBeforeBaselineRef.current) {
-      pendingEditBeforeBaselineRef.current = false;
-      setFormDirty(true);
-    }
   }, [
-    clearFormDirty,
     hydratedLifeDomainAnswers,
     hydratedLifeDomainSliders,
     hydratedMatchPrefs,
@@ -667,14 +555,25 @@ export const DatingProfileEditScreen: React.FC<{
     userId,
   ]);
 
-  const selectProfileTab = useCallback((id: EditProfileTabId) => {
-    setTypologyResultId(null);
-    setActiveTab(id);
-  }, []);
+  useEffect(() => {
+    if (!userId) {
+      draftHydratedForUserIdRef.current = null;
+      setBaselineReady(false);
+      return;
+    }
+    if (draftHydratedForUserIdRef.current !== userId) {
+      setBaselineReady(false);
+    }
+  }, [userId]);
 
-  const toggleTypologyResult = useCallback((id: AssessmentId) => {
-    setTypologyResultId((prev) => (prev === id ? null : id));
-  }, []);
+  const profileLoadFailed =
+    Boolean(userId) &&
+    (profileBlobError ||
+      lifeDomainSlidersError ||
+      matchPrefsError ||
+      lifeDomainAnswersError ||
+      interviewFieldsError);
+  const profileFieldsLoading = Boolean(userId) && !baselineReady && !profileLoadFailed;
 
   const onBirthLocationSuggestionsChange = useCallback(
     (suggestions: Array<{ label: string }>) => {
@@ -720,18 +619,10 @@ export const DatingProfileEditScreen: React.FC<{
   );
   const lifeDomainsSumOk = lifeDomainsTotal === 100;
 
-  const lifeDomainAnswerCounts = useMemo(() => {
-    const counts: Partial<Record<OnboardingLifeDomainKey, LifeDomainAnswerCount>> = {};
-    const wantKids = asStr(draft.wantKids) || null;
-    for (const key of ONBOARDING_LIFE_DOMAIN_KEYS) {
-      const domainId = onboardingLifeDomainKeyToId(key);
-      counts[key] = countAnsweredInDomain(domainId, lifeDomainAnswers[domainId] ?? {}, {
-        wantKids,
-        countOptionalOnly: true,
-      });
-    }
-    return counts;
-  }, [lifeDomainAnswers, draft.wantKids]);
+  const resolvedTypologyValues = useMemo(
+    () => resolveEditProfileTypologyValues(draft, typologyValues),
+    [draft, typologyValues],
+  );
 
   const formSnapshotInput = useMemo(
     (): EditProfileFormSnapshotInput => ({
@@ -779,13 +670,51 @@ export const DatingProfileEditScreen: React.FC<{
     [formSnapshotInput],
   );
 
-  const hasUnsavedChanges =
-    formDirty ||
-    (baselineReady &&
-      savedSnapshot !== null &&
-      !editProfileFormSnapshotsEqual(savedSnapshot, currentFormSnapshot));
+  const profileStrength = useMemo(
+    () => computeEditProfileStrength(formSnapshotInput),
+    [formSnapshotInput],
+  );
 
-  hasUnsavedChangesRef.current = hasUnsavedChanges;
+  const profileStrengthHint =
+    profileStrength.incomplete.length > 0
+      ? EDIT_PROFILE_STRENGTH_TAP_HINT
+      : EDIT_PROFILE_STRENGTH_COMPLETE_HINT;
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== 'deepDive') {
+      setOpenLifeDomainQuestionsId(null);
+    }
+  }, [activeTab]);
+
+  const autoSaveBlocked = useMemo(() => {
+    const birthForAge = asStr(draft.birthDate);
+    const ageSave = birthForAge ? calculateAgeFromBirthdate(birthForAge) : null;
+    if (ageSave != null && ageSave < MIN_PROFILE_AGE) return true;
+
+    const birthTimeRaw = asStr(draft.birthTime);
+    if (!isValidOptionalBirthTime24h(birthTimeRaw)) return true;
+
+    if (lifeDomainsTotal !== 100) return true;
+
+    if (archetypeSelection.length === 1) return true;
+
+    const promptValidation = validateProfilePromptsForSave(profilePrompts, {
+      requireSetupFloor: true,
+    });
+    if (!promptValidation.ok) return true;
+
+    return false;
+  }, [
+    archetypeSelection.length,
+    draft.birthDate,
+    draft.birthTime,
+    lifeDomainsTotal,
+    profilePrompts,
+  ]);
 
   const refreshLocation = useCallback(async () => {
     setLocationLoading(true);
@@ -810,7 +739,6 @@ export const DatingProfileEditScreen: React.FC<{
   }, []);
 
   const setScalar = (key: string) => (t: string) => {
-    markFormDirty();
     setDraft((d) => ({ ...d, [key]: t }));
   };
 
@@ -821,7 +749,6 @@ export const DatingProfileEditScreen: React.FC<{
       prefPartnerHasChildren?: string;
       prefPartnerPoliticalAlignmentImportance?: string;
     }) => {
-      markFormDirty();
       if (patch.matchPreferences) setMatchPrefs(patch.matchPreferences);
       if (patch.prefPartnerSharesSexualInterests !== undefined)
         setPrefPartnerSharesSexualInterests(
@@ -834,7 +761,7 @@ export const DatingProfileEditScreen: React.FC<{
           patch.prefPartnerPoliticalAlignmentImportance,
         );
     },
-    [markFormDirty],
+    [],
   );
 
   useEffect(() => {
@@ -868,12 +795,6 @@ export const DatingProfileEditScreen: React.FC<{
       }
     }
   }, [photoUrls]);
-
-  useEffect(() => {
-    if (!saveSucceeded) return;
-    const timeout = setTimeout(() => setSaveSucceeded(false), 3500);
-    return () => clearTimeout(timeout);
-  }, [saveSucceeded]);
 
   const pickPhotos = async () => {
     const remaining = Math.max(0, 6 - photoUrls.length);
@@ -937,7 +858,6 @@ export const DatingProfileEditScreen: React.FC<{
 
     if (toAdd.length === 0) return;
 
-    markFormDirty();
     setPhotoUrls((prev) => {
       const seen = new Set(prev.map((x) => x.trim()));
       const next = [...prev];
@@ -963,7 +883,6 @@ export const DatingProfileEditScreen: React.FC<{
   };
 
   const toggleAttraction = (option: string) => {
-    markFormDirty();
     setAttractedUi((prev) => {
       const isSelected = prev.includes(option);
       if (isSelected) {
@@ -974,41 +893,58 @@ export const DatingProfileEditScreen: React.FC<{
     });
   };
 
-  const onSave = async (): Promise<boolean> => {
+  const onSave = async (options?: { silent?: boolean }): Promise<boolean> => {
+    const silent = options?.silent ?? false;
     if (!userId || saving) return false;
+
+    if (
+      baselineReady &&
+      savedSnapshot &&
+      editProfileFormSnapshotsEqual(savedSnapshot, currentFormSnapshot)
+    ) {
+      return true;
+    }
 
     const birthForAge = asStr(draft.birthDate);
     const ageSave = birthForAge ? calculateAgeFromBirthdate(birthForAge) : null;
     if (ageSave != null && ageSave < MIN_PROFILE_AGE) {
-      showSimpleAlert(
-        'Age requirement',
-        'You must be 18 or older to use this app.',
-      );
+      if (!silent) {
+        showSimpleAlert(
+          'Age requirement',
+          'You must be 18 or older to use this app.',
+        );
+      }
       return false;
     }
 
     const birthTimeRaw = asStr(draft.birthTime);
     if (!isValidOptionalBirthTime24h(birthTimeRaw)) {
-      showSimpleAlert(
-        'Birth time',
-        'Use 24-hour format HH:MM (e.g. 09:05), choose from the list, or pick Not specified.',
-      );
+      if (!silent) {
+        showSimpleAlert(
+          'Birth time',
+          'Use 24-hour format HH:MM (e.g. 09:05), choose from the list, or pick Not specified.',
+        );
+      }
       return false;
     }
 
     if (lifeDomainsTotal !== 100) {
-      showSimpleAlert(
-        'Life domains',
-        `Your life domain sliders must add up to exactly 100 (they are ${lifeDomainsTotal} right now). Open the Lifestyle tab and adjust them until the total shows 100 / 100, then save again.`,
-      );
+      if (!silent) {
+        showSimpleAlert(
+          'Life domains',
+          `Your life domain sliders must add up to exactly 100 (they are ${lifeDomainsTotal} right now). Open the Lifestyle tab and adjust them until the total shows 100 / 100, then save again.`,
+        );
+      }
       return false;
     }
 
     if (archetypeSelection.length === 1) {
-      showSimpleAlert(
-        'Archetypes',
-        'Select two or three archetypes, or clear your selection and save the rest of your profile.',
-      );
+      if (!silent) {
+        showSimpleAlert(
+          'Archetypes',
+          'Select two or three archetypes, or clear your selection and save the rest of your profile.',
+        );
+      }
       return false;
     }
 
@@ -1016,7 +952,9 @@ export const DatingProfileEditScreen: React.FC<{
       requireSetupFloor: true,
     });
     if (!promptValidation.ok) {
-      showSimpleAlert('Profile prompts', promptValidation.message);
+      if (!silent) {
+        showSimpleAlert('Profile prompts', promptValidation.message);
+      }
       return false;
     }
 
@@ -1029,7 +967,6 @@ export const DatingProfileEditScreen: React.FC<{
     void _yc;
 
     setSaving(true);
-    setSaveSucceeded(false);
 
     const lifeDomainsChanged =
       !savedSnapshot ||
@@ -1180,7 +1117,6 @@ export const DatingProfileEditScreen: React.FC<{
         lifeDomainAnswers,
       });
       void qc.invalidateQueries({ queryKey: ['profile', userId] });
-      setSaveSucceeded(true);
       setSavedSnapshot(
         buildEditProfileFormSnapshot({
           ...formSnapshotInput,
@@ -1191,7 +1127,6 @@ export const DatingProfileEditScreen: React.FC<{
         ...formSnapshotInput,
         photoUrls: Array.isArray(resolvedPhotos) ? resolvedPhotos : [],
       };
-      clearFormDirty();
       return true;
     } catch (e) {
       if (__DEV__) console.warn('[DatingProfileEdit]', e);
@@ -1205,57 +1140,38 @@ export const DatingProfileEditScreen: React.FC<{
     }
   };
 
-  const completePendingExit = useCallback(() => {
-    const pendingAction = pendingNavigationActionRef.current;
-    pendingNavigationActionRef.current = null;
-    setUnsavedPromptVisible(false);
-    allowExitWithoutPromptRef.current = true;
-    if (pendingAction) {
-      navigation.dispatch(pendingAction);
-      return;
-    }
-    exitEditProfileToPostInterview();
-  }, [exitEditProfileToPostInterview, navigation]);
+  onSaveRef.current = onSave;
 
-  const showUnsavedChangesPrompt = useCallback(() => {
-    if (Platform.OS === 'web') {
-      setUnsavedPromptVisible(true);
-      return;
-    }
-    Alert.alert(
-      'Unsaved changes',
-      'You have unsaved changes. Would you like to save them before leaving?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: "Don't save",
-          style: 'destructive',
-          onPress: () => completePendingExitRef.current(),
-        },
-        {
-          text: 'Save',
-          onPress: () => {
-            void handleUnsavedPromptSaveRef.current();
-          },
-        },
-      ],
-    );
-  }, []);
+  useEffect(() => {
+    if (!baselineReady || !savedSnapshot || saving || autoSaveBlocked) return;
+    if (editProfileFormSnapshotsEqual(savedSnapshot, currentFormSnapshot)) return;
 
-  const promptUnsavedChanges = useCallback(() => {
-    pendingNavigationActionRef.current = null;
-    showUnsavedChangesPrompt();
-  }, [showUnsavedChangesPrompt]);
+    const timeout = setTimeout(() => {
+      void onSaveRef.current({ silent: true });
+    }, 600);
+
+    return () => clearTimeout(timeout);
+  }, [
+    autoSaveBlocked,
+    baselineReady,
+    currentFormSnapshot,
+    savedSnapshot,
+    saving,
+  ]);
 
   const handleBackPress = useCallback(() => {
-    if (!hasUnsavedChangesRef.current) {
-      exitEditProfileToPostInterview();
-      return;
-    }
-    promptUnsavedChanges();
-  }, [exitEditProfileToPostInterview, promptUnsavedChanges]);
+    exitEditProfileToPostInterview();
+  }, [exitEditProfileToPostInterview]);
 
   handleBackPressRef.current = handleBackPress;
+
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      handleBackPressRef.current();
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -1269,150 +1185,117 @@ export const DatingProfileEditScreen: React.FC<{
     });
   }, [navigation]);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('beforeRemove', (e) => {
-      if (allowExitWithoutPromptRef.current) return;
-      if (!hasUnsavedChangesRef.current) return;
-      e.preventDefault();
-      pendingNavigationActionRef.current = e.data.action;
-      showUnsavedChangesPrompt();
-    });
-    return unsubscribe;
-  }, [navigation, showUnsavedChangesPrompt]);
-
-  const handleUnsavedPromptCancel = useCallback(() => {
-    pendingNavigationActionRef.current = null;
-    setUnsavedPromptVisible(false);
-  }, []);
-
-  const handleUnsavedPromptDiscard = useCallback(() => {
-    completePendingExit();
-  }, [completePendingExit]);
-
-  const handleUnsavedPromptSave = useCallback(async () => {
-    if (unsavedPromptSaving || saving) return;
-    setUnsavedPromptSaving(true);
-    try {
-      const saved = await onSave();
-      if (saved) completePendingExit();
-    } finally {
-      setUnsavedPromptSaving(false);
-    }
-  }, [completePendingExit, onSave, saving, unsavedPromptSaving]);
-
-  completePendingExitRef.current = completePendingExit;
-  handleUnsavedPromptSaveRef.current = () => {
-    void handleUnsavedPromptSave();
-  };
-
-  const saveFeedbackText = saveSucceeded ? 'Changes saved successfully.' : '';
-  const saveButtonDisabled = saving || !userId || !hasUnsavedChanges;
-
   return (
-    <>
-    <SafeAreaContainer style={{ flex: 1, backgroundColor: BG }}>
+    <SafeAreaContainer
+      style={{ flex: 1, backgroundColor: BG }}
+      edges={['left', 'right', 'bottom']}
+    >
+      {profileFieldsLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={ep.colors.flameMid} />
+          <Text style={styles.loadingText}>Loading your profile…</Text>
+        </View>
+      ) : profileLoadFailed ? (
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingError}>
+            We couldn&apos;t load your profile. Check your connection and try again.
+          </Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              void invalidateEditProfileQueries(qc, userId);
+              void qc.invalidateQueries({ queryKey: ['editProfileInterviewFields', userId] });
+            }}
+            accessibilityRole="button"
+          >
+            <Text style={styles.retryButtonText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+      <View style={styles.page}>
       <ScrollView
-        contentContainerStyle={styles.scroll}
+        ref={scrollRef}
+        contentContainerStyle={[styles.scroll, styles.scrollWithTabBar]}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.h1}>{toTitleCaseUi('Your profile')}</Text>
-        <Text style={styles.lead}>
-          Modify these fields so we can better learn about you so that we can better match you with your perfect partner.
-        </Text>
-
-        <Pressable
-          onPress={() => void onSave()}
-          disabled={saveButtonDisabled}
-          style={[styles.primaryBtn, saveButtonDisabled && styles.primaryBtnDisabled]}
-        >
-          <View style={styles.saveButtonContent}>
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : null}
-            <Text style={styles.primaryBtnTxt}>
-              {saving ? 'Saving...' : toTitleCaseUi('Save changes')}
-            </Text>
-          </View>
-        </Pressable>
-        {saveFeedbackText ? (
-          <View
-            style={[
-              styles.saveStatus,
-              saving ? styles.saveStatusSaving : styles.saveStatusSuccess,
-            ]}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#93c5fd" />
-            ) : (
-              <Text style={styles.saveStatusIcon}>✓</Text>
-            )}
-            <Text style={styles.saveStatusText}>{saveFeedbackText}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.tabBar}>
-          {EDIT_PROFILE_TABS.map((tab) => {
-            const selected = activeTab === tab.id && typologyResultId == null;
-            return (
-              <Pressable
-                key={tab.id}
-                onPress={() => selectProfileTab(tab.id)}
-                style={[styles.tabButton, selected && styles.tabButtonActive]}
-              >
-                <Text
-                  style={[styles.tabText, selected && styles.tabTextActive]}
+        {activeTab === 'essentials' ? (
+              <>
+                <EditProfileTabHeader
+                  title="Essentials"
+                  lead={EDIT_PROFILE_PAGE_LEAD}
+                  saving={saving}
+                />
+                <EditProfileOverline label="Photos" />
+                <Text style={styles.sectionIntro}>{ONBOARDING_PHOTOS_DESCRIPTION}</Text>
+            <View style={styles.photoGrid}>
+              {photoUrls.map((uri, index) => (
+                <View key={`${uri}-${index}`} style={styles.photoContainer}>
+                  <ExpoImage
+                    source={{ uri }}
+                    style={styles.photo}
+                    contentFit="cover"
+                  />
+                  {photoUrls.length > 1 ? (
+                    <TouchableOpacity
+                      style={styles.removePhotoButton}
+                      onPress={() => {
+                        setPhotoUrls((prev) => prev.filter((_, i) => i !== index));
+                      }}
+                      accessibilityRole="button"
+                      accessibilityLabel="Remove photo"
+                    >
+                      <Text style={styles.removePhotoText}>×</Text>
+                    </TouchableOpacity>
+                  ) : null}
+                </View>
+              ))}
+              {photoUrls.length < 6 ? (
+                <TouchableOpacity
+                  style={styles.addPhotoButton}
+                  onPress={() => void pickPhotos()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Add photo"
                 >
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+                  <Ionicons name="add" size={36} color={ep.colors.textDim} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
 
-        <View style={styles.typologyTabBar}>
-          {TYPOLOGY_RESULT_TABS.map((tab) => {
-            const selected = typologyResultId === tab.id;
-            return (
-              <Pressable
-                key={tab.id}
-                onPress={() => toggleTypologyResult(tab.id)}
-                style={[styles.tabButton, selected && styles.tabButtonActive]}
-              >
-                <Text
-                  style={[styles.tabText, selected && styles.tabTextActive]}
-                  numberOfLines={2}
-                >
-                  {tab.label}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-
-        {!typologyResultId ? (
-          <>
-        {activeTab === 'basics' ? (
-          <>
-            <SectionTitle>About you</SectionTitle>
+            <EditProfileStrengthBar
+              percent={profileStrength.percent}
+              completedCount={profileStrength.completedCount}
+              totalCount={profileStrength.totalCount}
+              hint={profileStrengthHint}
+              incomplete={profileStrength.incomplete}
+              onNavigateToField={(item: ProfileStrengthItem) => {
+                setActiveTab(item.tab);
+                const lifeDomainItem = parseLifeDomainStrengthItemId(item.id);
+                if (lifeDomainItem) {
+                  setOpenLifeDomainQuestionsId(lifeDomainItem.domainId);
+                }
+              }}
+            />
+            <EditProfileSectionLabel>About you</EditProfileSectionLabel>
+            <Text style={styles.sectionIntro}>{ONBOARDING_ETHNICITY_DESCRIPTION}</Text>
             <Field
               label="Name"
               value={asStr(draft.displayName ?? draft.name)}
               onChangeText={(t) => {
-                markFormDirty();
                 setDraft((d) => ({ ...d, displayName: t, name: t }));
               }}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Gender"
               value={genderUiValue}
               options={GENDER_UI_OPTIONS.map((g) => ({ label: g, value: g }))}
               onValueChange={(ui) => {
-                markFormDirty();
                 setDraft((d) => ({
                   ...d,
                   gender: ui ? (mapGenderToDb(ui) ?? ui) : '',
                 }));
               }}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Ethnicity"
               value={asStr(draft.ethnicity)}
               options={ETHNICITY_CHOICES}
@@ -1472,7 +1355,7 @@ export const DatingProfileEditScreen: React.FC<{
               />
               {birthLocationPlacesLoading ? (
                 <View style={styles.birthLocationSearchRow}>
-                  <ActivityIndicator size="small" color="#93c5fd" />
+                  <ActivityIndicator size="small" color={ep.colors.flameMid} />
                   <Text style={styles.birthLocationSearchText}>Looking up places…</Text>
                 </View>
               ) : null}
@@ -1497,14 +1380,16 @@ export const DatingProfileEditScreen: React.FC<{
               ) : null}
             </View>
 
-            <SectionTitle>Relationship & place</SectionTitle>
-            <ChoiceDropdown
+            <EditProfileSubsectionTitle description={ONBOARDING_LOCATION_DESCRIPTION}>
+              Relationship & place
+            </EditProfileSubsectionTitle>
+            <AppSelect
               label="My relationship style is"
               value={relationshipStyleUi}
               options={RELATIONSHIP_STYLE_CHOICES}
               onValueChange={setScalar('relationshipStyle')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Relationship history"
               value={asStr(draft.longestRomanticRelationship)}
               options={LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS}
@@ -1515,10 +1400,8 @@ export const DatingProfileEditScreen: React.FC<{
               <View style={[styles.input, styles.readOnlyBox]}>
                 {locationLoading ? (
                   <View style={styles.locInner}>
-                    <ActivityIndicator size="small" color="#93c5fd" />
-                    <Text style={styles.readOnlyText}>
-                      Finding your location…
-                    </Text>
+                    <ActivityIndicator size="small" color={ep.colors.flameMid} />
+                    <Text style={styles.readOnlyText}>Finding your location…</Text>
                   </View>
                 ) : (
                   <Text style={styles.readOnlyText}>
@@ -1534,102 +1417,145 @@ export const DatingProfileEditScreen: React.FC<{
               </TouchableOpacity>
             </View>
 
-            <SectionTitle>Work & education</SectionTitle>
+            <EditProfileSubsectionTitle>Work & education</EditProfileSubsectionTitle>
             <Field
               label="Occupation"
               value={asStr(draft.occupation)}
               onChangeText={setScalar('occupation')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Education level"
               value={asStr(draft.educationLevel)}
               options={EDUCATION_LEVEL_CHOICES}
               onValueChange={setScalar('educationLevel')}
             />
 
-            <SectionTitle>Hobbies</SectionTitle>
-            <HobbiesFields
-              hobbies={asStr(draft.hobbies)}
-              professionalHobbyId={
-                draft.professionalHobbyId == null
-                  ? null
-                  : String(draft.professionalHobbyId)
-              }
-              onHobbiesChange={(hobbies) =>
-                setDraft((d) => ({ ...d, hobbies }))
-              }
-              onProfessionalHobbyIdChange={(professionalHobbyId) =>
-                setDraft((d) => ({ ...d, professionalHobbyId }))
-              }
-            />
-
-            <SectionTitle>Profile prompts</SectionTitle>
+            <EditProfileSubsectionTitle description={ONBOARDING_PROFILE_PROMPTS_SETUP_LEAD}>
+              Profile prompts
+            </EditProfileSubsectionTitle>
             <ProfilePromptsFields
+              variant="editProfile"
               prompts={profilePrompts}
               onChange={(next) => {
                 setProfilePrompts(next);
-                markFormDirty();
               }}
             />
-          </>
-        ) : null}
 
-        {activeTab === 'lifestyle' ? (
-          <>
-            <SectionTitle>Body & habits</SectionTitle>
+            <EditProfileSubsectionTitle>Your archetypes</EditProfileSubsectionTitle>
+            <ArchetypeSelector
+              value={archetypeSelection}
+              onChange={(next) => {
+                setArchetypeSelection(next);
+              }}
+            />
+
+            <EditProfileSubsectionTitle description={ONBOARDING_HOBBIES_DESCRIPTION}>
+              Hobbies
+            </EditProfileSubsectionTitle>
+            <HobbiesFields
+              variant="editProfile"
+              hobbies={asStr(draft.hobbies)}
+              onHobbiesChange={(hobbies) => {
+                setDraft((d) => {
+                  const ids = hobbiesStringToIds(hobbies);
+                  const proId =
+                    d.professionalHobbyId == null
+                      ? null
+                      : String(d.professionalHobbyId);
+                  return {
+                    ...d,
+                    hobbies,
+                    ...(proId && !ids.includes(proId) ? { professionalHobbyId: null } : null),
+                  };
+                });
+              }}
+            />
+              </>
+            ) : null}
+
+            {activeTab === 'lifestyle' ? (
+              <>
+                <EditProfileTabHeader title="Lifestyle" saving={saving} />
+            <EditProfileSubsectionTitle first description={ONBOARDING_HEIGHT_WEIGHT_NOTE}>
+              Body & habits
+            </EditProfileSubsectionTitle>
             <View style={styles.fieldBlock}>
               <HeightWeightInputFields
                 heightCm={heightCmPick}
                 weightKg={weightKgPick}
                 onHeightCmChange={(cm) => {
                   setHeightCmPick(cm);
-                  markFormDirty();
                 }}
                 onWeightKgChange={(kg) => {
                   setWeightKgPick(kg);
-                  markFormDirty();
                 }}
               />
             </View>
-            <ChoiceDropdown
+            <AppSelect
               label="Workout frequency"
               value={asStr(draft.workout)}
               options={workoutOptions}
               onValueChange={setScalar('workout')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Smoking & vaping"
               value={asStr(draft.smoking)}
               options={smokingOptions}
               onValueChange={setScalar('smoking')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="What is your relationship with alcohol"
               value={asStr(draft.drinking)}
               options={drinkingOptions}
               onValueChange={setScalar('drinking')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Do you use recreational drugs socially (MDMA, cocaine, etc)"
               value={asStr(draft.recreationalDrugsSocial)}
               options={recreationalDrugsSocialOptions}
               onValueChange={setScalar('recreationalDrugsSocial')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="What's your relationship with psychedelics or plant medicines?"
               value={asStr(draft.relationshipWithPsychedelics)}
               options={psychedelicsRelationshipOptions}
               onValueChange={setScalar('relationshipWithPsychedelics')}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="What is your relationship with cannabis or tobacco?"
               value={asStr(draft.relationshipWithCannabis)}
               options={cannabisRelationshipOptions}
               onValueChange={setScalar('relationshipWithCannabis')}
             />
 
-            <SectionTitle>Lifestyle & location</SectionTitle>
-            <ChoiceDropdown
+            <EditProfileSubsectionTitle>Values</EditProfileSubsectionTitle>
+            <AppSelect
+              label="Do you have kids?"
+              value={asStr(draft.haveKids)}
+              options={haveKidsOptions}
+              onValueChange={setScalar('haveKids')}
+            />
+            <AppSelect
+              label="Do you want children?"
+              value={asStr(draft.wantKids)}
+              options={wantChildrenYesNoOptions}
+              onValueChange={setScalar('wantKids')}
+            />
+            <AppSelect
+              label="Politics"
+              value={asStr(draft.politics)}
+              options={politicsOptions}
+              onValueChange={setScalar('politics')}
+            />
+            <AppSelect
+              label="Religion"
+              value={asStr(draft.religion)}
+              options={religionOptions}
+              onValueChange={setScalar('religion')}
+            />
+
+            <EditProfileSubsectionTitle>Lifestyle preferences</EditProfileSubsectionTitle>
+            <AppSelect
               label="Where do you see yourself living long term?"
               value={asStr(matchPrefs.longTermLivingPreference)}
               allowUnset
@@ -1637,11 +1563,11 @@ export const DatingProfileEditScreen: React.FC<{
                 label: o,
                 value: o,
               }))}
-              onValueChange={(v) =>
-                setMatchPrefs((p) => ({ ...p, longTermLivingPreference: v }))
-              }
+              onValueChange={(v) => {
+                setMatchPrefs((p) => ({ ...p, longTermLivingPreference: v }));
+              }}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Which lifestyle feels most like you?"
               value={asStr(matchPrefs.lifestylePreference)}
               allowUnset
@@ -1649,11 +1575,11 @@ export const DatingProfileEditScreen: React.FC<{
                 label: o,
                 value: o,
               }))}
-              onValueChange={(v) =>
-                setMatchPrefs((p) => ({ ...p, lifestylePreference: v }))
-              }
+              onValueChange={(v) => {
+                setMatchPrefs((p) => ({ ...p, lifestylePreference: v }));
+              }}
             />
-            <ChoiceDropdown
+            <AppSelect
               label="Would you relocate for the right relationship?"
               value={asStr(matchPrefs.relocationPreference)}
               allowUnset
@@ -1661,286 +1587,216 @@ export const DatingProfileEditScreen: React.FC<{
                 label: o,
                 value: o,
               }))}
-              onValueChange={(v) =>
-                setMatchPrefs((p) => ({ ...p, relocationPreference: v }))
-              }
-            />
-
-            <SectionTitle>Values</SectionTitle>
-            <ChoiceDropdown
-              label="Do you have kids?"
-              value={asStr(draft.haveKids)}
-              options={haveKidsOptions}
-              onValueChange={setScalar('haveKids')}
-            />
-            <ChoiceDropdown
-              label="Do you want children?"
-              value={asStr(draft.wantKids)}
-              options={wantChildrenYesNoOptions}
-              onValueChange={setScalar('wantKids')}
-            />
-            <ChoiceDropdown
-              label="Politics"
-              value={asStr(draft.politics)}
-              options={politicsOptions}
-              onValueChange={setScalar('politics')}
-            />
-            <ChoiceDropdown
-              label="Religion"
-              value={asStr(draft.religion)}
-              options={religionOptions}
-              onValueChange={setScalar('religion')}
-            />
-
-            <SectionTitle>Life domains</SectionTitle>
-            <LifeDomainDistribution
-              values={lifeDomainsState}
-              onValuesChange={setLifeDomainsState}
-              domainAnswerCounts={lifeDomainAnswerCounts}
-              onOpenDomainQuestions={(key) =>
-                setLifeDomainQuestionsDomainId(onboardingLifeDomainKeyToId(key))
-              }
-            />
-            {!lifeDomainsSumOk ? (
-              <Text style={styles.lifeDomainsError}>
-                Life domains must total 100 before you can save (currently{' '}
-                {lifeDomainsTotal}).
-              </Text>
-            ) : null}
-          </>
-        ) : null}
-
-        {activeTab === 'compatibility' ? (
-          <>
-            <SectionTitle>Sexual compatibility</SectionTitle>
-            <ChoiceDropdown
-              label="In a relationship, what feels like your natural rhythm for sex?"
-              value={asStr(draft.sexDrive)}
-              options={SEX_DRIVE_OPTIONS}
-              onValueChange={setScalar('sexDrive')}
-            />
-            <ChoiceDropdown
-              label="Sexual interests (select one)"
-              value={sexInterestSelected[0] ?? ''}
-              options={SEX_INTEREST_CATEGORY_OPTIONS}
-              onValueChange={(v) => setSexInterestSelected(v ? [v] : [])}
-            />
-            <ChoiceDropdown
-              label={RECENT_DATING_EARLY_WEEKS_QUESTION}
-              value={asStr(draft.recentDatingEarlyWeeks)}
-              options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
-              onValueChange={setScalar('recentDatingEarlyWeeks')}
-            />
-            <ChoiceDropdown
-              label="How much space do you realistically have for a new relationship right now?"
-              value={asStr(draft.spaceForNewRelationship)}
-              options={SPACE_FOR_NEW_RELATIONSHIP_OPTIONS}
-              onValueChange={setScalar('spaceForNewRelationship')}
-            />
-            <ChoiceDropdown
-              label="When my partner is in the mood and I'm not, I generally..."
-              value={asStr(draft.partnerMoodMismatchResponse)}
-              options={PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS}
-              onValueChange={setScalar('partnerMoodMismatchResponse')}
-            />
-            <ChoiceDropdown
-              label="During sex, I'm more focused on..."
-              value={asStr(draft.sexualFocusPreference)}
-              options={SEXUAL_FOCUS_OPTIONS}
-              onValueChange={setScalar('sexualFocusPreference')}
-            />
-
-            <SectionTitle>Life domain questions</SectionTitle>
-            <LifeDomainRequiredQuestionsSection
-              wantKids={asStr(draft.wantKids) || null}
-              answers={lifeDomainAnswers}
-              onAnswerChange={(domainId, questionId, value) => {
-                setLifeDomainAnswers((prev) => ({
-                  ...prev,
-                  [domainId]: { ...(prev[domainId] ?? {}), [questionId]: value },
-                }));
+              onValueChange={(v) => {
+                setMatchPrefs((p) => ({ ...p, relocationPreference: v }));
               }}
             />
+              </>
+            ) : null}
 
-            <SectionTitle>Typology</SectionTitle>
-            <TypologyPickerFields
-              variant="onboarding"
-              allowSkipOption
-              value={typologyValues}
-              onTypologyChange={setTypologyValues}
-            />
-          </>
-        ) : null}
-
-        {activeTab === 'basics' ? (
-          <>
-            <SectionTitle>Add your photos</SectionTitle>
-            <View style={styles.photoGrid}>
-              {photoUrls.map((uri, index) => (
-                <View key={`${uri}-${index}`} style={styles.photoContainer}>
-                  <ExpoImage
-                    source={{ uri }}
-                    style={styles.photo}
-                    contentFit="cover"
-                  />
-                  <TouchableOpacity
-                    style={styles.removePhotoButton}
-                    onPress={() => {
-                      setPhotoUrls((prev) =>
-                        prev.filter((_, i) => i !== index),
-                      );
-                    }}
-                  >
-                    <Text style={styles.removePhotoText}>×</Text>
-                  </TouchableOpacity>
-                </View>
-              ))}
-              {photoUrls.length < 6 && (
-                <TouchableOpacity
-                  style={styles.addPhotoButton}
-                  onPress={() => void pickPhotos()}
-                  accessibilityRole="button"
+            {activeTab === 'compatibility' ? (
+              <>
+                <EditProfileTabHeader title="Compatibility" saving={saving} />
+                <EditProfileSubsectionTitle
+                  first
+                  description={ONBOARDING_SEXUAL_COMPATIBILITY_LEAD}
                 >
-                  <Text style={styles.addPhotoGlyph}>+</Text>
-                </TouchableOpacity>
-              )}
-            </View>
+                  Sexual compatibility
+                </EditProfileSubsectionTitle>
+                <AppSelect
+                  label="In a relationship, what feels like your natural rhythm for sex?"
+                  value={asStr(draft.sexDrive)}
+                  options={SEX_DRIVE_OPTIONS}
+                  onValueChange={setScalar('sexDrive')}
+                />
+                <AppSelect
+                  label="Sexual interests (select one)"
+                  value={sexInterestSelected[0] ?? ''}
+                  options={SEX_INTEREST_CATEGORY_OPTIONS}
+                  onValueChange={(v) => {
+                    setSexInterestSelected(v ? [v] : []);
+                  }}
+                />
+                <AppSelect
+                  label={RECENT_DATING_EARLY_WEEKS_QUESTION}
+                  value={asStr(draft.recentDatingEarlyWeeks)}
+                  options={RECENT_DATING_EARLY_WEEKS_OPTIONS}
+                  onValueChange={setScalar('recentDatingEarlyWeeks')}
+                />
+                <AppSelect
+                  label="How much space do you realistically have for a new relationship right now?"
+                  value={asStr(draft.spaceForNewRelationship)}
+                  options={SPACE_FOR_NEW_RELATIONSHIP_OPTIONS}
+                  onValueChange={setScalar('spaceForNewRelationship')}
+                />
+                <AppSelect
+                  label="When my partner is in the mood and I'm not, I generally..."
+                  value={asStr(draft.partnerMoodMismatchResponse)}
+                  options={PARTNER_MOOD_MISMATCH_RESPONSE_OPTIONS}
+                  onValueChange={setScalar('partnerMoodMismatchResponse')}
+                />
+                <AppSelect
+                  label="During sex, I'm more focused on..."
+                  value={asStr(draft.sexualFocusPreference)}
+                  options={SEXUAL_FOCUS_OPTIONS}
+                  onValueChange={setScalar('sexualFocusPreference')}
+                />
+                <EditProfileSubsectionTitle description={ONBOARDING_DEALBREAKERS_LEAD}>
+                  Dealbreakers
+                </EditProfileSubsectionTitle>
+                <MatchPreferencesEmbedded
+                  location={asStr(draft.location)}
+                  userAge={userAge}
+                  matchPreferences={matchPrefs}
+                  prefPartnerSharesSexualInterests={prefPartnerSharesSexualInterests}
+                  prefPartnerHasChildren={prefPartnerHasChildren}
+                  prefPartnerPoliticalAlignmentImportance={
+                    prefPartnerPoliticalAlignmentImportance
+                  }
+                  afterAlcoholDealbreaker={
+                    <HobbyDealbreakerField
+                      hobbies={asStr(draft.hobbies)}
+                      professionalHobbyId={
+                        draft.professionalHobbyId == null
+                          ? null
+                          : String(draft.professionalHobbyId)
+                      }
+                      onProfessionalHobbyIdChange={(professionalHobbyId) => {
+                        setDraft((d) => ({ ...d, professionalHobbyId }));
+                      }}
+                    />
+                  }
+                  onPreferencesPatch={onMatchEmbeddedPatch}
+                />
+              </>
+            ) : null}
 
-            <View style={styles.divider} />
-
-            <SectionTitle>Your archetypes</SectionTitle>
-            <ArchetypeSelector
-              value={archetypeSelection}
-              onChange={setArchetypeSelection}
-            />
-            <Text style={styles.mutedSmall}>
-              Select {MIN_PROFILE_ARCHETYPES}–{MAX_PROFILE_ARCHETYPES} archetypes, then use Save changes at the top.
-            </Text>
-          </>
-        ) : null}
-
-        {activeTab === 'dealbreakers' ? (
-          <>
-            <SectionTitle>Dealbreakers</SectionTitle>
-            <MatchPreferencesEmbedded
-              location={asStr(draft.location)}
-              userAge={userAge}
-              matchPreferences={matchPrefs}
-              prefPartnerSharesSexualInterests={
-                prefPartnerSharesSexualInterests
-              }
-              prefPartnerHasChildren={prefPartnerHasChildren}
-              prefPartnerPoliticalAlignmentImportance={
-                prefPartnerPoliticalAlignmentImportance
-              }
-              onPreferencesPatch={onMatchEmbeddedPatch}
-            />
-          </>
-        ) : null}
-          </>
-        ) : typologyResultId === 'CONFLICT-30' && userId ? (
-          <ConflictStyleResultsPanel
-            userId={userId}
-            footer={{ kind: 'none' }}
-          />
-        ) : typologyResultId && userId ? (
-          <AssessmentInsightResultsPanel
-            userId={userId}
-            instrumentId={typologyResultId}
-          />
-        ) : null}
-
-        <Pressable
-          onPress={() => void onSave()}
-          disabled={saveButtonDisabled}
-          style={[
-            styles.primaryBtn,
-            saveButtonDisabled && styles.primaryBtnDisabled,
-            { marginTop: 8 },
-          ]}
-        >
-          <View style={styles.saveButtonContent}>
-            {saving ? <ActivityIndicator size="small" color="#fff" /> : null}
-            <Text style={styles.primaryBtnTxt}>
-              {saving ? 'Saving...' : toTitleCaseUi('Save changes')}
-            </Text>
-          </View>
-        </Pressable>
-        {saveFeedbackText ? (
-          <View
-            style={[
-              styles.saveStatus,
-              saving ? styles.saveStatusSaving : styles.saveStatusSuccess,
-            ]}
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color="#93c5fd" />
-            ) : (
-              <Text style={styles.saveStatusIcon}>✓</Text>
-            )}
-            <Text style={styles.saveStatusText}>{saveFeedbackText}</Text>
-          </View>
-        ) : null}
+            {activeTab === 'deepDive' ? (
+              <>
+                <EditProfileTabHeader
+                  title="Deep Dive"
+                  lead={EDIT_PROFILE_DEEP_DIVE_LEAD}
+                  saving={saving}
+                />
+                <EditProfileCompatibilityDeepDiveView
+                  wantKids={asStr(draft.wantKids) || null}
+                  lifeDomainsState={lifeDomainsState}
+                  onLifeDomainsChange={(next) => {
+                    setLifeDomainsState(next);
+                  }}
+                  lifeDomainAnswers={lifeDomainAnswers}
+                  onLifeDomainAnswerChange={(domainId, questionId, value) => {
+                    setLifeDomainAnswers((prev) => ({
+                      ...prev,
+                      [domainId]: { ...(prev[domainId] ?? {}), [questionId]: value },
+                    }));
+                  }}
+                  lifeDomainsTotal={lifeDomainsTotal}
+                  lifeDomainsSumOk={lifeDomainsSumOk}
+                  openQuestionsDomainId={openLifeDomainQuestionsId}
+                  onOpenQuestionsDomainIdChange={setOpenLifeDomainQuestionsId}
+                />
+                <EditProfileTypologyView
+                  first={false}
+                  value={resolvedTypologyValues}
+                  onChange={(next) => {
+                    setTypologyValues(next);
+                  }}
+                />
+                {userId ? <EditProfileMyResultsView userId={userId} /> : null}
+              </>
+            ) : null}
 
         <Text style={styles.mutedSmall}>Signed in as {user?.email ?? '—'}</Text>
       </ScrollView>
+      <EditProfileTabBar active={activeTab} onChange={setActiveTab} />
+      </View>
+      )}
     </SafeAreaContainer>
-
-    {userId && lifeDomainQuestionsDomainId ? (
-      <LifeDomainQuestionsEditModal
-        visible
-        userId={userId}
-        domainId={lifeDomainQuestionsDomainId}
-        initialAnswers={lifeDomainAnswers}
-        onAnswersChange={setLifeDomainAnswers}
-        wantKids={asStr(draft.wantKids) || null}
-        enforceRequired={false}
-        questionScope="optional"
-        onClose={() => setLifeDomainQuestionsDomainId(null)}
-      />
-    ) : null}
-    <EditProfileUnsavedChangesModal
-      visible={unsavedPromptVisible}
-      saving={unsavedPromptSaving || saving}
-      onCancel={handleUnsavedPromptCancel}
-      onDiscard={handleUnsavedPromptDiscard}
-      onSave={() => void handleUnsavedPromptSave()}
-    />
-    </>
   );
 };
 
 const styles = StyleSheet.create({
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 32,
+    gap: 14,
+  },
+  loadingText: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    color: ep.colors.textSecondary,
+    textAlign: 'center',
+  },
+  loadingError: {
+    fontFamily: FONT_BODY,
+    fontSize: 14,
+    lineHeight: 21,
+    color: ep.colors.textSecondary,
+    textAlign: 'center',
+  },
+  retryButton: {
+    marginTop: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 18,
+    borderRadius: 8,
+    backgroundColor: ep.colors.buttonTintBg,
+    borderWidth: 1,
+    borderColor: ep.colors.buttonTintBorder,
+  },
+  retryButtonText: {
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    color: ep.colors.flameMid,
+    letterSpacing: 0.3,
+  },
+  page: {
+    flex: 1,
+  },
   scroll: {
-    padding: 22,
+    paddingHorizontal: 22,
+    paddingTop: 12,
     paddingBottom: 48,
     maxWidth: 560,
     width: '100%',
     alignSelf: 'center',
   },
+  scrollWithTabBar: {
+    paddingBottom: 24,
+  },
+  sectionIntro: {
+    fontFamily: FONT_BODY,
+    fontSize: 13,
+    lineHeight: 19,
+    color: ep.colors.textSecondary,
+    marginBottom: 14,
+  },
   h1: {
-    fontFamily:
-      Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 26,
+    fontFamily: FONT_DISPLAY,
+    fontSize: 30,
     fontWeight: '600',
-    color: '#fafafa',
+    color: ep.colors.textBright,
     marginBottom: 10,
+  },
+  savingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  savingHint: {
+    fontFamily: FONT_UI,
+    fontSize: 13,
+    color: ep.colors.textMuted,
   },
   lead: {
     fontFamily: FONT_BODY,
     fontSize: 14,
     lineHeight: 21,
-    color: 'rgba(255,255,255,0.72)',
+    color: ep.colors.textSecondary,
     marginBottom: 20,
-  },
-  sectionTitle: {
-    fontFamily:
-      Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#e4e4e7',
-    marginTop: 22,
-    marginBottom: 12,
   },
   fieldBlock: { marginBottom: 14 },
   birthLocationSearchRow: {
@@ -1950,8 +1806,9 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   birthLocationSearchText: {
+    fontFamily: FONT_BODY,
     fontSize: 12,
-    color: 'rgba(255,255,255,0.55)',
+    color: ep.colors.textDim,
   },
   birthLocationSuggestions: {
     marginTop: 4,
@@ -1961,35 +1818,45 @@ const styles = StyleSheet.create({
   birthLocationSuggestionRow: {
     paddingVertical: 10,
     paddingHorizontal: 12,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: ep.colors.glassBg,
     borderRadius: 8,
     marginBottom: 6,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderColor: ep.colors.glassBorder,
   },
   birthLocationSuggestionText: {
+    fontFamily: FONT_BODY,
     fontSize: 14,
-    color: '#E8F0F8',
+    color: ep.colors.textPrimary,
     lineHeight: 20,
   },
-  label: { color: '#9CB4D8', fontSize: 13, marginBottom: 8 },
+  label: {
+    fontFamily: FONT_BODY,
+    color: ep.colors.textSecondary,
+    fontSize: 13,
+    marginBottom: 8,
+  },
   input: {
     fontFamily: FONT_BODY,
     fontSize: 16,
     fontWeight: '500',
     lineHeight: 22,
-    color: '#E8F0F8',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    color: ep.colors.textPrimary,
+    backgroundColor: ep.colors.surfaceCard,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 10,
+    borderColor: ep.colors.borderSubtle,
+    borderRadius: ep.spacing.inputRadius,
     paddingHorizontal: 14,
     paddingVertical: 12,
     minHeight: 56,
   },
   inputMultiline: { minHeight: 88, paddingTop: 12 },
   readOnlyBox: { justifyContent: 'center' },
-  readOnlyText: { fontFamily: FONT_BODY, fontSize: 15, color: '#E8F0F8' },
+  readOnlyText: {
+    fontFamily: FONT_BODY,
+    fontSize: 15,
+    color: ep.colors.textPrimary,
+  },
   locInner: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   choicePickerWrap: {
     paddingHorizontal: 0,
@@ -1999,7 +1866,7 @@ const styles = StyleSheet.create({
   },
   choicePicker: {
     width: '100%',
-    color: '#E8F0F8',
+    color: ep.colors.textPrimary,
     backgroundColor: 'transparent',
     ...(Platform.OS === 'ios'
       ? { height: 152 }
@@ -2007,30 +1874,29 @@ const styles = StyleSheet.create({
         ? { height: 56 }
         : {}),
   },
-  dropdownChevron: {
-    color: 'rgba(156,180,216,0.9)',
-    fontSize: 14,
-    paddingLeft: 10,
-  },
   chipWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     paddingVertical: 10,
     paddingHorizontal: 14,
-    borderRadius: 10,
+    borderRadius: ep.spacing.inputRadius,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderColor: ep.colors.borderDefault,
+    backgroundColor: ep.colors.surface,
   },
   chipOn: {
-    borderColor: '#5BA8E8',
-    backgroundColor: 'rgba(91,168,232,0.15)',
+    borderColor: ep.colors.flameMid,
+    backgroundColor: ep.colors.tipCardBg,
   },
   chipTxt: {
-    fontFamily: FONT_BODY,
+    fontFamily: FONT_UI,
     fontSize: 14,
-    color: 'rgba(255,255,255,0.82)',
+    color: ep.colors.textSecondary,
   },
-  chipTxtOn: { color: '#EEF6FF', fontWeight: '600' },
+  chipTxtOn: {
+    fontFamily: FONT_UI,
+    color: ep.colors.flameBright,
+    fontWeight: '600',
+  },
   secondaryBtn: {
     alignSelf: 'flex-start',
     marginTop: 8,
@@ -2038,9 +1904,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: ep.colors.buttonTintBorder,
+    backgroundColor: ep.colors.buttonTintBg,
   },
-  secondaryBtnTxt: { color: '#93c5fd', fontSize: 13, fontWeight: '600' },
+  secondaryBtnTxt: {
+    fontFamily: FONT_UI,
+    color: ep.colors.flameMid,
+    fontSize: 13,
+    fontWeight: '600',
+  },
   photoGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -2052,7 +1924,9 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     borderRadius: 8,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: ep.colors.surfaceCard,
+    borderWidth: 1,
+    borderColor: ep.colors.borderSubtle,
     position: 'relative',
   },
   photo: { width: '100%', height: '100%' },
@@ -2072,124 +1946,18 @@ const styles = StyleSheet.create({
     width: '30%',
     aspectRatio: 1,
     borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    backgroundColor: ep.colors.surface,
     borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: ep.colors.borderStrong,
     borderStyle: 'dashed',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  addPhotoGlyph: {
-    fontSize: 32,
-    color: 'rgba(255,255,255,0.55)',
-    fontWeight: '300',
-  },
-  primaryBtn: {
-    backgroundColor: ACCENT,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  primaryBtnDisabled: {
-    opacity: 0.78,
-  },
-  saveButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  primaryBtnTxt: { color: '#fff', fontWeight: '600', fontSize: 15 },
-  saveStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 10,
-  },
-  saveStatusSaving: {
-    borderColor: 'rgba(147,197,253,0.28)',
-    backgroundColor: 'rgba(59,130,246,0.12)',
-  },
-  saveStatusSuccess: {
-    borderColor: 'rgba(74,222,128,0.28)',
-    backgroundColor: 'rgba(34,197,94,0.12)',
-  },
-  saveStatusIcon: {
-    color: '#86efac',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  saveStatusText: {
-    color: '#E8F0F8',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  tabBar: {
-    flexDirection: 'row',
-    flexWrap: 'nowrap',
-    gap: 4,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(255,255,255,0.035)',
-    padding: 6,
-    marginTop: 6,
-    marginBottom: 8,
-  },
-  typologyTabBar: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.22)',
-    backgroundColor: 'rgba(91,168,232,0.06)',
-    padding: 6,
-    marginBottom: 12,
-  },
-  tabButton: {
-    flex: 1,
-    flexGrow: 1,
-    flexBasis: 0,
-    minWidth: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    paddingHorizontal: 6,
-    paddingVertical: 10,
-  },
-  tabButtonActive: {
-    borderColor: 'rgba(91,168,232,0.42)',
-    backgroundColor: 'rgba(91,168,232,0.16)',
-  },
-  tabText: {
-    color: 'rgba(200,217,238,0.78)',
+  mutedSmall: {
+    fontFamily: FONT_BODY,
+    color: ep.colors.textDim,
     fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  tabTextActive: {
-    color: '#EEF6FF',
-  },
-  mutedSmall: { color: 'rgba(255,255,255,0.35)', fontSize: 12, marginTop: 16 },
-  divider: {
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginVertical: 20,
-  },
-  lifeDomainsError: {
-    marginTop: 4,
-    marginBottom: 8,
-    fontSize: 14,
-    lineHeight: 20,
-    color: theme.colors.error,
-    fontWeight: '600',
+    marginTop: 16,
   },
 });

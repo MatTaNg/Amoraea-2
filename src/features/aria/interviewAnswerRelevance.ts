@@ -1,5 +1,8 @@
 import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
-import { looksLikeCheckingInSufficiencyAsk } from './metaCommentPatternScoring';
+import {
+  looksLikeCheckingInSufficiencyAsk,
+  looksLikeClearSkipRequestPhrase,
+} from './metaCommentPatternScoring';
 import { looksLikePriorAnswerMetaComment } from './interviewPriorAnswerMetaDetection';
 
 /**
@@ -101,7 +104,10 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
     return false;
   }
   // Dangling modal / auxiliary with nothing after (classic Whisper / early mic-stop cut-off).
+  // Longer substantive replies often end on "she was." / "he was." after a completed thought
+  // (e.g. "told her how proud of her she was.") — not a mic-stop fragment.
   if (
+    wordCount <= 10 &&
     /\b(i|he|she|they|we|you|ryan|emma|james|sarah|sophie|daniel)\s+(would|could|should|might|will|can|am|is|are|was|were|have|had|do|did|wanna|gonna)\s*[.,;:!?…—–-]*$/i.test(
       low,
     )
@@ -260,6 +266,13 @@ export function looksLikeInterviewProcessMetaComment(text: string): boolean {
   if (!t) return false;
   const wc = t.split(/\s+/).filter(Boolean).length;
   if (/\b(?:next question|what'?s next|move on to the next|can we move on)\b/i.test(t)) {
+    return false;
+  }
+  // "Can I skip this question?" is a skip_request — not a "repeat/clarify the question" process ask.
+  if (looksLikeClearSkipRequestPhrase(t)) {
+    return false;
+  }
+  if (/\b(?:can|could|may)\s+(?:i|we)\s+skip\b/i.test(t)) {
     return false;
   }
   // Long turns that summarize the vignette and ask what to infer are content confusion — not a

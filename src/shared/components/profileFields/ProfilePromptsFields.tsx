@@ -16,24 +16,31 @@ import type { ProfilePromptAnswer } from '@domain/models/Profile';
 import {
   PROFILE_PROMPT_CATEGORIES,
   MAX_PROFILE_PROMPTS,
-  PROFILE_PROMPT_ANSWER_MAX_LENGTH,
+  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
   getPromptById,
   isRequiredEligibleCategory,
+  promptAnswerHasMinimumLength,
 } from '@/features/profile/profilePromptsLibrary';
 import {
   wouldRemovalBreakRequiredCategoryFloor,
   validateProfilePromptsForSetup,
 } from '@/features/profile/profilePromptValidation';
 import { theme } from '@/shared/theme/theme';
+import { ep } from '@/screens/profile/editProfile/editProfileTheme';
+import { ONBOARDING_PROFILE_PROMPTS_SETUP_LEAD } from '@/datingProfile/screens/onboarding/modals/onboardingStepCopy';
 
 const FONT_BODY =
   Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
+const FONT_DISPLAY =
+  Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 
 export type ProfilePromptsFieldsProps = {
   prompts: ProfilePromptAnswer[];
   onChange: (next: ProfilePromptAnswer[]) => void;
   /** When true, show setup validation hint (onboarding). */
   showSetupHints?: boolean;
+  /** Edit profile uses display font for prompt questions. */
+  variant?: 'default' | 'editProfile';
 };
 
 type FlowStep = 'list' | 'category' | 'prompt' | 'answer';
@@ -42,6 +49,7 @@ export const ProfilePromptsFields: React.FC<ProfilePromptsFieldsProps> = ({
   prompts,
   onChange,
   showSetupHints = false,
+  variant = 'default',
 }) => {
   const insets = useSafeAreaInsets();
   const answerScrollRef = useRef<ScrollView>(null);
@@ -137,34 +145,48 @@ export const ProfilePromptsFields: React.FC<ProfilePromptsFieldsProps> = ({
 
   const activeCategory = PROFILE_PROMPT_CATEGORIES.find((c) => c.id === activeCategoryId);
   const activePrompt = activePromptId ? getPromptById(activePromptId) : undefined;
-  const charCount = draftAnswer.length;
-  const answerTooLong = charCount > PROFILE_PROMPT_ANSWER_MAX_LENGTH;
+  const trimmedCount = draftAnswer.trim().length;
+  const requiresMinLength = Boolean(
+    activeCategoryId && promptAnswerHasMinimumLength(activeCategoryId),
+  );
+  const answerTooShort =
+    requiresMinLength && trimmedCount < PROFILE_PROMPT_ANSWER_MIN_LENGTH;
   const canSaveAnswer =
-    draftAnswer.trim().length > 0 && !answerTooLong && Boolean(activePromptId && activeCategoryId);
+    draftAnswer.trim().length > 0 && !answerTooShort && Boolean(activePromptId && activeCategoryId);
 
   return (
     <View style={styles.root}>
       {showSetupHints ? (
-        <Text style={styles.lead}>
-          Pick at least one prompt from <Text style={styles.em}>What Matters To Me</Text> or{' '}
-          <Text style={styles.em}>How I Show Up</Text>. You can add up to {MAX_PROFILE_PROMPTS}{' '}
-          total — the rest are optional.
-        </Text>
-      ) : (
+        <Text style={styles.lead}>{ONBOARDING_PROFILE_PROMPTS_SETUP_LEAD}</Text>
+      ) : variant !== 'editProfile' ? (
         <Text style={styles.lead}>
           Answer up to {MAX_PROFILE_PROMPTS} prompts. Keep at least one from{' '}
           <Text style={styles.em}>What Matters To Me</Text> or{' '}
           <Text style={styles.em}>How I Show Up</Text>.
         </Text>
-      )}
+      ) : null}
 
       {prompts.map((row, index) => {
         const prompt = getPromptById(row.promptId);
         const removalBlocked = wouldRemovalBreakRequiredCategoryFloor(prompts, index);
         return (
-          <View key={`${row.promptId}-${index}`} style={styles.card}>
-            <Text style={styles.promptQuestion}>{prompt?.text ?? row.promptId}</Text>
-            <Text style={styles.promptAnswer}>{row.answer}</Text>
+          <View key={`${row.promptId}-${index}`} style={[styles.card, variant === 'editProfile' && styles.cardEditProfile]}>
+            <Text
+              style={[
+                styles.promptQuestion,
+                variant === 'editProfile' && styles.promptQuestionEditProfile,
+              ]}
+            >
+              {prompt?.text ?? row.promptId}
+            </Text>
+            <Text
+              style={[
+                styles.promptAnswer,
+                variant === 'editProfile' && styles.promptAnswerEditProfile,
+              ]}
+            >
+              {row.answer}
+            </Text>
             <View style={styles.cardActions}>
               <Pressable onPress={() => openEditFlow(index)} style={styles.linkBtn}>
                 <Text style={styles.linkBtnText}>Edit</Text>
@@ -276,13 +298,10 @@ export const ProfilePromptsFields: React.FC<ProfilePromptsFieldsProps> = ({
                   <TextInput
                     style={styles.answerInput}
                     value={draftAnswer}
-                    onChangeText={(t) =>
-                      setDraftAnswer(t.slice(0, PROFILE_PROMPT_ANSWER_MAX_LENGTH))
-                    }
+                    onChangeText={setDraftAnswer}
                     placeholder="Type your answer…"
                     placeholderTextColor={theme.colors.textSecondary}
                     multiline
-                    maxLength={PROFILE_PROMPT_ANSWER_MAX_LENGTH}
                     textAlignVertical="top"
                     onFocus={() => {
                       requestAnimationFrame(() => {
@@ -290,9 +309,11 @@ export const ProfilePromptsFields: React.FC<ProfilePromptsFieldsProps> = ({
                       });
                     }}
                   />
-                  <Text style={[styles.counter, answerTooLong && styles.counterError]}>
-                    {charCount}/{PROFILE_PROMPT_ANSWER_MAX_LENGTH}
-                  </Text>
+                  {requiresMinLength ? (
+                    <Text style={[styles.counter, answerTooShort && styles.counterError]}>
+                      {trimmedCount}/{PROFILE_PROMPT_ANSWER_MIN_LENGTH} min
+                    </Text>
+                  ) : null}
                   <Pressable
                     onPress={commitAnswer}
                     disabled={!canSaveAnswer}
@@ -339,6 +360,20 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: theme.colors.textSecondary,
     fontFamily: FONT_BODY,
+  },
+  cardEditProfile: {
+    backgroundColor: ep.colors.surfaceCard,
+    borderColor: ep.colors.borderSubtle,
+  },
+  promptQuestionEditProfile: {
+    fontFamily: FONT_DISPLAY,
+    fontWeight: '500',
+    fontStyle: 'italic',
+    color: ep.colors.flameBright,
+    fontSize: 19,
+  },
+  promptAnswerEditProfile: {
+    color: ep.colors.textPrimary,
   },
   cardActions: { flexDirection: 'row', gap: 16, marginTop: 4 },
   linkBtn: { paddingVertical: 4 },

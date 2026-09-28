@@ -253,9 +253,72 @@ export type AdminCohortListFilters = {
   humanVerifiedCohortFilter: HumanVerifiedCohortFilter;
   uncertaintyBandFilter: UncertaintyBandFilter;
   hideIncomplete: boolean;
-  statusFilter: AdminUserStatusFilter;
+  /** Empty array = no status filter (all statuses). Multiple entries = match any selected status. */
+  statusFilters: AdminUserStatusFilter[];
+  needsReviewQuickFilter: boolean;
   userSearchQuery: string;
 };
+
+export const ADMIN_NEAR_MISS_WEIGHTED_MIN = 6.0;
+export const ADMIN_NEAR_MISS_WEIGHTED_MAX = 6.5;
+
+export function resolveAdminCohortComparisonWeightedScore(
+  attempt: AttemptSummary | null | undefined,
+): number | null {
+  if (!attempt) return null;
+  const candidates = [
+    attempt.modified_weighted_score_with_psychometrics,
+    attempt.modified_weighted_score,
+    attempt.weighted_score,
+  ];
+  for (const c of candidates) {
+    if (typeof c === 'number' && Number.isFinite(c)) return c;
+  }
+  return null;
+}
+
+export function userGroupInNearMissWeightedBand(g: UserGroup): boolean {
+  const score = resolveAdminCohortComparisonWeightedScore(g.latestAttempt);
+  return score != null && score >= ADMIN_NEAR_MISS_WEIGHTED_MIN && score <= ADMIN_NEAR_MISS_WEIGHTED_MAX;
+}
+
+export function userGroupMatchesNeedsReviewQuickFilter(g: UserGroup): boolean {
+  if (reviewFlagsFromStoredAttempt(g.latestAttempt).length > 0) return true;
+  if (resolveAdminPrimaryOutcomeDisplay(g.user, g.latestAttempt).outcomeLabel === 'almost') return true;
+  if (userGroupInNearMissWeightedBand(g)) return true;
+  return false;
+}
+
+export function userMatchesAdminStatusFilter(g: UserGroup, statusFilter: AdminUserStatusFilter): boolean {
+  if (statusFilter === 'all') return true;
+  if (statusFilter === 'flagged') {
+    return reviewFlagsFromStoredAttempt(g.latestAttempt).length > 0;
+  }
+  if (statusFilter === 'er_floor_review') {
+    return g.latestAttempt != null && isLegacyEmotionRecognitionFloorOnlyFail(g.latestAttempt);
+  }
+  if (
+    statusFilter === 'sd3_narcissism_floor_review' ||
+    statusFilter === 'psychometric_floor_review'
+  ) {
+    return userGroupNeedsPsychometricFloorReview(g);
+  }
+  const s = classifyAdminUserListStatus(g);
+  if (statusFilter === 'incomplete') return s === 'in_progress' || s === 'no_result';
+  return s === statusFilter;
+}
+
+export function toggleAdminStatusFilterSelection(
+  current: AdminUserStatusFilter[],
+  next: AdminUserStatusFilter,
+): AdminUserStatusFilter[] {
+  if (next === 'all') return [];
+  const withoutAll = current.filter((id) => id !== 'all');
+  if (withoutAll.includes(next)) {
+    return withoutAll.filter((id) => id !== next);
+  }
+  return [...withoutAll, next];
+}
 
 export function filterAdminUserCohort(users: UserGroup[], filters: AdminCohortListFilters): UserGroup[] {
   let list = users;
@@ -273,28 +336,14 @@ export function filterAdminUserCohort(users: UserGroup[], filters: AdminCohortLi
   if (filters.uncertaintyBandFilter !== 'all') {
     list = list.filter((g) => userMatchesUncertaintyFilter(g, filters.uncertaintyBandFilter));
   }
-  if (filters.hideIncomplete && filters.statusFilter !== 'incomplete') {
+  if (filters.hideIncomplete && !filters.statusFilters.includes('incomplete')) {
     list = list.filter((g) => g.user.interview_completed === true);
   }
-  if (filters.statusFilter !== 'all') {
-    list = list.filter((g) => {
-      if (filters.statusFilter === 'flagged') {
-        const flags = reviewFlagsFromStoredAttempt(g.latestAttempt);
-        return flags.length > 0;
-      }
-      if (filters.statusFilter === 'er_floor_review') {
-        return g.latestAttempt != null && isLegacyEmotionRecognitionFloorOnlyFail(g.latestAttempt);
-      }
-      if (
-        filters.statusFilter === 'sd3_narcissism_floor_review' ||
-        filters.statusFilter === 'psychometric_floor_review'
-      ) {
-        return userGroupNeedsPsychometricFloorReview(g);
-      }
-      const s = classifyAdminUserListStatus(g);
-      if (filters.statusFilter === 'incomplete') return s === 'in_progress' || s === 'no_result';
-      return s === filters.statusFilter;
-    });
+  if (filters.needsReviewQuickFilter) {
+    list = list.filter((g) => userGroupMatchesNeedsReviewQuickFilter(g));
+  }
+  if (filters.statusFilters.length > 0) {
+    list = list.filter((g) => filters.statusFilters.some((sf) => userMatchesAdminStatusFilter(g, sf)));
   }
   if (filters.userSearchQuery.trim()) {
     list = list.filter((g) => userGroupMatchesSearchQuery(g, filters.userSearchQuery));

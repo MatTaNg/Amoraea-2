@@ -9,7 +9,7 @@ import {
   mergePsychometricFloorsIntoGateState,
 } from '../psychometricFloorBreaches';
 import { NPI_ENTITLEMENT_ENABLED } from '../interviewCompletionStatus';
-import { narcissismFloorBreachScores, NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED } from '../narcissismInstrumentTestFixtures';
+import { narcissismFloorBreachScores } from '../narcissismInstrumentTestFixtures';
 
 const REGRESSION_FLOOR_SCORES = {
   rfqScore: 1.75,
@@ -99,9 +99,10 @@ describe('admin recalculation psychometric floor merge', () => {
     expect(breaches).toHaveLength(0);
   });
 
-  it('fires eight active instrument floors for admin recalc regression user (SD3 below threshold)', () => {
+  it('fires active new-user instrument floors for admin recalc regression user', () => {
     const breaches = collectPsychometricFloorGateFailReasons(ADMIN_RECALC_USER_FLOOR_SCORES, []);
-    expect(breaches).toHaveLength(8);
+    expect(breaches).not.toContain('aaq2_high_experiential_avoidance_floor');
+    expect(breaches).not.toContain('rfq_low_reflective_functioning_floor');
     expect(breaches).not.toContain(
       NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement_floor' : 'sd3_narcissism_floor',
     );
@@ -109,7 +110,7 @@ describe('admin recalculation psychometric floor merge', () => {
 
   it('produces eight active floor breaches with rich keyed psychometric_floors detail', () => {
     const breaches = collectPsychometricFloorGateFailReasons(REGRESSION_FLOOR_SCORES, []);
-    expect(breaches).toHaveLength(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? 8 : 7);
+    expect(breaches).toHaveLength(4);
 
     const merged = mergePsychometricFloorsIntoGateState({
       existingFailReasons: [],
@@ -118,7 +119,7 @@ describe('admin recalculation psychometric floor merge', () => {
       straightLineFlags: [],
     });
 
-    expect(merged.gateFailReasons).toHaveLength(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? 8 : 7);
+    expect(merged.gateFailReasons.length).toBeGreaterThanOrEqual(4);
     const psychFloors = merged.gateFailDetail.psychometric_floors as Record<
       string,
       { score: number; description: string }

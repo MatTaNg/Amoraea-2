@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import type { AdminCohortDemographics } from '@features/admin/interviewDashboard/adminCohortDemographics';
 
 const GENDER_COLORS: Record<string, string> = {
@@ -46,10 +46,14 @@ function DistributionBar({
 export function AdminCohortDemographicsBanner({
   demographics,
   loadingProfiles,
+  defaultExpanded = false,
 }: {
   demographics: AdminCohortDemographics;
   loadingProfiles?: boolean;
+  defaultExpanded?: boolean;
 }) {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+
   if (demographics.cohortSize === 0) return null;
 
   const genderMax = Math.max(1, ...demographics.gender.map((g) => g.count));
@@ -66,14 +70,24 @@ export function AdminCohortDemographicsBanner({
 
   return (
     <View style={styles.banner}>
-      <View style={styles.headerRow}>
-        <Text style={styles.title}>Cohort demographics</Text>
-        <Text style={styles.subtitle}>
-          {demographics.cohortSize} user{demographics.cohortSize === 1 ? '' : 's'} in current filter
-          {loadingProfiles ? ' · loading profile fields…' : ''}
-        </Text>
-      </View>
+      <TouchableOpacity
+        style={[styles.headerRow, !expanded && styles.headerRowCollapsed]}
+        onPress={() => setExpanded((v) => !v)}
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel="Cohort demographics"
+      >
+        <View style={styles.headerText}>
+          <Text style={styles.title}>Cohort demographics</Text>
+          <Text style={styles.subtitle}>
+            {demographics.cohortSize} user{demographics.cohortSize === 1 ? '' : 's'} in current filter
+            {loadingProfiles ? ' · loading profile fields…' : ''}
+          </Text>
+        </View>
+        <Text style={styles.chevron}>{expanded ? '▲' : '▼'}</Text>
+      </TouchableOpacity>
 
+      {expanded ? (
       <View style={styles.columns}>
         <View style={styles.column}>
           <Text style={styles.columnTitle}>Gender</Text>
@@ -120,6 +134,7 @@ export function AdminCohortDemographicsBanner({
           )}
         </View>
       </View>
+      ) : null}
     </View>
   );
 }
@@ -136,7 +151,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(30,111,217,0.12)',
   },
   headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     marginBottom: 12,
+  },
+  headerRowCollapsed: {
+    marginBottom: 0,
+  },
+  headerText: {
+    flex: 1,
+  },
+  chevron: {
+    color: '#7A9ABE',
+    fontSize: 12,
+    paddingLeft: 4,
   },
   title: {
     color: '#E8F0F8',

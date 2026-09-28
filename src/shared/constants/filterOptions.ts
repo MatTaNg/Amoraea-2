@@ -1,3 +1,5 @@
+import { PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS } from '@/shared/constants/partnerAlignmentImportance';
+
 export type ChoiceOption = { label: string; value: string };
 
 function opts(labels: string[]): ChoiceOption[] {
@@ -64,10 +66,7 @@ export const haveKidsOptions = opts(['No', 'Yes']);
 export const wantChildrenYesNoOptions = opts(["Don't want kids", 'Undecided', 'Want kids']);
 
 /** Partner dealbreaker: alignment on substance use (onboarding match preferences). */
-export const PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS: string[] = [
-  'Yes',
-  'No',
-];
+export const PARTNER_SUBSTANCE_ALIGNMENT_OPTIONS = PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS;
 
 export function normalizeWantKidsToYesNo(raw: unknown): string | undefined {
   if (raw === undefined || raw === null) return undefined;

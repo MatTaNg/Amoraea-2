@@ -57,6 +57,13 @@ Apply this distinction consistently across fictional scenarios and personal narr
  * Used in per-scenario JSON scoring and full-interview holistic scoring (repair + accountability only).
  */
 export const REPAIR_AND_ACCOUNTABILITY_UNPROMPTED_VS_PROMPTED_WEIGHTING = `
+SCENARIO A/B — RETIRED HYPOTHETICAL REPAIR PROBES (repair marker only):
+Scenario A (Ryan) and Scenario B (James) **no longer have a dedicated repair prompt** in current interviews. **Do not** treat the applicant as having failed a repair probe they were never asked.
+- If this transcript slice **does not** contain a repair-as-Ryan / repair-as-James (or equivalent) interviewer question **and** the user did **not** volunteer **meaningful repair process** (apology, amends, ownership of harm plus a next step, talking it through, follow-through after rupture — **not** mere appreciation or "they should notice her more"): set **repair** to JSON **null**. keyEvidence must say there is **no assessable repair evidence from this scenario**. Absence of spontaneous repair is **missing evidence**, not a 1–4 score.
+- If no repair probe was asked **but** the user volunteered meaningful repair process: score that evidence normally and tag keyEvidence as **spontaneous**.
+- If a repair probe **is** present in this slice (historical interviews): score the response normally using the unprompted vs prompted rules below.
+Appreciation or "James should have been more positive" **does not** count as spontaneous repair unless the answer also meets repair-process criteria.
+
 REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED (fictional scenarios only; applies to **repair** and **accountability** markers — not mentalizing, attunement, contempt, appreciation, regulation, or commitment_threshold):
 
 Distinguish two response types in each scenario:

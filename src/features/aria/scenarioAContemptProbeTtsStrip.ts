@@ -1,5 +1,10 @@
 import { normalizeInterviewTypography } from './interviewTypography';
 import {
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+} from './scenarioAContemptProbeCopy';
+import {
   isIncompleteScenarioAContemptProbeLeadSentence,
   looksLikeScenarioAContemptProbeQuestion,
   scenarioAEmmaVeryClearClosingLineMentioned,
@@ -7,15 +12,13 @@ import {
 } from './scenarioAContemptProbeTextMatch';
 import { withSkipAcceptedNextQuestionBridgePreserved } from './skipAcceptedNextQuestionBridge';
 
-/** Canonical Scenario A contempt probe — client-forced and orphan-stream fallback. */
-export const SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY =
-  "What about when Emma says 'you've made that very clear' — what do you make of that?";
-
-/** TTS matches show-modal / delivered copy (including Emma's quoted line). */
-export const SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY = SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
-
-/** @deprecated Alias — use {@link SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY}. */
-export const SCENARIO_A_CONTEMPT_PROBE_RESUME_REPEAT_TTS_COPY = SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY;
+export {
+  S1_REPAIR_QUESTION,
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_RESUME_REPEAT_TTS_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+} from './scenarioAContemptProbeCopy';
 
 /** Any contempt-probe-shaped assistant line → exact framework copy (no model paraphrase / wrong Emma quotes). */
 export function coerceScenarioAContemptProbeToDeliveredCopy(text: string): string {
@@ -78,13 +81,6 @@ export function scenarioAContemptProbeResumeRepeatTtsText(storedAssistantText: s
   }
   return storedAssistantText;
 }
-
-/** Canonical Scenario A repair ask after the contempt probe — question only (ack is spoken separately). */
-export const SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY =
-  'If you were Ryan, how would you repair this?';
-
-/** @deprecated Prefer {@link SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}. */
-export const S1_REPAIR_QUESTION = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
 
 export function assertScenarioARepairQuestionCompleteness(): void {
   const q = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;

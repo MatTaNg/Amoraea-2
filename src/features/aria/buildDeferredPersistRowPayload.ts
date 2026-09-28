@@ -124,6 +124,11 @@ export function buildDeferredPersistRowPayload(
         'moment_5_scores',
         { suppressBaselineBackfill: suppressMoment5BaselineBackfill },
       ),
+      moment_support_scores: resolveMomentScoresForFinalPersist(
+        null,
+        scoringBaseline,
+        'moment_support_scores',
+      ),
     },
     defense_patterns: normalizeDefensePatternsForPersist(defensePatternsForDeferredRow),
     moment_4_concreteness: coalesceMoment4ConcretenessForFinalPersist(

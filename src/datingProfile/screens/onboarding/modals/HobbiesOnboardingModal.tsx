@@ -11,18 +11,14 @@ import { styles } from './HobbiesOnboardingModal.styled';
 
 interface HobbiesOnboardingModalProps {
   hobbies: string;
-  professionalHobbyId: string | null | undefined;
   onHobbiesChange: (hobbies: string) => void;
-  onProfessionalHobbyIdChange: (id: string | null) => void;
   onNext: () => void;
   onBack: () => void;
 }
 
 export const HobbiesOnboardingModal: React.FC<HobbiesOnboardingModalProps> = ({
   hobbies,
-  professionalHobbyId,
   onHobbiesChange,
-  onProfessionalHobbyIdChange,
   onNext,
   onBack,
 }) => {
@@ -37,12 +33,7 @@ export const HobbiesOnboardingModal: React.FC<HobbiesOnboardingModalProps> = ({
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
-          <HobbiesFields
-            hobbies={hobbies}
-            professionalHobbyId={professionalHobbyId}
-            onHobbiesChange={onHobbiesChange}
-            onProfessionalHobbyIdChange={onProfessionalHobbyIdChange}
-          />
+          <HobbiesFields hobbies={hobbies} onHobbiesChange={onHobbiesChange} />
         </View>
       </ScrollView>
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>

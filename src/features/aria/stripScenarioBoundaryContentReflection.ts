@@ -1,6 +1,9 @@
 import { INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS } from '@features/aria/interviewTransitionBundles';
 import { isScenarioBoundaryPositiveAddressReflection } from '@features/aria/interviewReflectionTextStrips';
 
+const BOUNDARY_CONTENT_REFLECTION_OPENER_RE =
+  /^(?:You\s+(?:focused on|named|framed|pointed to|highlighted|saw|recognized|picked up on|read)\b|What\s+(?:I\s+(?:heard|got)|came through|landed for me)\s+was\b)/i;
+
 /**
  * Remove "Nice work, {name} — …" / "What I heard was…" content reflections from a
  * scenario-boundary handoff. No-op while {@link INCLUDE_SCENARIO_BOUNDARY_REFLECTIONS} is true.
@@ -22,6 +25,11 @@ export function stripScenarioBoundaryContentReflection(text: string): string {
     /You\s+(?:focused on|named|framed|pointed to|highlighted|saw|recognized|picked up on|read)\s+[^.!?\n]+[.!?]?\s*/gi,
     '',
   );
+  // Em-dash continuation after a reflection opener ("You picked up on X — the way Y.").
+  t = t.replace(
+    /You\s+(?:focused on|named|framed|pointed to|highlighted|saw|recognized|picked up on|read)\s+[^—\-–\n]+[—\-–]\s*[^.!?\n]+[.!?]?\s*/gi,
+    '',
+  );
   return t.replace(/[ \t]{2,}/g, ' ').replace(/ \n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -31,10 +39,8 @@ export function shouldDropScenarioBoundaryContentReflectionSentence(text: string
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return false;
   if (isScenarioBoundaryPositiveAddressReflection(t)) return true;
-  if (
-    /^(?:What\s+(?:I\s+(?:heard|got)|came through|landed for me)\s+was)\b/i.test(t) &&
-    !/\?/.test(t)
-  ) {
+  if (BOUNDARY_CONTENT_REFLECTION_OPENER_RE.test(t) && !/\?/.test(t)) {
+    // Drop pure reflection sentences, and reflection+wrap compounds from LLM boundary leads.
     return true;
   }
   return false;

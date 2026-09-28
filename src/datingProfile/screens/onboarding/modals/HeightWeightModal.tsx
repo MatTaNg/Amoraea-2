@@ -9,6 +9,7 @@ import {
 } from '@/shared/components/HeightWeightInputFields';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './HeightWeightModal.styled';
+import { ONBOARDING_HEIGHT_WEIGHT_NOTE } from './onboardingStepCopy';
 
 interface HeightWeightModalProps {
   heightCm?: number;
@@ -39,8 +40,7 @@ export const HeightWeightModal: React.FC<HeightWeightModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.note}>
-            This is only used to calculate BMI. Your height, weight, and BMI will not be
-            communicated to your potential matches.
+            {ONBOARDING_HEIGHT_WEIGHT_NOTE}
           </Text>
           <HeightWeightInputFields
             heightCm={heightCm}

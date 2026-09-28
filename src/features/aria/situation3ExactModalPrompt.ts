@@ -10,10 +10,13 @@ import {
 } from '@features/aria/interviewScenarioOpeningStreamGate';
 import { SHOW_SCENARIO_3_VIGNETTE_EXACT } from '@features/aria/interviewShowScenarioExactCopy';
 import {
+  isIncompleteScenarioCRepairAsDanielLeadSentence,
+  isIncompleteScenarioCRepairQuestionTail,
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCRepairAsDanielQuestion,
   looksLikeScenarioCSophiePerspectiveQuestion,
   resolveScenarioCRepairModalPromptFromText,
+  SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from '@features/aria/scenarioCPromptDetection';
 import { looksLikeScenarioARepairQuestion } from '@features/aria/scenarioARepairQuestionHelpers';
 import {
@@ -25,7 +28,37 @@ import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDis
 export type Situation3ModalDeliveryState = {
   sophiePerspectiveAsked?: boolean;
   danielRepairAsked?: boolean;
+  /** Session ref: repair Q2 passed to TTS before transcript persist (parallel stream / forced probe). */
+  danielRepairDelivered?: boolean;
 };
+
+function spokenIndicatesScenarioCRepairPrompt(spoken: string): boolean {
+  const t = spoken.trim();
+  if (!t) return false;
+  return (
+    looksLikeScenarioCRepairAsDanielQuestion(t) ||
+    isScenarioCRepairAssistantPrompt(t) ||
+    isIncompleteScenarioCRepairAsDanielLeadSentence(t) ||
+    isIncompleteScenarioCRepairQuestionTail(t)
+  );
+}
+
+function resolveSituation3ModalPromptFromSubstantiveQuestion(question: string): string | null {
+  const q = question.trim();
+  if (!q) return null;
+  if (spokenIndicatesScenarioCRepairPrompt(q)) {
+    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+  }
+  if (looksLikeScenarioCSophiePerspectiveQuestion(q)) {
+    return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
+  }
+  if (
+    normalizeScenarioOpeningForCompare(q) === normalizeScenarioOpeningForCompare(SCENARIO_3_OPENING)
+  ) {
+    return SCENARIO_3_OPENING;
+  }
+  return null;
+}
 
 export const SITUATION_3_REFERENCE_SCENARIO: ActiveScenario = {
   label: 'Situation 3',
@@ -83,13 +116,18 @@ export function isSituation3ModalAdvancedPastOpening(
   lastQuestionText?: string | null,
   transcript?: ScenarioModalTranscriptTurn[],
 ): boolean {
-  if (delivery?.danielRepairAsked || delivery?.sophiePerspectiveAsked) return true;
+  if (
+    delivery?.danielRepairAsked ||
+    delivery?.danielRepairDelivered ||
+    delivery?.sophiePerspectiveAsked
+  ) {
+    return true;
+  }
   const last = (lastQuestionText ?? '').trim();
   if (last) {
     if (
       looksLikeScenarioCSophiePerspectiveQuestion(last) ||
-      looksLikeScenarioCRepairAsDanielQuestion(last) ||
-      isScenarioCRepairAssistantPrompt(last)
+      spokenIndicatesScenarioCRepairPrompt(last)
     ) {
       return true;
     }
@@ -115,45 +153,32 @@ export function resolveSituation3ExactModalPrompt(
       looksLikeScenarioBRepairAsJamesQuestion(spoken) ||
       looksLikeScenarioBJamesDifferentlyQuestion(spoken));
   if (spoken && !spokenIsPriorScenarioBleed && !isIrrelevantAnswerRetryAssistantLine(spoken)) {
-    if (
-      looksLikeScenarioCRepairAsDanielQuestion(spoken) ||
-      isScenarioCRepairAssistantPrompt(spoken)
-    ) {
-      return resolveScenarioCRepairModalPromptFromText(spoken);
-    }
-    if (looksLikeScenarioCSophiePerspectiveQuestion(spoken)) {
-      return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
-    }
+    const fromSpoken = resolveSituation3ModalPromptFromSubstantiveQuestion(spoken);
+    if (fromSpoken) return fromSpoken;
   }
 
   const scoped = scopedSituation3AssistantTurns(transcript);
-  const lastSubstantive = getLastSubstantiveScenarioModalQuestion(scoped);
-  if (lastSubstantive) {
-    if (
-      looksLikeScenarioCRepairAsDanielQuestion(lastSubstantive) ||
-      isScenarioCRepairAssistantPrompt(lastSubstantive)
-    ) {
-      return resolveScenarioCRepairModalPromptFromText(lastSubstantive);
-    }
-    if (looksLikeScenarioCSophiePerspectiveQuestion(lastSubstantive)) {
-      return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
-    }
-    if (
-      normalizeScenarioOpeningForCompare(lastSubstantive) ===
-      normalizeScenarioOpeningForCompare(SCENARIO_3_OPENING)
-    ) {
-      return SCENARIO_3_OPENING;
-    }
-  }
 
-  // Resume / delivery-ref fallback when transcript lacks explicit probe lines.
-  if (delivery?.danielRepairAsked) {
+  // Repair may be audibly delivered before the transcript row exists — do not keep Sophie footer.
+  if (delivery?.danielRepairAsked || delivery?.danielRepairDelivered) {
     const lastRepair = lastScenarioCRepairAssistantContent(scoped);
     if (lastRepair) {
       return resolveScenarioCRepairModalPromptFromText(lastRepair);
     }
+    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
-  if (delivery?.sophiePerspectiveAsked && transcriptHasSophiePerspectiveProbe(scoped)) {
+
+  const lastSubstantive = getLastSubstantiveScenarioModalQuestion(scoped);
+  if (lastSubstantive) {
+    const fromTranscript = resolveSituation3ModalPromptFromSubstantiveQuestion(lastSubstantive);
+    if (fromTranscript) return fromTranscript;
+  }
+
+  // Resume / delivery-ref fallback when transcript lacks explicit probe lines.
+  if (
+    delivery?.sophiePerspectiveAsked &&
+    (transcriptHasSophiePerspectiveProbe(scoped) || !lastSubstantive)
+  ) {
     return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
   }
 
@@ -166,6 +191,16 @@ export function readSituation3DeliveryState(
   return {
     sophiePerspectiveAsked: transcriptHasSophiePerspectiveProbe(assistantForModal),
     danielRepairAsked: transcriptHasDanielRepairProbe(assistantForModal),
+  };
+}
+
+export function readSituation3DeliveryStateForModal(
+  assistantForModal: ScenarioModalTranscriptTurn[],
+  opts?: Pick<Situation3ModalDeliveryState, 'danielRepairDelivered'>,
+): Situation3ModalDeliveryState {
+  return {
+    ...readSituation3DeliveryState(assistantForModal),
+    ...(opts?.danielRepairDelivered ? { danielRepairDelivered: true } : {}),
   };
 }
 

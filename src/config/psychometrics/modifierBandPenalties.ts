@@ -2,8 +2,9 @@
  * Psychometric modifier band penalties and per-instrument score cutoffs.
  * Applied to final gate weighted score (negative modifiers only; floors handled separately).
  *
- * Strong (0 modifier) requires strictly better than {@link REFERENCE_PSYCHOMETRIC_CALIBRATION}.
- * At or below reference → average / below-average / poor bands (modifier reduction).
+ * Live modifier instruments: BRS, trait anxiety, SCS-SF, GASP, RSES.
+ * Floor breaches fail independently and contribute 0 for that instrument.
+ * The summed live modifier is clamped to {@link PSYCHOMETRIC_MODIFIER_MIN} (Amoraea heuristic).
  */
 
 export {
@@ -14,12 +15,18 @@ export {
 export const PSYCHOMETRIC_MODIFIER_STRONG = 0;
 export const PSYCHOMETRIC_MODIFIER_AVERAGE = -0.1;
 export const PSYCHOMETRIC_MODIFIER_POOR = -0.25;
-/** SCS-SF below-average band (between strong and low). */
+/** SCS-SF mild-concern band (still above the admission floor). */
 export const PSYCHOMETRIC_MODIFIER_BELOW_AVERAGE = -0.05;
-/** RSES low self-esteem band (between average and very low). */
+/** Strong-concern band for still-admissible scores (e.g. RSES 21). */
 export const PSYCHOMETRIC_MODIFIER_LOW = -0.15;
 /** MSPSS isolated / high dependency risk. */
 export const PSYCHOMETRIC_MODIFIER_ISOLATED = -0.2;
+/**
+ * Lower bound on the summed live psychometric modifier (BRS + anxiety + SCS-SF + GASP + RSES).
+ * Amoraea heuristic — not a research-derived coefficient. Hard floors still fail independently.
+ */
+export const PSYCHOMETRIC_MODIFIER_MIN = -0.35;
+export const PSYCHOMETRIC_MODIFIER_CAP_SOURCE = 'amoraea_heuristic' as const;
 
 /** GASP externalization mean bands (4-item subscale, 1–7). Strong requires mean &lt; reference (4.0). */
 export const GASP_STRONG_MAX_MEAN = 3.99;
@@ -38,10 +45,15 @@ export const BRS_AVERAGE_MIN = 2.5;
 export const ANXIETY_STRONG_MAX = 3;
 export const ANXIETY_AVERAGE_MAX = 3.5;
 
-/** SCS-SF self-compassion (1–5 mean). Strong requires score &gt; reference (3.25). */
+/**
+ * SCS-SF self-compassion (1–5 mean). Modifier bands sit entirely above the admission floor (&lt; 2.5).
+ * Strong requires score ≥ 3.3 (above reference 3.25).
+ */
 export const SCS_SF_STRONG_MIN = 3.3;
-export const SCS_SF_BELOW_AVERAGE_MIN = 2.5;
-export const SCS_SF_LOW_MIN = 2.0;
+/** Mild concern: 2.90–3.29. */
+export const SCS_SF_BELOW_AVERAGE_MIN = 2.9;
+/** Moderate concern: 2.50–2.89. Below 2.50 is the hard floor, not a modifier band. */
+export const SCS_SF_LOW_MIN = 2.5;
 
 /** Dweck growth mindset (1–6 mean). Strong requires score &gt; reference (3.1). Average widened to 3.0–3.24. */
 export const DWECK_STRONG_MIN = 3.25;
@@ -56,10 +68,15 @@ export const AAQ2_HIGH_AVOIDANCE_MIN = 25;
 export const AAQ2_LOW_AVOIDANCE_MAX = 14;
 export const AAQ2_STRAIGHT_LINE_UNIQUE_MAX = 2;
 
-/** RSES sum (10–40). Strong requires score &gt; reference (21). */
-export const RSES_STRONG_MIN = 22;
-export const RSES_AVERAGE_MIN = 21;
-export const RSES_LOW_MIN = 19;
+/**
+ * RSES sum (10–40). Modifier bands sit entirely above the Amoraea admissions floor (≤ 20).
+ * Strong / healthy: ≥ 24. Reference calibration (21) is the last admissible modifier band.
+ */
+export const RSES_STRONG_MIN = 24;
+/** Moderate concern: 22–23. */
+export const RSES_AVERAGE_MIN = 22;
+/** Strong concern: 21 only. ≤ 20 is the hard floor, not a modifier band. */
+export const RSES_LOW_MIN = 21;
 export const RSES_LOW_SELF_ESTEEM_MAX = 18;
 export const RSES_STRAIGHT_LINE_UNIQUE_MAX = 2;
 

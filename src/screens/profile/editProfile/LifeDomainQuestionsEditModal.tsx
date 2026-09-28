@@ -28,24 +28,10 @@ import {
   saveLifeDomainAnswersFromOnboarding,
   type LifeDomainAnswersMap,
 } from '@/screens/profile/editProfile/lifeDomainProfileService';
-import {
-  BottomSheet,
-  OptionPickerTrigger,
-  type OptionAnchor,
-} from '@/screens/profile/editProfile/BottomSheet';
-import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
-import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { LifeDomainQuestionSuggestionBlock } from '@/datingProfile/screens/onboarding/modals/components/LifeDomainQuestionSuggestionBlock';
 import { submitLifeDomainQuestionSuggestion } from '@/datingProfile/screens/onboarding/modals/lifeDomainQuestionSuggestion';
 import { styles as lifeDomainQuestionStyles } from '@/datingProfile/screens/onboarding/modals/LifeDomainQuestionsModal.styled';
-
-type PickerSheet = {
-  title: string;
-  options: { label: string; value: string }[];
-  selectedValue: string;
-  onPick: (value: string) => void;
-  anchor?: OptionAnchor;
-};
 
 type Props = {
   visible: boolean;
@@ -75,7 +61,6 @@ export const LifeDomainQuestionsEditModal: React.FC<Props> = ({
   const [answers, setAnswers] = useState<LifeDomainAnswersMap>({});
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [pickerSheet, setPickerSheet] = useState<PickerSheet | null>(null);
   const [questionSuggestion, setQuestionSuggestion] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
   const answersBaselineRef = useRef<LifeDomainAnswersMap>({});
@@ -173,10 +158,6 @@ export const LifeDomainQuestionsEditModal: React.FC<Props> = ({
     const value = answers[domainId]?.[q.id] ?? '';
     const suffix = questionLabelSuffix(q);
     if (q.input === 'dropdown' && q.options?.length) {
-      const optionRows = [{ label: 'Select an option', value: '' }, ...q.options];
-      const selectedLabel =
-        optionRows.find((o) => o.value === value)?.label ?? 'Select an option';
-
       return (
         <View key={q.id} style={styles.questionBlock}>
           <View style={lifeDomainQuestionStyles.questionTextRow}>
@@ -193,25 +174,16 @@ export const LifeDomainQuestionsEditModal: React.FC<Props> = ({
               </Text>
             ) : null}
           </View>
-          <OptionPickerTrigger
-            style={styles.dropdownTrigger}
-            onOpen={(anchor) =>
-              setPickerSheet({
-                title: q.text,
-                options: optionRows,
-                selectedValue: value,
-                anchor,
-                onPick: (picked) => setAnswer(q.id, picked),
-              })
-            }
-          >
-            <SelectTriggerRow
-              label={selectedLabel}
-              isPlaceholder={!value}
-              labelStyle={styles.dropdownTriggerText}
-              placeholderStyle={styles.dropdownPlaceholder}
-            />
-          </OptionPickerTrigger>
+          <AppSelect
+            bare
+            value={value}
+            options={q.options}
+            onValueChange={(picked) => setAnswer(q.id, picked)}
+            allowUnset
+            unsetLabel="Select an option"
+            placeholder="Select an option"
+            sheetTitle={q.text}
+          />
         </View>
       );
     }
@@ -331,24 +303,6 @@ export const LifeDomainQuestionsEditModal: React.FC<Props> = ({
               style={styles.footerBtn}
             />
           </View>
-
-          <BottomSheet
-            visible={!!pickerSheet}
-            title={pickerSheet?.title}
-            anchor={pickerSheet?.anchor}
-            onClose={() => setPickerSheet(null)}
-          >
-            {pickerSheet ? (
-              <SingleChoiceOptionList
-                options={pickerSheet.options}
-                value={pickerSheet.selectedValue}
-                onSelect={(next) => {
-                  pickerSheet.onPick(next);
-                  setPickerSheet(null);
-                }}
-              />
-            ) : null}
-          </BottomSheet>
         </SafeAreaView>
       </View>
     </Modal>

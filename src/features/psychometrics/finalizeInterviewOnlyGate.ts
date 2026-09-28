@@ -125,6 +125,9 @@ function rollupPayloadFromSuccess(result: AdminRecalculateSuccess): Record<strin
     ...modifierFields,
     disclosure_calibration: result.disclosure_calibration,
     ego_development_level: result.ego_development_level,
+    repair_source_signals: result.repair_source_signals,
+    regulation_source_signals: result.regulation_source_signals,
+    weighted_score_breakdown: result.gate.weightedScoreBreakdown ?? null,
     incomplete_reason: null,
   };
 }

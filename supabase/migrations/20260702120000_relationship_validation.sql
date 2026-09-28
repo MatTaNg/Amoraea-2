@@ -35,18 +35,21 @@ COMMENT ON TABLE public.relationship_validation_records IS
 
 ALTER TABLE public.relationship_validation_records ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS relationship_validation_records_select_own ON public.relationship_validation_records;
 CREATE POLICY relationship_validation_records_select_own
   ON public.relationship_validation_records
   FOR SELECT
   TO authenticated
   USING (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS relationship_validation_records_insert_own ON public.relationship_validation_records;
 CREATE POLICY relationship_validation_records_insert_own
   ON public.relationship_validation_records
   FOR INSERT
   TO authenticated
   WITH CHECK (auth.uid() = user_id);
 
+DROP POLICY IF EXISTS relationship_validation_records_update_own ON public.relationship_validation_records;
 CREATE POLICY relationship_validation_records_update_own
   ON public.relationship_validation_records
   FOR UPDATE

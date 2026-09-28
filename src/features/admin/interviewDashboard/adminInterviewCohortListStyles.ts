@@ -158,6 +158,41 @@ export const cohortListStyles = StyleSheet.create({
     fontSize: 9,
     flexBasis: '100%' as const,
   },
+  needsReviewRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  needsReviewChip: {
+    borderWidth: 1.5,
+    borderColor: 'rgba(217, 122, 58, 0.55)',
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(217, 122, 58, 0.08)',
+  },
+  needsReviewChipActive: {
+    backgroundColor: 'rgba(217, 122, 58, 0.22)',
+    borderColor: 'rgba(217, 122, 58, 0.85)',
+  },
+  needsReviewChipText: {
+    color: '#D97A3A',
+    fontSize: 13,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  needsReviewChipTextActive: {
+    color: '#F5C4A0',
+  },
+  needsReviewHint: {
+    color: '#7A9ABE',
+    fontSize: 11,
+    flexShrink: 1,
+  },
   cardsContainer: {
     padding: 20,
     gap: 12,

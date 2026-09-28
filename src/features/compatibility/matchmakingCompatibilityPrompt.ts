@@ -38,16 +38,13 @@ When hard-blocked, compatibilityScore should still be computed but capped at 25 
 - Narrative/lifestyle fit: bio, hobbies, archetypes (2 Jungian archetypes each), optional typologies (MBTI, Enneagram, etc.), dating pace, space for relationship, sex interests overlap.
 - Reward concrete overlap; penalize vague or contradictory self-presentation vs interview signals.
 
-**sexualCommunicationAdjustment (soft, not a weighted pillar)**
-- If both sexualCommunicationMean present: diff ≤ 0.5 → +0.03; diff > 1.5 → −0.05; else 0.
-
 ## Final score formula (must match exactly)
 
 weightedStyle = style × styleConfidence + 0.5 × (1 − styleConfidence)
 where styleConfidence = average of both users' communicationStyle.overallConfidence, or 0.5 if missing.
 
 compatibilityScoreNormalized = clamp(
-  attachment × 0.35 + values × 0.30 + weightedStyle × 0.20 + semantic × 0.15 + sexualCommunicationAdjustment,
+  attachment × 0.35 + values × 0.30 + weightedStyle × 0.20 + semantic × 0.15,
   0, 1
 ) × dealbreakerMultiplier
 

@@ -14,7 +14,10 @@ import {
 
 import { isIrrelevantAnswerRetryAssistantLine } from '@features/aria/interviewAnswerRelevance';
 import {
+  applyMoment4OrientationReferenceCard,
   applyMoment4ThresholdReferenceCard,
+  applyMomentSupportConditionalReferenceCard,
+  applyMomentSupportReferenceCard,
   isAssistantBubbleForTranscript,
   isResumeOrScenarioReplayUiPrompt,
 } from '@features/aria/interviewReferenceCardResumeHelpers';
@@ -109,12 +112,20 @@ import {
   looksLikeScenarioCRepairAsDanielQuestion,
 } from '@features/aria/scenarioCPromptDetection';
 import {
+  isIncompleteMoment4OrientationLeadSentence,
   isIncompleteMoment4ThresholdLeadSentence,
+  isIncompleteMomentSupportLeadSentence,
   looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdParaphraseInProgress,
   looksLikeMoment4ThresholdQuestion,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportQuestion,
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_QUESTION_CARD_BODY,
 } from '@features/aria/moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from '@features/aria/moment4SpecificityFollowUp';
 
@@ -136,7 +147,7 @@ import {
 } from '@features/aria/situation2ExactModalPrompt';
 import {
   applySituation3ReferenceCard,
-  readSituation3DeliveryState,
+  readSituation3DeliveryStateForModal,
 } from '@features/aria/situation3ExactModalPrompt';
 import { transcriptContainsScenarioBJamesDifferentlyProbe } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import {
@@ -301,7 +312,32 @@ export function restoreReferenceCardPromptFromAssessableQuestion(
       deps as ApplyReferenceCardFromAssistantSpeechDeps,
       assistantForModal,
       q,
+      readSituation3ModalDeliveryState(
+        deps as ApplyReferenceCardFromAssistantSpeechDeps,
+        assistantForModal,
+      ),
     );
+    restoreLastQuestion();
+    return;
+  }
+  if (
+    looksLikeMomentSupportConditionalProbe(q) ||
+    q === MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY
+  ) {
+    applyMomentSupportConditionalReferenceCard(deps);
+    restoreLastQuestion();
+    return;
+  }
+  if (looksLikeMomentSupportQuestion(q) || q === MOMENT_SUPPORT_QUESTION_CARD_BODY) {
+    applyMomentSupportReferenceCard(deps);
+    restoreLastQuestion();
+    return;
+  }
+  if (
+    looksLikeMoment4OrientationQuestion(q) ||
+    q === MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY
+  ) {
+    applyMoment4OrientationReferenceCard(deps);
     restoreLastQuestion();
     return;
   }
@@ -382,6 +418,15 @@ function buildAssistantForModal(
     }));
 }
 
+function readSituation3ModalDeliveryState(
+  deps: ApplyReferenceCardFromAssistantSpeechDeps,
+  assistantForModal: Array<{ role: string; content?: string | null }>,
+) {
+  return readSituation3DeliveryStateForModal(assistantForModal, {
+    danielRepairDelivered: deps.s3RepairProbeDeliveredRef?.current === true,
+  });
+}
+
 function applySituation1ExactModalPrompt(
 
   deps: ApplyReferenceCardFromAssistantSpeechDeps,
@@ -428,7 +473,12 @@ export function runApplyReferenceCardFromAssistantSpeech(
     looksLikeScenarioCRepairAsDanielQuestion(cleaned) ||
     isScenarioCRepairAssistantPrompt(cleaned)
   ) {
-    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    applySituation3ReferenceCard(
+      deps,
+      assistantForModal,
+      cleaned,
+      readSituation3ModalDeliveryState(deps, assistantForModal),
+    );
     return;
   }
 
@@ -436,7 +486,12 @@ export function runApplyReferenceCardFromAssistantSpeech(
     looksLikeScenarioCSophiePerspectiveQuestion(cleaned) ||
     looksLikeScenarioCSophieRolePlayMisparaphraseQuestion(cleaned)
   ) {
-    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    applySituation3ReferenceCard(
+      deps,
+      assistantForModal,
+      cleaned,
+      readSituation3ModalDeliveryState(deps, assistantForModal),
+    );
     return;
   }
 
@@ -444,7 +499,12 @@ export function runApplyReferenceCardFromAssistantSpeech(
     textContainsScenarioCVignetteBody(cleaned) ||
     detectActiveScenarioFromMessage(cleaned)?.label === 'Situation 3'
   ) {
-    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    applySituation3ReferenceCard(
+      deps,
+      assistantForModal,
+      cleaned,
+      readSituation3ModalDeliveryState(deps, assistantForModal),
+    );
     return;
   }
 
@@ -519,23 +579,37 @@ export function runApplyReferenceCardFromAssistantSpeech(
   }
 
   if (
+    looksLikeMomentSupportConditionalProbe(cleaned) ||
+    cleaned === MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY
+  ) {
+    applyMomentSupportConditionalReferenceCard(deps);
+    return;
+  }
+
+  if (
+    looksLikeMomentSupportQuestion(cleaned) ||
+    isIncompleteMomentSupportLeadSentence(cleaned) ||
+    cleaned === MOMENT_SUPPORT_QUESTION_CARD_BODY
+  ) {
+    applyMomentSupportReferenceCard(deps);
+    return;
+  }
+
+  if (
+    looksLikeMoment4OrientationQuestion(cleaned) ||
+    isIncompleteMoment4OrientationLeadSentence(cleaned) ||
+    cleaned === MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY
+  ) {
+    applyMoment4OrientationReferenceCard(deps);
+    return;
+  }
+
+  if (
     looksLikeMoment4ThresholdQuestion(cleaned) ||
     isIncompleteMoment4ThresholdLeadSentence(cleaned) ||
     looksLikeMoment4ThresholdParaphraseInProgress(cleaned)
   ) {
-    const personalScenario = {
-      label: MOMENT_4_PERSONAL_LABEL,
-      text: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
-    };
-    if (deps.committedScenarioRef) {
-      deps.committedScenarioRef.current = personalScenario;
-    }
-    deps.setReferenceCardScenario(personalScenario);
-    deps.setReferenceCardPrompt(null);
-    deps.setInterviewUiPhase('scenario_active');
-    if (deps.lastQuestionTextRef) {
-      deps.lastQuestionTextRef.current = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
-    }
+    applyMoment4ThresholdReferenceCard(deps);
     return;
   }
 
@@ -720,8 +794,12 @@ export function runApplyReferenceCardFromAssistantSpeech(
     }
 
     if (scenario.label === 'Situation 3') {
-      const delivery = readSituation3DeliveryState(assistantForModal);
-      applySituation3ReferenceCard(deps, assistantForModal, cleaned, delivery);
+      applySituation3ReferenceCard(
+        deps,
+        assistantForModal,
+        cleaned,
+        readSituation3ModalDeliveryState(deps, assistantForModal),
+      );
       return;
     }
 
@@ -772,7 +850,12 @@ export function runApplyReferenceCardFromAssistantSpeech(
   }
 
   if (deps.committedScenarioRef.current.label === 'Situation 3') {
-    applySituation3ReferenceCard(deps, assistantForModal, cleaned);
+    applySituation3ReferenceCard(
+      deps,
+      assistantForModal,
+      cleaned,
+      readSituation3ModalDeliveryState(deps, assistantForModal),
+    );
     return;
   }
 

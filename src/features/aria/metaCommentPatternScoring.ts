@@ -94,6 +94,13 @@ const SKIP_REQUEST_RES: RegExp[] = [
   /\bi'?ll\s+pass\b/i,
   /\bpass\s+on\s+this\b/i,
   /\bskip\s+(this|it)\b/i,
+  /** "Can I skip this question?" / "Could we skip this one?" */
+  /\b(can|could|may)\s+(i|we)\s+skip\b/i,
+  /\b(can|could|may)\s+(i|we)\s+pass\s+on\b/i,
+  /\bi\s+want\s+to\s+skip\b/i,
+  /\bi\s+would\s+like\s+to\s+skip\b/i,
+  /\blet'?s\s+skip\s+(this|it|the\s+question)\b/i,
+  /\bskip\s+this\s+question\b/i,
   /\b^n(ext)?\.?\s*$/i,
   /\bnext\s+one\b/i,
   /\b^(next|skip)\b/i,
@@ -106,6 +113,22 @@ const SKIP_REQUEST_RES: RegExp[] = [
   /\bi'?d\s+prefer\s+not\s+to\b/i,
   /\bi'?m\s+not\s+going\s+to\s+answer\s+that\b/i,
 ];
+
+/** Unambiguous skip asks — high confidence so LLM cannot reclassify as confusion. */
+const CLEAR_SKIP_REQUEST_RES: RegExp[] = [
+  /\b(can|could|may)\s+(i|we)\s+skip(\s+this)?(\s+question|\s+one)?\b/i,
+  /\bi\s+(want|would\s+like)\s+to\s+skip(\s+this)?(\s+question|\s+one)?\b/i,
+  /\blet'?s\s+skip(\s+this)?(\s+question|\s+one)?\b/i,
+  /\bskip\s+this\s+question\b/i,
+  /^\s*skip(\s+it|\s+this(\s+one)?)?\s*[.!]?\s*$/i,
+];
+
+/** True for clear skip phrasing even when hybrid meta mislabels the turn. */
+export function looksLikeClearSkipRequestPhrase(text: string): boolean {
+  const t = text.trim();
+  if (!t || wordCount(t) > 22) return false;
+  return CLEAR_SKIP_REQUEST_RES.some((re) => re.test(t));
+}
 
 /** User believes they already answered — verified client-side against transcript. */
 const ALREADY_ANSWERED_RES: RegExp[] = [
@@ -204,6 +227,9 @@ export const WEAK_THRESHOLD = 0.35;
 export function skipRequestScore(text: string): number {
   const t = text.trim();
   if (!t || wordCount(t) > 22) return 0;
+  if (looksLikeClearSkipRequestPhrase(t)) {
+    return Math.max(0.95, patternScore(t, SKIP_REQUEST_RES));
+  }
   return patternScore(t, SKIP_REQUEST_RES);
 }
 

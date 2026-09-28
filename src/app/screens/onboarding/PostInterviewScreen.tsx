@@ -39,6 +39,7 @@ import { useRedirectRelationshipValidationFromStandardPostInterview } from '@fea
 import { useRedirectPostInterviewLaunchWhenEnabled } from '@features/onboarding/postInterviewLaunchMode';
 import { ValidationFlowOptInCard } from '@features/relationshipValidation/ValidationFlowOptInCard';
 import { PostInterviewReferFriendSection } from '@features/referrals/PostInterviewReferFriendSection';
+import { SmsMarketingOptInSettingsField } from '@/shared/components/SmsMarketingOptInSettingsField';
 
 const BG = '#0a0a0f';
 const ACCENT = '#3b82f6';
@@ -489,6 +490,11 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
           <Text style={styles.stayLead}>
             We will email you once your application has been reviewed or when the app goes live!
           </Text>
+          {userId ? (
+            <View style={styles.smsOptInWrap}>
+              <SmsMarketingOptInSettingsField userId={userId} />
+            </View>
+          ) : null}
           <Text style={styles.staySub}>
             If you would like SMS updates, enter your number below and tap Save. Otherwise we&apos;ll use your sign-in
             email for launch and review news.
@@ -677,6 +683,11 @@ const styles = StyleSheet.create({
     fontSize: 15,
     lineHeight: 22,
     color: 'rgba(255,255,255,0.88)',
+    marginBottom: 12,
+  },
+  smsOptInWrap: {
+    width: '100%',
+    marginTop: 4,
     marginBottom: 12,
   },
   staySub: {

@@ -533,6 +533,17 @@ export async function applyPsychometricModifierToAttempt(
           uncertainty_breakdown: uncertaintyForDb,
         }
       : {}),
+    ...(attempt.weighted_score_breakdown != null &&
+    typeof attempt.weighted_score_breakdown === 'object' &&
+    !Array.isArray(attempt.weighted_score_breakdown)
+      ? {
+          weighted_score_breakdown: {
+            ...(attempt.weighted_score_breakdown as Record<string, unknown>),
+            psychometricModifier: result.modifier,
+            finalModifiedScore,
+          },
+        }
+      : {}),
   };
 
   let { error } = await supabase

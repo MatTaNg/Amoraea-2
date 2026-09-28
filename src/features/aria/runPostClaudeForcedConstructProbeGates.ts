@@ -3,6 +3,7 @@ import type {
   PostClaudeAssistantTurnDeps,
   PostClaudeAssistantTurnParams,
 } from '@features/aria/postClaudeAssistantTurnTypes';
+import { runPostClaudeMoment4OrientationForcedProbeGate } from '@features/aria/runPostClaudeMoment4OrientationForcedProbeGate';
 import { runPostClaudeMoment4ThresholdForcedProbeGate } from '@features/aria/runPostClaudeMoment4ThresholdForcedProbeGate';
 import { runPostClaudeScenarioAContemptForcedProbeGate } from '@features/aria/runPostClaudeScenarioAContemptForcedProbeGate';
 import { runPostClaudeScenarioBAppreciationForcedProbeGate } from '@features/aria/runPostClaudeScenarioBAppreciationForcedProbeGate';
@@ -112,6 +113,20 @@ export async function runPostClaudeForcedConstructProbeGates(
     if (s3Repair) {
       return s3Repair;
     }
+  }
+
+  const m4Orientation = skipMoment4ThresholdForced
+    ? null
+    : await runPostClaudeMoment4OrientationForcedProbeGate(
+        deps,
+        params,
+        text,
+        draft,
+        speakAssistantTurn,
+        jamesState,
+      );
+  if (m4Orientation) {
+    return m4Orientation;
   }
 
   const m4Threshold = skipMoment4ThresholdForced

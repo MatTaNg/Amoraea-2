@@ -57,16 +57,14 @@ export function buildDepthSignalModifierLines(
   }
 
   const defenseCount = parseDefenseCount(options?.defensePatterns);
-  const defenseCountCapped = Math.min(4, defenseCount) as 0 | 1 | 2 | 3 | 4;
+  const defenseCountCapped = Math.min(3, defenseCount) as 0 | 1 | 2 | 3;
   const defenseDelta = DEFENSE_PATTERN_COUNT_MODIFIERS[defenseCountCapped];
   if (defenseCount === 1) {
-    lines.push({ label: 'Defense patterns', detail: '1 immature defense flagged (projection excluded)', delta: defenseDelta });
+    lines.push({ label: 'Defense patterns', detail: '1 immature defense flagged', delta: defenseDelta });
   } else if (defenseCount === 2) {
-    lines.push({ label: 'Defense patterns', detail: '2 immature defenses flagged (projection excluded)', delta: defenseDelta });
-  } else if (defenseCount === 3) {
-    lines.push({ label: 'Defense patterns', detail: '3 immature defenses flagged (projection excluded)', delta: defenseDelta });
-  } else if (defenseCount >= 4) {
-    lines.push({ label: 'Defense patterns', detail: '4+ immature defenses flagged (projection excluded)', delta: defenseDelta });
+    lines.push({ label: 'Defense patterns', detail: '2 immature defenses flagged', delta: defenseDelta });
+  } else if (defenseCount >= 3) {
+    lines.push({ label: 'Defense patterns', detail: '3 immature defenses flagged', delta: defenseDelta });
   }
 
   const m4 = (options?.moment4Concreteness ?? '').toString().trim().toLowerCase();

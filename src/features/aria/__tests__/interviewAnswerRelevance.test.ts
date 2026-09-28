@@ -39,6 +39,17 @@ describe('interviewAnswerRelevance', () => {
     expect(looksLikeUnassessableScenarioAnswer(answer)).toBe(false);
   });
 
+  it('does not treat Scenario B James-differently celebration answers ending in "she was" as cut-offs', () => {
+    const answers = [
+      "Could've celebrated with her, asked her how she went, and told her how proud of her she was.",
+      'Got excited with her, asked her how she went, and told her how proud of her she was.',
+    ];
+    for (const answer of answers) {
+      expect(looksLikeIncompleteCutOffUserAnswer(answer)).toBe(false);
+      expect(looksLikeUnassessableScenarioAnswer(answer)).toBe(false);
+    }
+  });
+
   it('flags mid-sentence cut-offs even when a character name is present', () => {
     expect(looksLikeIncompleteCutOffUserAnswer('If I were Ryan, I would')).toBe(true);
     expect(looksLikeIncompleteCutOffUserAnswer("If I'm right and I really")).toBe(true);
@@ -188,6 +199,7 @@ describe('interviewAnswerRelevance', () => {
     expect(looksLikeInterviewProcessMetaComment('Give a question.')).toBe(true);
     expect(looksLikeInterviewProcessMetaComment('Do you have a question?')).toBe(true);
     expect(looksLikeInterviewProcessMetaComment('What is the question?')).toBe(true);
+    expect(looksLikeInterviewProcessMetaComment('Can I skip this question?')).toBe(false);
     expect(looksLikeInterviewProcessQuestionRepeatRequest('Give a question.')).toBe(true);
     expect(looksLikeInterviewProcessQuestionRepeatRequest('Give a ques-')).toBe(true);
     expect(looksLikeInterviewProcessQuestionRepeatRequest('Can you ask?')).toBe(true);

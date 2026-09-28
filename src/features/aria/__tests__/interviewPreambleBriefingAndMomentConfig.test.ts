@@ -13,6 +13,8 @@ describe('interviewPreambleBriefing', () => {
   it('buildFallbackIntroBriefingText personalizes the greeting', () => {
     const text = buildFallbackIntroBriefingText('Alex');
     expect(text).toMatch(/Good to meet you, Alex/);
+    expect(text).toMatch(/three scenarios/);
+    expect(text).toMatch(/three personal questions/);
     expect(text).toMatch(/Are you ready\?/);
   });
 
@@ -57,7 +59,8 @@ describe('interviewPreambleBriefing', () => {
     );
     expect(out).toHaveLength(3);
     expect(out[2]?.role).toBe('assistant');
-    expect(out[2]?.content).toMatch(/three situations/);
+    expect(out[2]?.content).toMatch(/three scenarios/);
+    expect(out[2]?.content).toMatch(/three personal questions/);
   });
 });
 

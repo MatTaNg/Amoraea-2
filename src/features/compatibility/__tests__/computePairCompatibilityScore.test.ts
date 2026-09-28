@@ -27,7 +27,7 @@ describe('computePairCompatibilityScore golden pipeline', () => {
     expect(result.subscores.dealbreakerMultiplier).toBe(1);
     expect(result.finalScore).toBeGreaterThan(0.7);
     expect(result.subscores.attachment).toBeGreaterThan(0.75);
-    expect(result.breakdown.capacityDiscount).toBeGreaterThanOrEqual(0);
+    expect(result.breakdown.capacityDiscount).toBe(0);
     expect(result.finalScore).toBeLessThanOrEqual(1);
   });
 
@@ -64,14 +64,15 @@ describe('computePairCompatibilityScore golden pipeline', () => {
     expect(anxiousAvoidant.finalScore).toBeLessThan(ideal.finalScore);
   });
 
-  it('low capacity user increases capacity discount in pair with ideal partner', () => {
+  it('does not apply a relational-capacity discount in ranking', () => {
     const ideal = mapMatchmakingUserToCompatibilityInputs(idealPairUserA, fixtureMappingExtras);
     const low = mapMatchmakingUserToCompatibilityInputs(lowCapacityUser, fixtureMappingExtras);
 
     const balanced = computePairCompatibilityScore(ideal, ideal);
     const mismatched = computePairCompatibilityScore(ideal, low);
 
-    expect(mismatched.breakdown.capacityDiscount).toBeGreaterThan(balanced.breakdown.capacityDiscount);
+    expect(balanced.breakdown.capacityDiscount).toBe(0);
+    expect(mismatched.breakdown.capacityDiscount).toBe(0);
   });
 
   it('exposes breakdown components that sum consistently with final score logic', () => {
@@ -82,14 +83,20 @@ describe('computePairCompatibilityScore golden pipeline', () => {
     const core =
       result.breakdown.attachment +
       result.breakdown.values +
+      result.breakdown.lifeDomain +
+      result.breakdown.concreteLifeFit +
       result.breakdown.semantic +
       result.breakdown.finance +
       result.breakdown.interviewProcess +
       result.breakdown.baseline;
 
+    expect(result.breakdown.interviewProcess).toBe(0);
+    expect(result.breakdown.baseline).toBe(0);
+    expect(result.breakdown.capacityDiscount).toBe(0);
+
     const recomputed = Math.max(
       0,
-      Math.min(1, core - result.breakdown.capacityDiscount + result.breakdown.adjustments),
+      Math.min(1, core + result.breakdown.adjustments),
     );
     expect(result.finalScore).toBeCloseTo(recomputed, 10);
   });
@@ -130,12 +137,47 @@ describe('computePairCompatibilityScore component edge cases', () => {
       capacityB: 0.8,
       interviewWeightedScoreA: 8,
       interviewWeightedScoreB: 8,
-      sexualCommAdjustment: 0.03,
+      sexualCommAdjustment: 0,
       conflictStyleAdjustment: 0,
       politicsAdjustment: 0,
       psychometricSoftAdjustment: 0,
       dealbreakerMultiplier: 0,
     });
     expect(result.finalScore).toBe(0);
+  });
+});
+
+describe('sexual communication is not a pair-ranking signal', () => {
+  function pairWithMeans(meanA: number, meanB: number) {
+    const userA = mapMatchmakingUserToCompatibilityInputs(idealPairUserA, fixtureMappingExtras);
+    const userB = mapMatchmakingUserToCompatibilityInputs(idealPairUserB, fixtureMappingExtras);
+    userA.sexualCommunicationMean = meanA;
+    userB.sexualCommunicationMean = meanB;
+    return computePairCompatibilityScore(userA, userB);
+  }
+
+  it('does not boost two similarly low scorers, two high scorers, or penalize a large mean gap', () => {
+    const lowSimilar = pairWithMeans(2.0, 2.1);
+    const highSimilar = pairWithMeans(4.8, 4.9);
+    const farApart = pairWithMeans(2.0, 4.8);
+    expect(lowSimilar.adjustments.sexualComm).toBe(0);
+    expect(highSimilar.adjustments.sexualComm).toBe(0);
+    expect(farApart.adjustments.sexualComm).toBe(0);
+    expect(lowSimilar.finalScore).toBeCloseTo(highSimilar.finalScore, 10);
+    expect(highSimilar.finalScore).toBeCloseTo(farApart.finalScore, 10);
+    expect(lowSimilar.contributionBreakdown?.adjustments.sexualDiscrepancy).toBe(0);
+  });
+
+  it('keeps the person-level score on mapped inputs for profile/research', () => {
+    const mapped = mapMatchmakingUserToCompatibilityInputs(idealPairUserA, fixtureMappingExtras);
+    expect(mapped.sexualCommunicationMean).toBe(4.0);
+  });
+
+  it('does not derive an intimacy domain score from sexual-communication similarity', () => {
+    const result = pairWithMeans(2.0, 4.8);
+    const intimacy = result.domainViews.find((d) => d.id === 'intimacy');
+    expect(intimacy?.score).toBeNull();
+    expect(intimacy?.band).toBe('Unavailable');
+    expect(intimacy?.explanation).toMatch(/preferences and needs/i);
   });
 });

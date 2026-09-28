@@ -5,6 +5,7 @@ import {
   computeCronbachAlpha,
   computeFullyCompletedCohortAnalytics,
   computeInterviewCompletedCohortAnalytics,
+  computeDepthSignalHitRateRanking,
   computeOverviewAnalytics,
   detectScoreRecovery,
   type AttemptRecord,
@@ -431,5 +432,85 @@ describe('analytics', () => {
     expect(cohort.timingAverages.profileQuestionnaireMs).toBe(900000);
     expect(cohort.timingAverages.profileEditMs).toBe(3600000);
     expect(cohort.timingAverages.totalMs).toBe(4 * 3600000);
+  });
+
+  it('ranks depth signal hit rates by frequency with average score impact', () => {
+    const baseAttempt = {
+      created_at: '2026-05-01T00:00:00Z',
+      completed_at: '2026-05-01T01:00:00Z',
+      weighted_score: 6.5,
+      modified_weighted_score: null,
+      passed: true,
+      final_gate_pass: true,
+      pillar_scores: { repair: 7 },
+      scenario_1_scores: null,
+      scenario_2_scores: null,
+      scenario_3_scores: null,
+      scenario_composites: null,
+      score_modifier: null,
+      ego_development_level: null,
+      disclosure_calibration: null,
+      moment_4_concreteness: null,
+      moment_5_concreteness: null,
+      personal_moment_emotional_vocab_density: null,
+      mentalizing_overcertainty_count: null,
+      defense_patterns: null,
+      emotion_recognition_raw_score: null,
+      gate_fail_reasons: null,
+      review_flags: null,
+      reasoning_pending: null,
+      scenario_1_recovered: false,
+      scenario_2_recovered: false,
+      scenario_3_recovered: false,
+      algorithm_era: 'current' as const,
+    };
+
+    const attempts: AttemptRecord[] = [
+      {
+        ...baseAttempt,
+        id: 'a1',
+        user_id: 'u1',
+        ego_development_level: 1,
+        depth_signal_modifier: -0.5,
+      },
+      {
+        ...baseAttempt,
+        id: 'a2',
+        user_id: 'u2',
+        ego_development_level: 1,
+        depth_signal_modifier: -0.3,
+      },
+      {
+        ...baseAttempt,
+        id: 'a3',
+        user_id: 'u3',
+        defense_patterns: { rationalization_detected: true },
+        depth_signal_modifier: -0.8,
+      },
+    ];
+
+    const ranking = computeDepthSignalHitRateRanking(attempts);
+
+    expect(ranking[0]?.id).toBe('any_depth_modifier');
+    expect(ranking[0]?.hitCount).toBe(3);
+    expect(ranking[0]?.avgScoreImpact).toBeCloseTo(-0.533, 2);
+
+    const egoLevel1 = ranking.find((r) => r.id === 'ego_level_1');
+    expect(egoLevel1?.hitCount).toBe(2);
+    expect(egoLevel1?.hitRatePct).toBe(66.7);
+    expect(egoLevel1?.avgScoreImpact).toBe(-0.4);
+
+    const rationalization = ranking.find((r) => r.id === 'defense_rationalization');
+    expect(rationalization?.hitCount).toBe(1);
+    expect(rationalization?.hitRatePct).toBe(33.3);
+    expect(rationalization?.avgScoreImpact).toBe(-0.8);
+
+    const egoIdx = ranking.findIndex((r) => r.id === 'ego_level_1');
+    const ratIdx = ranking.findIndex((r) => r.id === 'defense_rationalization');
+    expect(egoIdx).toBeLessThan(ratIdx);
+
+    for (let i = 1; i < ranking.length; i++) {
+      expect(ranking[i - 1]!.hitCount).toBeGreaterThanOrEqual(ranking[i]!.hitCount);
+    }
   });
 });

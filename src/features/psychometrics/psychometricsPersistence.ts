@@ -4,11 +4,13 @@ import {
   ASSESSMENTS,
   POST_INTERVIEW_ASSESSMENT_ORDER,
   scoreAssessment,
+  scoreLikertItemValue,
   type AssessmentId,
   type NpiEntitlementResponse,
   type PostInterviewAssessmentId,
   type PsychometricResponsesMap,
 } from './assessmentContent';
+import { PSYCHOMETRIC_BATTERY_VERSION } from '@config/algorithmVersions';
 import {
   isMissingUsersPsychometricsSd3ColumnsError,
   sd3NarcissismLegacyNarqSavePayload,
@@ -25,51 +27,54 @@ export type PsychometricResponsesRow = {
   psychometrics_anxiety_trait_responses?: unknown;
   psychometrics_scs_sf_responses?: unknown;
   psychometrics_gasp_responses?: unknown;
+  psychometrics_relationship_growth_beliefs_responses?: unknown;
+  psychometrics_conflict_catastrophizing_responses?: unknown;
   psychometrics_dweck_responses?: unknown;
   psychometrics_aaq2_responses?: unknown;
   psychometrics_rses_responses?: unknown;
   psychometrics_scs_public_responses?: unknown;
   psychometrics_scs_private_responses?: unknown;
   psychometrics_mspss_responses?: unknown;
+  psychometrics_amoraea_entitlement_v1_responses?: unknown;
   psychometrics_sd3_narcissism_responses?: unknown;
   psychometrics_narq_s_responses?: unknown;
   psychometrics_npi_entitlement_responses?: unknown;
   psychometrics_rfq_responses?: unknown;
 };
 
-const PSYCHOMETRICS_RESPONSES_SELECT = `
-  psychometrics_brs_responses,
-  psychometrics_anxiety_trait_responses,
-  psychometrics_scs_sf_responses,
-  psychometrics_gasp_responses,
-  psychometrics_dweck_responses,
-  psychometrics_aaq2_responses,
-  psychometrics_rses_responses,
-  psychometrics_scs_public_responses,
-  psychometrics_scs_private_responses,
-  psychometrics_mspss_responses,
-  psychometrics_sd3_narcissism_responses,
-  psychometrics_narq_s_responses,
-  psychometrics_npi_entitlement_responses,
-  psychometrics_rfq_responses
-`;
+function psychometricResponseColumnsForAssessments(assessmentIds: readonly AssessmentId[]): string[] {
+  const columns: string[] = [];
+  for (const assessmentId of assessmentIds) {
+    if (assessmentId === 'sd3_narcissism') {
+      columns.push('psychometrics_sd3_narcissism_responses', 'psychometrics_narq_s_responses');
+      continue;
+    }
+    columns.push(`psychometrics_${assessmentId}_responses`);
+  }
+  return [...new Set(columns)];
+}
+
+const STABLE_BATTERY_ASSESSMENT_IDS = ASSESSMENT_ORDER.filter((assessmentId) => {
+  const assessment = ASSESSMENTS[assessmentId];
+  return !('confidence' in assessment) || assessment.confidence !== 'experimental';
+});
+
+/** Response JSON columns for the active pre-interview battery. */
+export const PSYCHOMETRICS_RESPONSES_SELECT = psychometricResponseColumnsForAssessments(
+  ASSESSMENT_ORDER,
+).join(',\n  ');
+
+/** Active battery minus experimental instruments — used if v2 columns are not in schema cache yet. */
+const PSYCHOMETRICS_RESPONSES_SELECT_STABLE = psychometricResponseColumnsForAssessments(
+  STABLE_BATTERY_ASSESSMENT_IDS,
+).join(',\n  ');
 
 /** When 20260628140000_users_psychometrics_sd3_narcissism.sql is not applied yet. */
-const PSYCHOMETRICS_RESPONSES_SELECT_LEGACY_SD3 = `
-  psychometrics_brs_responses,
-  psychometrics_anxiety_trait_responses,
-  psychometrics_scs_sf_responses,
-  psychometrics_gasp_responses,
-  psychometrics_dweck_responses,
-  psychometrics_aaq2_responses,
-  psychometrics_rses_responses,
-  psychometrics_scs_public_responses,
-  psychometrics_scs_private_responses,
-  psychometrics_mspss_responses,
-  psychometrics_narq_s_responses,
-  psychometrics_npi_entitlement_responses,
-  psychometrics_rfq_responses
-`;
+const PSYCHOMETRICS_RESPONSES_SELECT_LEGACY_SD3 = psychometricResponseColumnsForAssessments(
+  STABLE_BATTERY_ASSESSMENT_IDS.filter((id) => id !== 'sd3_narcissism'),
+)
+  .concat(['psychometrics_narq_s_responses'])
+  .join(',\n  ');
 
 function hasStoredResponses(value: unknown): boolean {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -97,6 +102,12 @@ function isAssessmentPersisted(assessmentId: AssessmentId, row: PsychometricResp
       return hasStoredResponses(row.psychometrics_scs_sf_responses);
     case 'gasp':
       return hasStoredResponses(row.psychometrics_gasp_responses);
+    case 'relationship_growth_beliefs':
+      return hasStoredResponses(row.psychometrics_relationship_growth_beliefs_responses);
+    case 'conflict_catastrophizing':
+      return hasStoredResponses(row.psychometrics_conflict_catastrophizing_responses);
+    case 'amoraea_entitlement_v1':
+      return hasStoredResponses(row.psychometrics_amoraea_entitlement_v1_responses);
     case 'dweck':
       return hasStoredResponses(row.psychometrics_dweck_responses);
     case 'aaq2':
@@ -110,7 +121,9 @@ function isAssessmentPersisted(assessmentId: AssessmentId, row: PsychometricResp
     case 'rfq':
       return hasStoredResponses(row.psychometrics_rfq_responses);
     default:
-      return false;
+      return hasStoredResponses(
+        (row as Record<string, unknown>)[`psychometrics_${assessmentId}_responses`],
+      );
   }
 }
 
@@ -167,6 +180,26 @@ export function buildAssessmentSavePayload(
         scores.total as number,
       ),
     );
+  } else if (
+    assessmentId === 'amoraea_entitlement_v1' ||
+    assessmentId === 'relationship_growth_beliefs' ||
+    assessmentId === 'conflict_catastrophizing'
+  ) {
+    const assessment = ASSESSMENTS[assessmentId];
+    const scoredResponses: Record<number, number> = {};
+    if (!('format' in assessment)) {
+      for (const q of assessment.questions) {
+        const raw = finalResponses[q.id];
+        if (typeof raw !== 'number' || !Number.isFinite(raw)) continue;
+        scoredResponses[q.id] = scoreLikertItemValue(assessment, q.id, raw);
+      }
+    }
+    updatePayload[`psychometrics_${assessmentId}_responses`] = finalResponses;
+    updatePayload[`psychometrics_${assessmentId}_scored_responses`] = scoredResponses;
+    updatePayload[`psychometrics_${assessmentId}_score`] = scores.total;
+    updatePayload[`psychometrics_${assessmentId}_version`] =
+      assessment.assessmentVersion ?? assessmentId;
+    updatePayload.psychometrics_battery_version = PSYCHOMETRIC_BATTERY_VERSION;
   } else {
     updatePayload[`psychometrics_${assessmentId}_responses`] = finalResponses;
     updatePayload[`psychometrics_${assessmentId}_score`] = scores.total;
@@ -286,6 +319,16 @@ export async function verifyAllPsychometricsPersisted(userId: string): Promise<{
     .eq('id', userId)
     .maybeSingle();
 
+  if (error && isRecoverablePsychometricsSelectError(error)) {
+    const stable = await supabase
+      .from('users')
+      .select(PSYCHOMETRICS_RESPONSES_SELECT_STABLE)
+      .eq('id', userId)
+      .maybeSingle();
+    data = stable.data;
+    error = stable.error;
+  }
+
   if (error && isMissingUsersPsychometricsSd3ColumnsError(error)) {
     const legacy = await supabase
       .from('users')
@@ -396,6 +439,8 @@ export async function fetchPsychometricResponsesBundle(
   const selectVariants = [
     `${PSYCHOMETRICS_RESPONSES_SELECT}, psychometrics_sexual_communication_responses`,
     PSYCHOMETRICS_RESPONSES_SELECT,
+    `${PSYCHOMETRICS_RESPONSES_SELECT_STABLE}, psychometrics_sexual_communication_responses`,
+    PSYCHOMETRICS_RESPONSES_SELECT_STABLE,
     `${PSYCHOMETRICS_RESPONSES_SELECT_LEGACY_SD3}, psychometrics_sexual_communication_responses`,
     PSYCHOMETRICS_RESPONSES_SELECT_LEGACY_SD3,
   ];

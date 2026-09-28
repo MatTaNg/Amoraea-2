@@ -17,13 +17,9 @@ import {
   GATE_MARKER_FLOORS,
   GATE_PASS_WEIGHTED_MIN,
   PASS_THRESHOLD,
-  REFERRAL_WEIGHTED_PASS_MIN,
 } from '../../../src/config/scoring/interviewGateThresholds.ts';
-import {
-  INTERVIEW_MARKER_IDS,
-  INTERVIEW_MARKER_LABELS,
-  type InterviewMarkerId,
-} from './interviewMarkers.ts';
+import { INTERVIEW_MARKER_IDS, INTERVIEW_MARKER_LABELS, type InterviewMarkerId } from './interviewMarkers.ts';
+import { normalizeInterviewPillarScoreMap } from '../../../src/config/scoring/interviewMarkerAliases.ts';
 import {
   DEFAULT_DEFENSE_PATTERNS,
   type DefensePatternsJson,
@@ -57,7 +53,6 @@ export {
   GATE_MARKER_FLOORS,
   GATE_PASS_WEIGHTED_MIN,
   PASS_THRESHOLD,
-  REFERRAL_WEIGHTED_PASS_MIN,
 };
 
 /** @deprecated Import from @config/scoring/interviewGateThresholds — re-exported for backward compatibility. */
@@ -140,12 +135,29 @@ export interface GateResult {
   /** Normalized response_concreteness from Moment 4 scorer (absent | low | moderate | high). */
   moment4Concreteness?: string | null;
   moment5Concreteness?: string | null;
+  /** Per-pillar contribution audit; sums to raw weighted score before depth/psychometric modifiers. */
+  weightedScoreBreakdown?: WeightedScoreBreakdown | null;
 }
+
+export type WeightedScorePillarContribution = {
+  score: number | null;
+  weight: number;
+  contribution: number;
+};
+
+export type WeightedScoreBreakdown = {
+  pillars: Record<InterviewMarkerId, WeightedScorePillarContribution>;
+  rawWeightedScore: number | null;
+  skipPenaltyTotal: number;
+  depthModifier: number;
+  psychometricModifier: number | null;
+  finalModifiedScore: number | null;
+};
 
 export type ComputeGateResultOptions = {
   /** App-only: e.g. remote logging. Omitted in Node scripts. */
   onWeightedBreakdown?: (data: Record<string, unknown>) => void;
-  /** Overrides {@link GATE_PASS_WEIGHTED_MIN} for weighted average only (e.g. referral boost). Floors unchanged. */
+  /** Overrides {@link GATE_PASS_WEIGHTED_MIN} for weighted average only (tests / special paths). Floors unchanged. */
   weightedPassMin?: number;
   /** Sum of skip penalties (negative), applied after marker weighted score. Omit if no skips. */
   skipPenaltyTotal?: number;
@@ -357,7 +369,9 @@ export function computeInterviewWeightedCompositeFromPillars(
   skipPenaltyTotal = 0,
   skipAutoFail = false,
 ): number | null {
-  const adjustedScores: Record<string, number | undefined> = { ...pillarScores } as Record<string, number | undefined>;
+  const adjustedScores: Record<string, number | undefined> = {
+    ...normalizeInterviewPillarScoreMap(pillarScores),
+  } as Record<string, number | undefined>;
   if (skepticismModifier && skepticismModifier.pillarId != null && skepticismModifier.adjustment !== 0) {
     const id = String(skepticismModifier.pillarId);
     const current = adjustedScores[id];
@@ -393,7 +407,9 @@ export function computeGateResultCore(
   skepticismModifier?: { pillarId: number | string | null; adjustment: number; reason?: string } | null,
   options?: ComputeGateResultOptions,
 ): GateResult {
-  const adjustedScores: Record<string, number | undefined> = { ...pillarScores } as Record<string, number | undefined>;
+  const adjustedScores: Record<string, number | undefined> = {
+    ...normalizeInterviewPillarScoreMap(pillarScores),
+  } as Record<string, number | undefined>;
   if (skepticismModifier && skepticismModifier.pillarId != null && skepticismModifier.adjustment !== 0) {
     const id = String(skepticismModifier.pillarId);
     const current = adjustedScores[id];
@@ -419,6 +435,7 @@ export function computeGateResultCore(
     failReasonDetail: gateFailDetailForResult(null),
     modifiedWeightedScore: null,
     scoreModifier: 0,
+    weightedScoreBreakdown: null,
   });
 
   if (assessedMarkerIds.length === 0) {
@@ -505,7 +522,7 @@ export function computeGateResultCore(
 
   const _defenseCount = countDefensePatternsForDepthModifier(dpMerged);
 
-  const defenseCountCapped = Math.min(4, _defenseCount) as 0 | 1 | 2 | 3 | 4;
+  const defenseCountCapped = Math.min(3, _defenseCount) as 0 | 1 | 2 | 3;
   const defensePatternModifier = DEFENSE_PATTERN_COUNT_MODIFIERS[defenseCountCapped];
   depthSignalModifier += defensePatternModifier;
 
@@ -652,11 +669,38 @@ export function computeGateResultCore(
     | 'personalMomentConcretenessModifier'
     | 'moment4Concreteness'
     | 'moment5Concreteness'
+    | 'weightedScoreBreakdown'
   > => ({
     reviewFlags,
     scoreModifier,
     depthSignalModifier,
     modifiedWeightedScore,
+    weightedScoreBreakdown: (() => {
+      const byId = new Map(contributions.map((c) => [c.marker, c]));
+      const pillars = {} as WeightedScoreBreakdown['pillars'];
+      for (const id of INTERVIEW_MARKER_IDS) {
+        const c = byId.get(id);
+        pillars[id] = c
+          ? {
+              score: c.score,
+              weight: GATE_MARKER_BASE_WEIGHTS[id],
+              contribution: Math.round(c.weightedContribution * 1000) / 1000,
+            }
+          : {
+              score: null,
+              weight: GATE_MARKER_BASE_WEIGHTS[id],
+              contribution: 0,
+            };
+      }
+      return {
+        pillars,
+        rawWeightedScore: markerWeightedScore,
+        skipPenaltyTotal,
+        depthModifier: scoreModifier,
+        psychometricModifier: null,
+        finalModifiedScore: modifiedWeightedScore,
+      };
+    })(),
     ...(egoDevelopmentModifier != null ? { egoDevelopmentModifier } : {}),
     ...(dp ? { defensePatterns: dp } : {}),
     ...(defensePatternScoreAdjustment != null ? { defensePatternScoreAdjustment } : {}),

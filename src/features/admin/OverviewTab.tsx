@@ -178,18 +178,18 @@ function MetricRow({
   );
 }
 
-type OverviewPanelTab = 'cohort' | 'scores' | 'validity' | 'users';
-type CohortDetailTab = 'scores' | 'pillars' | 'psychometrics' | 'timing';
+type OverviewPanelTab = 'algorithm' | 'cohort' | 'reliability' | 'users';
+type CohortDetailTab = 'other_scores' | 'pillars' | 'psychometrics' | 'timing';
 
 const OVERVIEW_PANEL_TABS: { id: OverviewPanelTab; label: string }[] = [
-  { id: 'cohort', label: 'Cohort' },
-  { id: 'scores', label: 'Scores' },
-  { id: 'validity', label: 'Validity' },
+  { id: 'algorithm', label: 'Algorithm' },
+  { id: 'cohort', label: 'Cohort & timing' },
+  { id: 'reliability', label: 'Reliability' },
   { id: 'users', label: 'Users' },
 ];
 
 const COHORT_DETAIL_TABS: { id: CohortDetailTab; label: string }[] = [
-  { id: 'scores', label: 'Scores' },
+  { id: 'other_scores', label: 'Other scores' },
   { id: 'pillars', label: 'Pillars' },
   { id: 'psychometrics', label: 'Psychometrics' },
   { id: 'timing', label: 'Timing' },
@@ -612,8 +612,8 @@ export function OverviewTab() {
   const [expandedUser, setExpandedUser] = useState<string | null>(null);
   const [showAllUsers, setShowAllUsers] = useState(false);
   const [showFlippedOnly, setShowFlippedOnly] = useState(false);
-  const [panelTab, setPanelTab] = useState<OverviewPanelTab>('cohort');
-  const [cohortDetailTab, setCohortDetailTab] = useState<CohortDetailTab>('scores');
+  const [panelTab, setPanelTab] = useState<OverviewPanelTab>('algorithm');
+  const [cohortDetailTab, setCohortDetailTab] = useState<CohortDetailTab>('pillars');
   const [cohortSegmentTab, setCohortSegmentTab] = useState<string>('scenario1');
 
   const load = useCallback(async () => {
@@ -793,9 +793,216 @@ export function OverviewTab() {
       }
     >
       <Text style={styles.pageTitle}>Assessment Battery Overview</Text>
-      <Text style={styles.pageSubtitle}>Pull down to refresh · Tap any section to collapse</Text>
+      <Text style={styles.pageSubtitle}>
+        Algorithm tab: is scoring fair? · Cohort tab: timing & psychometrics · Pull down to refresh
+      </Text>
 
       <TabBar tabs={OVERVIEW_PANEL_TABS} active={panelTab} onChange={setPanelTab} />
+
+      {panelTab === 'algorithm' ? (
+        <>
+          <Section
+            title="Scenario composite averages"
+            tooltip="Mean scenario composite scores (S1–S3) for interview-completed users with a scored attempt. Use this to spot scenario difficulty drift before changing gate logic."
+          >
+            {cohortAnalytics && cohortAnalytics.scoredUsers > 0 ? (
+              <MetricsGrid>
+                <MetricRow
+                  label="Scenario 1 composite"
+                  value={formatScore(cohortAnalytics.scoreAverages.scenario1)}
+                  sublabel={`n=${cohortAnalytics.scoredUsers}`}
+                />
+                <MetricRow
+                  label="Scenario 2 composite"
+                  value={formatScore(cohortAnalytics.scoreAverages.scenario2)}
+                />
+                <MetricRow
+                  label="Scenario 3 composite"
+                  value={formatScore(cohortAnalytics.scoreAverages.scenario3)}
+                />
+              </MetricsGrid>
+            ) : (
+              <Text style={styles.alphaNote}>
+                No scored attempts yet — scenario averages appear after pillar rollup completes.
+              </Text>
+            )}
+          </Section>
+
+          <Section
+            title="Depth signal hit-rate ranking"
+            tooltip="Each row is a depth signal or modifier trigger. Sorted by how often it fires in the scored cohort. Average score impact is the mean depth modifier on affected attempts — use this to decide whether a signal is too aggressive."
+          >
+            {a.depthSignalHitRateRanking.length === 0 ? (
+              <Text style={styles.alphaNote}>No scored attempts with depth signal data.</Text>
+            ) : (
+              <>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tableCell, { flex: 2.2 }]}>Signal</Text>
+                  <Text style={styles.tableCell}>Hit rate</Text>
+                  <Text style={styles.tableCell}>Avg impact</Text>
+                </View>
+                {a.depthSignalHitRateRanking.map((row) => (
+                  <View key={row.id} style={styles.tableRow}>
+                    <Text style={[styles.tableCell, { flex: 2.2, color: '#ccc' }]}>{row.label}</Text>
+                    <Text style={styles.tableCell}>
+                      {row.hitCount} ({row.hitRatePct}%)
+                    </Text>
+                    <Text
+                      style={[
+                        styles.tableCell,
+                        {
+                          color:
+                            row.avgScoreImpact == null
+                              ? '#666'
+                              : row.avgScoreImpact < 0
+                                ? '#ef4444'
+                                : row.avgScoreImpact > 0
+                                  ? '#22c55e'
+                                  : '#aaa',
+                        },
+                      ]}
+                    >
+                      {row.avgScoreImpact != null
+                        ? `${row.avgScoreImpact > 0 ? '+' : ''}${row.avgScoreImpact.toFixed(2)}`
+                        : '—'}
+                    </Text>
+                  </View>
+                ))}
+              </>
+            )}
+          </Section>
+
+          <Section
+            title="Score distribution & 6.0 gate"
+            tooltip="Weighted score histogram with the 6.0 gate band highlighted. The flip table shows pass/fail outcomes that would change if depth modifiers were removed — use it to evaluate whether modifiers are swinging borderline users."
+          >
+            {a.thresholdAnalysis.scoreDistribution.map((bucket) => (
+              <View key={bucket.range} style={styles.bucketRow}>
+                <Text
+                  style={[
+                    styles.bucketLabel,
+                    (bucket.range === '5.5–5.9' || bucket.range === '6.0–6.4') &&
+                      styles.bucketLabelHighlight,
+                  ]}
+                >
+                  {bucket.range}
+                  {bucket.range === '5.5–5.9' ? ' ←threshold' : ''}
+                  {bucket.range === '6.0–6.4' ? ' threshold→' : ''}
+                </Text>
+                <MiniBar
+                  value={bucket.count}
+                  max={a.sampleSize.total}
+                  color={
+                    bucket.range.startsWith('5.5') || bucket.range.startsWith('6.0')
+                      ? '#f59e0b'
+                      : '#3b82f6'
+                  }
+                />
+                <Text style={styles.bucketCount}>
+                  {bucket.count} ({bucket.percentage}%)
+                </Text>
+              </View>
+            ))}
+
+            <View style={styles.divider} />
+            <MetricsGrid>
+              <MetricRow
+                label="Borderline cases (5.5–6.5)"
+                value={`${a.thresholdAnalysis.borderlineCount} attempts`}
+                tooltip="Gate decisions most sensitive to threshold or modifier tweaks."
+              />
+              <MetricRow
+                label="Decisions flipped by modifier"
+                value={`${a.thresholdAnalysis.wouldFlipWithModifier}`}
+                color={a.thresholdAnalysis.wouldFlipWithModifier > 0 ? '#f59e0b' : '#22c55e'}
+                tooltip="Pass/fail would change if depth modifiers were not applied."
+              />
+            </MetricsGrid>
+
+            {a.thresholdAnalysis.wouldFlipWithModifier > 0 ? (
+              <>
+                <TouchableOpacity
+                  style={styles.toggleButton}
+                  onPress={() => setShowFlippedOnly((v) => !v)}
+                >
+                  <Text style={styles.toggleButtonText}>
+                    {showFlippedOnly ? 'Show all' : 'Show flipped only'}
+                  </Text>
+                </TouchableOpacity>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.tableCell, { flex: 2 }]}>User</Text>
+                  <Text style={styles.tableCell}>Base</Text>
+                  <Text style={styles.tableCell}>Modified</Text>
+                  <Text style={styles.tableCell}>Flip</Text>
+                </View>
+                {modifierRows.map((row) => (
+                  <View
+                    key={row.attemptId}
+                    style={[styles.tableRow, row.flipped && styles.tableRowHighlight]}
+                  >
+                    <Text style={[styles.tableCell, { flex: 2, color: '#ccc' }]}>
+                      {row.userName ?? 'Unknown'}
+                    </Text>
+                    <Text style={[styles.tableCell, { color: row.basePass ? '#22c55e' : '#ef4444' }]}>
+                      {row.baseScore.toFixed(2)}
+                    </Text>
+                    <Text
+                      style={[styles.tableCell, { color: row.modifiedPass ? '#22c55e' : '#ef4444' }]}
+                    >
+                      {row.modifiedScore.toFixed(2)}
+                    </Text>
+                    <Text style={[styles.tableCell, { color: row.flipped ? '#f59e0b' : '#444' }]}>
+                      {row.flipped ? '⚠ YES' : '—'}
+                    </Text>
+                  </View>
+                ))}
+              </>
+            ) : null}
+          </Section>
+
+          <Section
+            title="Scenario cross-correlations"
+            tooltip="Pearson correlation between scenario composite scores. Target: 0.40–0.70. Too low = unrelated constructs; too high = redundancy."
+            defaultExpanded={false}
+          >
+            {[
+              { label: 'Scenario 1 × Scenario 2', value: a.scenarioCorrelations.s1s2 },
+              { label: 'Scenario 1 × Scenario 3', value: a.scenarioCorrelations.s1s3 },
+              { label: 'Scenario 2 × Scenario 3', value: a.scenarioCorrelations.s2s3 },
+            ].map(({ label, value }) => {
+              const color =
+                value === null
+                  ? '#666'
+                  : value >= 0.4 && value <= 0.7
+                    ? '#22c55e'
+                    : value < 0.2
+                      ? '#ef4444'
+                      : '#f59e0b';
+              const interp =
+                value === null
+                  ? 'Insufficient data'
+                  : value >= 0.4 && value <= 0.7
+                    ? 'Good — scenarios are related but distinct'
+                    : value < 0.2
+                      ? 'Too low — scenarios may be measuring unrelated constructs'
+                      : value > 0.7
+                        ? 'Too high — scenarios may be redundant'
+                        : 'Borderline — monitor as sample grows';
+              return (
+                <View key={label} style={styles.correlationRow}>
+                  <Text style={styles.correlationLabel}>{label}</Text>
+                  <View>
+                    <Text style={[styles.correlationValue, { color }]}>
+                      {value !== null ? `r = ${value > 0 ? '+' : ''}${value.toFixed(3)}` : 'n/a'}
+                    </Text>
+                    <Text style={[styles.correlationInterp, { color }]}>{interp}</Text>
+                  </View>
+                </View>
+              );
+            })}
+          </Section>
+        </>
+      ) : null}
 
       {panelTab === 'cohort' && cohortAnalytics ? (
         <Section
@@ -841,7 +1048,7 @@ export function OverviewTab() {
                 onChange={setCohortDetailTab}
               />
 
-              {cohortDetailTab === 'scores' ? (
+              {cohortDetailTab === 'other_scores' ? (
                 <MetricsGrid>
                   <MetricRow
                     label="Weighted score"
@@ -855,18 +1062,6 @@ export function OverviewTab() {
                   <MetricRow
                     label="Modified weighted (with psychometrics)"
                     value={formatScore(cohortAnalytics.scoreAverages.modifiedWeightedWithPsychometrics)}
-                  />
-                  <MetricRow
-                    label="Scenario 1 composite"
-                    value={formatScore(cohortAnalytics.scoreAverages.scenario1)}
-                  />
-                  <MetricRow
-                    label="Scenario 2 composite"
-                    value={formatScore(cohortAnalytics.scoreAverages.scenario2)}
-                  />
-                  <MetricRow
-                    label="Scenario 3 composite"
-                    value={formatScore(cohortAnalytics.scoreAverages.scenario3)}
                   />
                   <MetricRow
                     label="Moment 4 composite"
@@ -973,7 +1168,7 @@ export function OverviewTab() {
         </Section>
       ) : null}
 
-      {panelTab === 'scores' ? (
+      {panelTab === 'reliability' ? (
       <>
       <Section
         title="Sample Summary"
@@ -1072,140 +1267,6 @@ export function OverviewTab() {
           : null}
       </Section>
 
-      <Section
-        title="Scenario Cross-Correlations"
-        tooltip="Pearson correlation between scenario composite scores. Target: 0.40–0.70. Too low means scenarios measure unrelated things. Too high means scenarios are redundant."
-        defaultExpanded={false}
-      >
-        {[
-          { label: 'Scenario 1 × Scenario 2', value: a.scenarioCorrelations.s1s2 },
-          { label: 'Scenario 1 × Scenario 3', value: a.scenarioCorrelations.s1s3 },
-          { label: 'Scenario 2 × Scenario 3', value: a.scenarioCorrelations.s2s3 },
-        ].map(({ label, value }) => {
-          const color =
-            value === null
-              ? '#666'
-              : value >= 0.4 && value <= 0.7
-                ? '#22c55e'
-                : value < 0.2
-                  ? '#ef4444'
-                  : '#f59e0b';
-          const interp =
-            value === null
-              ? 'Insufficient data'
-              : value >= 0.4 && value <= 0.7
-                ? 'Good — scenarios are related but distinct'
-                : value < 0.2
-                  ? 'Too low — scenarios may be measuring unrelated constructs'
-                  : value > 0.7
-                    ? 'Too high — scenarios may be redundant'
-                    : 'Borderline — monitor as sample grows';
-          return (
-            <View key={label} style={styles.correlationRow}>
-              <Text style={styles.correlationLabel}>{label}</Text>
-              <View>
-                <Text style={[styles.correlationValue, { color }]}>
-                  {value !== null ? `r = ${value > 0 ? '+' : ''}${value.toFixed(3)}` : 'n/a'}
-                </Text>
-                <Text style={[styles.correlationInterp, { color }]}>{interp}</Text>
-              </View>
-            </View>
-          );
-        })}
-      </Section>
-
-      <Section
-        title="Score Distribution & Threshold Analysis"
-        tooltip="Distribution of weighted scores across all attempts. The 6.0 threshold is shown. Borderline zone is 5.5–6.5. Modifier impact shows how many gate decisions would change if depth signal modifiers were applied."
-      >
-        {a.thresholdAnalysis.scoreDistribution.map((bucket) => (
-          <View key={bucket.range} style={styles.bucketRow}>
-            <Text
-              style={[
-                styles.bucketLabel,
-                (bucket.range === '5.5–5.9' || bucket.range === '6.0–6.4') &&
-                  styles.bucketLabelHighlight,
-              ]}
-            >
-              {bucket.range}
-              {bucket.range === '5.5–5.9' ? ' ←threshold' : ''}
-              {bucket.range === '6.0–6.4' ? ' threshold→' : ''}
-            </Text>
-            <MiniBar
-              value={bucket.count}
-              max={a.sampleSize.total}
-              color={
-                bucket.range.startsWith('5.5') || bucket.range.startsWith('6.0')
-                  ? '#f59e0b'
-                  : '#3b82f6'
-              }
-            />
-            <Text style={styles.bucketCount}>
-              {bucket.count} ({bucket.percentage}%)
-            </Text>
-          </View>
-        ))}
-
-        <View style={styles.divider} />
-        <MetricsGrid>
-          <MetricRow
-            label="Borderline cases (5.5–6.5)"
-            value={`${a.thresholdAnalysis.borderlineCount} attempts`}
-            tooltip="These users' gate decisions are most sensitive to algorithm changes."
-          />
-          <MetricRow
-            label="Decisions flipped by modifier"
-            value={`${a.thresholdAnalysis.wouldFlipWithModifier}`}
-            color={a.thresholdAnalysis.wouldFlipWithModifier > 0 ? '#f59e0b' : '#22c55e'}
-            tooltip="Attempts where applying the depth signal modifier would change the pass/fail outcome."
-          />
-        </MetricsGrid>
-
-        {a.thresholdAnalysis.wouldFlipWithModifier > 0 ? (
-          <>
-            <TouchableOpacity
-              style={styles.toggleButton}
-              onPress={() => setShowFlippedOnly((v) => !v)}
-            >
-              <Text style={styles.toggleButtonText}>
-                {showFlippedOnly ? 'Show all' : 'Show flipped only'}
-              </Text>
-            </TouchableOpacity>
-            <View style={styles.tableHeader}>
-              <Text style={[styles.tableCell, { flex: 2 }]}>User</Text>
-              <Text style={styles.tableCell}>Base</Text>
-              <Text style={styles.tableCell}>Modified</Text>
-              <Text style={styles.tableCell}>Flip</Text>
-            </View>
-            {modifierRows.map((row) => (
-              <View
-                key={row.attemptId}
-                style={[styles.tableRow, row.flipped && styles.tableRowHighlight]}
-              >
-                <Text style={[styles.tableCell, { flex: 2, color: '#ccc' }]}>
-                  {row.userName ?? 'Unknown'}
-                </Text>
-                <Text style={[styles.tableCell, { color: row.basePass ? '#22c55e' : '#ef4444' }]}>
-                  {row.baseScore.toFixed(2)}
-                </Text>
-                <Text
-                  style={[styles.tableCell, { color: row.modifiedPass ? '#22c55e' : '#ef4444' }]}
-                >
-                  {row.modifiedScore.toFixed(2)}
-                </Text>
-                <Text style={[styles.tableCell, { color: row.flipped ? '#f59e0b' : '#444' }]}>
-                  {row.flipped ? '⚠ YES' : '—'}
-                </Text>
-              </View>
-            ))}
-          </>
-        ) : null}
-      </Section>
-      </>
-      ) : null}
-
-      {panelTab === 'validity' ? (
-      <>
       <Section
         title="Uncertainty distribution"
         tooltip="Adaptive uncertainty scores (0–1) computed at interview completion. Green &lt; 0.4, amber 0.4–0.6, red ≥ 0.6. Admin-only — does not affect user routing."
@@ -1424,7 +1485,9 @@ export function OverviewTab() {
         <Text style={[styles.subSectionTitle, { marginTop: 16 }]}>Defense Patterns Detected</Text>
         {Object.entries(a.depthSignalSummary.defensePatternRates).map(([pattern, count]) => (
           <View key={pattern} style={styles.distRow}>
-            <Text style={styles.distLabel}>{pattern}</Text>
+            <Text style={styles.distLabel}>
+              {pattern.charAt(0).toUpperCase() + pattern.slice(1)}
+            </Text>
             <MiniBar value={count} max={a.sampleSize.total} color="#f59e0b" />
             <Text style={styles.distCount}>{count}</Text>
           </View>

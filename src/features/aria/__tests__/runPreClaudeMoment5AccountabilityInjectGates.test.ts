@@ -93,6 +93,28 @@ describe('runPreClaudeMoment5AccountabilityInjectGates', () => {
     expect(deps.moment5SpecificityRedirectIssuedRef.current).toBe(false);
   });
 
+  it('defers M5 accountability when skip phrase is mislabeled as confusion', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const deps = baseMoment5Deps({ speakTextSafe });
+    const skipAsk = 'Can I skip this question?';
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: skipAsk, interviewMoment: 5 },
+    ];
+
+    const result = await runPreClaudeMoment5AccountabilityInjectGates(
+      deps,
+      skipAsk,
+      messagesToUse,
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      { type: 'confusion', confidence: 0.95 },
+    );
+
+    expect(result).toEqual({ handled: false, moment5CombinedUserText: skipAsk });
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(deps.moment5AccountabilityProbeFiredRef.current).toBe(false);
+  });
+
   it('fires accountability probe when model delivered M5 but delivery refs were stale', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = baseMoment5Deps({

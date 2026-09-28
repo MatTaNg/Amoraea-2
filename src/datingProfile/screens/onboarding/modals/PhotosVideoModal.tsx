@@ -13,6 +13,7 @@ import { useAuth } from '@/shared/hooks/AuthProvider';
 import { profilesRepo } from '@/data/repos/profilesRepo';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './PhotosVideoModal.styled';
+import { ONBOARDING_PHOTOS_DESCRIPTION } from './onboardingStepCopy';
 
 interface PhotosVideoModalProps {
   photos: string[];
@@ -153,7 +154,7 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            Add up to 6 photos.
+            {ONBOARDING_PHOTOS_DESCRIPTION}
           </Text>
 
           {/* Photos Section */}

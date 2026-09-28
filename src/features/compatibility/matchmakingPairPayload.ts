@@ -13,8 +13,6 @@ export type MatchmakingSubscores = {
   values: number;
   style: number;
   semantic: number;
-  /** Soft adjustment from sexual communication comfort alignment (−0.05 … +0.03). */
-  sexualCommunicationAdjustment?: number;
 };
 
 /** Weights mirror {@link computeFinalCompatibilityScore} in styleCompatibilityScore.ts. */

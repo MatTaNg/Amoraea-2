@@ -1,7 +1,6 @@
 import { CompatibilityRepository } from '@data/repositories/CompatibilityRepository';
 import { Compatibility, CompatibilityUpdate } from '@domain/models/Compatibility';
 import {
-  computeSexualCommunicationCompatibilityAdjustment,
   computeStyleCompatibility,
   type StyleCompatibilityResult,
 } from '@features/compatibility/styleCompatibility';
@@ -14,7 +13,6 @@ export type CombinedCompatibilityParams = {
   styleScore: number;
   styleConfidence: number;
   dealbreakerMultiplier: number;
-  sexualCommunicationAdjustment?: number;
 };
 
 export class CompatibilityUseCase {
@@ -36,13 +34,12 @@ export class CompatibilityUseCase {
     return computeFinalCompatibilityScore(params);
   }
 
-  /** Fetches sexual communication scores and applies the soft pair adjustment. */
+  /** Combined score for a pair. Sexual-communication means are not a ranking input. */
   async computeCombinedCompatibilityScoreForPair(
-    userIdA: string,
-    userIdB: string,
-    params: Omit<CombinedCompatibilityParams, 'sexualCommunicationAdjustment'>,
+    _userIdA: string,
+    _userIdB: string,
+    params: CombinedCompatibilityParams,
   ): Promise<number> {
-    const { adjustment } = await computeSexualCommunicationCompatibilityAdjustment(userIdA, userIdB);
-    return computeFinalCompatibilityScore({ ...params, sexualCommunicationAdjustment: adjustment });
+    return computeFinalCompatibilityScore(params);
   }
 }

@@ -1,8 +1,10 @@
 import {
+  hasMinimalAssessableScenarioContent,
   hasQuestionRecoveryPromptAlreadySpokenForSeq,
   IRRELEVANT_ANSWER_RETRY_LINE,
   isIrrelevantAnswerRetryAssistantLine,
   looksLikeCompleteShortUserReply,
+  looksLikeGrammaticallyCompleteShortUtterance,
   looksLikeInterviewProcessQuestionRepeatRequest,
   looksLikeUnassessableScenarioAnswer,
 } from '@features/aria/interviewAnswerRelevance';
@@ -38,6 +40,8 @@ import {
 } from '@features/aria/scenarioCPromptDetection';
 import {
   looksLikeMoment4ThresholdQuestion,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeNeedRecognitionInSupportAnswer,
   looksLikeUnassessableMoment4ThresholdAnswer,
 } from '@features/aria/moment4ProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
@@ -147,12 +151,23 @@ export async function runPreClaudeIrrelevantAnswerRetryGate(
   if (sophiePerspectiveQuestion && looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(trimmed)) {
     return { handled: false };
   }
+  // Need-recognition probe accepts short complete ask answers ("I asked her") even though
+  // they lack scenario engagement keywords / look like Whisper cut-offs ("I asked for a").
+  const needRecognitionQuestion =
+    looksLikeMomentSupportConditionalProbe(questionToKeep) ||
+    looksLikeMomentSupportConditionalProbe(lastAssistantContent);
+  if (needRecognitionQuestion && looksLikeNeedRecognitionInSupportAnswer(trimmed)) {
+    return { handled: false };
+  }
   if (
     hasQuestionRecoveryPromptAlreadySpokenForSeq(
       deps.recoveryAssistantSpokenAtSubstantiveSeqRef?.current,
       deps.substantiveInterviewQuestionDeliveredSeqRef?.current ?? 0,
     ) &&
-    looksLikeCompleteShortUserReply(trimmed)
+    (looksLikeCompleteShortUserReply(trimmed) ||
+      looksLikeGrammaticallyCompleteShortUtterance(trimmed) ||
+      (trimmed.split(/\s+/).filter(Boolean).length >= 10 &&
+        hasMinimalAssessableScenarioContent(trimmed)))
   ) {
     return { handled: false };
   }

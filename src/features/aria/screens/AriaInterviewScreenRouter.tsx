@@ -95,7 +95,15 @@ export function AriaInterviewScreenRouter(
       props.interviewStatus === 'under_review' ||
       props.interviewStatus === 'congratulations');
 
-  if (validationPreparingResultsVisible || props.interviewStatus === 'preparing_results') {
+  const standardApplicantCompletionHandoffVisible =
+    !props.isAdminAccount &&
+    (props.interviewStatus === 'under_review' || props.interviewStatus === 'congratulations');
+
+  if (
+    validationPreparingResultsVisible ||
+    props.interviewStatus === 'preparing_results' ||
+    standardApplicantCompletionHandoffVisible
+  ) {
     return <PreparingResultsView />;
   }
 

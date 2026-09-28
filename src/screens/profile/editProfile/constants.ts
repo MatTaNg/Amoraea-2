@@ -1,9 +1,11 @@
+import {
+  PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS,
+  parsePartnerAlignmentImportance,
+} from '@/shared/constants/partnerAlignmentImportance';
+
+/** Normalize stored political-alignment importance to the 4-level slug (legacy Yes/No supported). */
 export function normalizePartnerPoliticalAlignmentToYesNo(raw: string): string {
-  const s = raw.trim().toLowerCase();
-  if (!s) return '';
-  if (/\b(no|not)\b/.test(s)) return 'No';
-  if (/\byes\b|important|matters/.test(s)) return 'Yes';
-  return raw.trim();
+  return parsePartnerAlignmentImportance(raw) ?? '';
 }
 
 /** Partner already has children — options shown in onboarding MatchPreferencesModal. */
@@ -13,11 +15,8 @@ export const PREF_PARTNER_HAS_CHILDREN_OPTIONS: string[] = [
   'Prefer partner without children',
 ];
 
-/** Political alignment — onboarding BottomSheet string options. */
-export const PREF_PARTNER_POLITICAL_SHARING_OPTIONS: string[] = [
-  'Yes',
-  'No',
-];
+/** Political alignment — onboarding / edit-profile 4-level importance. */
+export const PREF_PARTNER_POLITICAL_SHARING_OPTIONS = PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS;
 
 export const PREF_DEALBREAKER_CHILDREN_OPTIONS: string[] = [
   "Don't want kids",
@@ -46,7 +45,7 @@ export const PREF_DEALBREAKER_RELIGION_OPTIONS: string[] = [
   'Other',
 ];
 
-export const PREF_PARTNER_SAME_RELIGION_OPTIONS: string[] = ['Yes', 'No'];
+export const PREF_PARTNER_SAME_RELIGION_OPTIONS = PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS;
 
 export const PREF_LONG_TERM_LOCATION_OPTIONS: string[] = [
   'Austin',

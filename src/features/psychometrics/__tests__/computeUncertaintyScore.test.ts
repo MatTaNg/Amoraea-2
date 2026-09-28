@@ -61,32 +61,29 @@ describe('computeUncertaintyScore', () => {
     });
     if (NPI_ENTITLEMENT_ENABLED) {
       expect(result.activeFlags).toContain('npi_entitlement_accountability_divergence');
-      expect(result.activeFlags).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
     } else {
       expect(result.activeFlags).toContain('sd3_narcissism_contempt_divergence');
-      expect(result.activeFlags).toContain('sd3_narcissism_floor');
     }
+    expect(result.activeFlags).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
     expect(result.activeFlags).toContain('rfq_mentalizing_divergence_low_self_report');
   });
 
-  it('flags active narcissism floor when straight-line is active but score breaches threshold', () => {
-    if (NPI_ENTITLEMENT_ENABLED) {
-      const result = computeUncertaintyScore({
-        ...EMPTY_ATTEMPT,
-        psychometrics_npi_entitlement_score: 5,
-      });
-      expect(result.activeFlags).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
-      return;
-    }
-    const result = computeUncertaintyScore({
+  it('does not flag retired narcissism floors in uncertainty telemetry', () => {
+    const npi = computeUncertaintyScore({
+      ...EMPTY_ATTEMPT,
+      psychometrics_npi_entitlement_score: 5,
+    });
+    expect(npi.activeFlags).not.toContain(ACTIVE_NARCISSISM_FLOOR_CODE);
+
+    const sd3 = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_sd3_narcissism_score: 4.5,
       psychometric_straight_line_flags: ['sd3_narcissism_straight_line'],
     });
-    expect(result.activeFlags).toContain('sd3_narcissism_floor');
+    expect(sd3.activeFlags).not.toContain('sd3_narcissism_floor');
   });
 
-  it('flags psychometric floor breaches in active flags', () => {
+  it('flags only active new-user psychometric floors in uncertainty telemetry', () => {
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_rfq_score: 1.8,
@@ -94,13 +91,13 @@ describe('computeUncertaintyScore', () => {
       psychometrics_dweck_score: 2.3,
       psychometrics_scs_sf_score: 2.417,
     });
-    expect(result.activeFlags).toContain('rfq_low_reflective_functioning_floor');
     expect(result.activeFlags).toContain('gasp_extreme_externalization_floor');
-    expect(result.activeFlags).toContain('dweck_extreme_fixed_mindset_floor');
     expect(result.activeFlags).toContain('scs_sf_low_self_compassion_floor');
+    expect(result.activeFlags).not.toContain('rfq_low_reflective_functioning_floor');
+    expect(result.activeFlags).not.toContain('dweck_extreme_fixed_mindset_floor');
   });
 
-  it('flags psychometric floors when straight-line flags are active but scores breach thresholds', () => {
+  it('flags active floors when straight-line flags are present but scores still breach', () => {
     const result = computeUncertaintyScore({
       ...EMPTY_ATTEMPT,
       psychometrics_rfq_score: 1.8,
@@ -114,10 +111,10 @@ describe('computeUncertaintyScore', () => {
         'scs_sf_straight_line',
       ],
     });
-    expect(result.activeFlags).toContain('rfq_low_reflective_functioning_floor');
     expect(result.activeFlags).toContain('gasp_extreme_externalization_floor');
-    expect(result.activeFlags).toContain('dweck_extreme_fixed_mindset_floor');
     expect(result.activeFlags).toContain('scs_sf_low_self_compassion_floor');
+    expect(result.activeFlags).not.toContain('rfq_low_reflective_functioning_floor');
+    expect(result.activeFlags).not.toContain('dweck_extreme_fixed_mindset_floor');
   });
 
   it('flags high RFQ vs low mentalizing divergence', () => {

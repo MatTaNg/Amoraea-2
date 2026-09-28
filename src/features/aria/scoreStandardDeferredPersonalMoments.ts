@@ -44,6 +44,7 @@ import {
   moment4AggregateFromBaselinePatterns,
   scoreAndPersistMoment4Slice,
 } from '@features/aria/scoreAndPersistMoment4Slice';
+import { scoreAndPersistSupportMomentSlice } from '@features/aria/scoreAndPersistSupportMomentSlice';
 import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { fetchWithTimeout } from '@utilities/fetchWithTimeout';
 import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
@@ -340,12 +341,24 @@ export async function scoreStandardDeferredMoment5(
   return { moment5ForAggregate, scoringBaseline };
 }
 
-/** Score Moments 4–5 on the standard onboarding deferred path (before completion gate). */
+/** Score Moments 4, support, and 5 on the standard onboarding deferred path (before completion gate). */
 export async function scoreStandardDeferredPersonalMoments(
   params: ScoreStandardDeferredPersonalMomentsParams,
 ): Promise<ScoreStandardDeferredPersonalMomentsResult> {
   const m4 = await scoreStandardDeferredMoment4(params);
-  const m5 = await scoreStandardDeferredMoment5({ ...params, scoringBaseline: m4.scoringBaseline });
+  const support = await scoreAndPersistSupportMomentSlice({
+    apiUrl: params.apiUrl,
+    headers: params.headers,
+    msgs: params.msgsDeferred,
+    userId: params.userId,
+    attemptId: params.attemptIdForIncremental,
+    scoringBaseline: m4.scoringBaseline,
+    supabase: params.supabase,
+  });
+  const m5 = await scoreStandardDeferredMoment5({
+    ...params,
+    scoringBaseline: support.scoringBaseline,
+  });
   return {
     moment4ForAggregate: m4.moment4ForAggregate,
     moment5ForAggregate: m5.moment5ForAggregate,

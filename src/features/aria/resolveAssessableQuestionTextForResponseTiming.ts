@@ -2,15 +2,22 @@ import { assistantTextLooksLikeMoment4HandoffLead } from '@features/aria/intervi
 import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
 import { extractScenarioModalQuestionFromAssistantText } from '@features/aria/interviewScenarioModalPrompt';
 import {
+  looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportQuestion,
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_QUESTION_CARD_BODY,
 } from '@features/aria/moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
 import {
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
-  SCENARIO_B_JAMES_REPAIR_CANONICAL,
+  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 import {
   isScenarioCRepairAssistantPrompt,
@@ -34,6 +41,15 @@ export function resolveAssessableQuestionTextForResponseTiming(
   if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(t)) {
     return MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;
   }
+  if (looksLikeMomentSupportConditionalProbe(t)) {
+    return MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY;
+  }
+  if (looksLikeMomentSupportQuestion(t)) {
+    return MOMENT_SUPPORT_QUESTION_CARD_BODY;
+  }
+  if (looksLikeMoment4OrientationQuestion(t)) {
+    return MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY;
+  }
   if (looksLikeMoment4ThresholdQuestion(t)) {
     return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
   }
@@ -50,7 +66,7 @@ export function resolveAssessableQuestionTextForResponseTiming(
     return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   if (looksLikeScenarioBRepairAsJamesQuestion(t)) {
-    return SCENARIO_B_JAMES_REPAIR_CANONICAL;
+    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }
 
   const extracted = extractScenarioModalQuestionFromAssistantText(t);

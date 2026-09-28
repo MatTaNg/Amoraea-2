@@ -30,8 +30,23 @@ import {
   type DisclosureCalibration,
   type DisclosureCalibrationTurn,
 } from './disclosureCalibration.ts';
-import { INTERVIEW_MARKER_IDS } from './interviewMarkers.ts';
+import {
+  INTERVIEW_MARKER_IDS,
+  type InterviewMarkerId,
+} from './interviewMarkers.ts';
 import { countMentalizingOvercertaintyInMarkerSlices } from './mentalizingOvercertaintyFromTranscript.ts';
+import { normalizeInterviewPillarScoreMap } from '../../../src/config/scoring/interviewMarkerAliases.ts';
+import { PILLAR_ROLLUP_ALGORITHM_VERSION_CURRENT } from '../../../src/config/algorithmVersions.ts';
+import {
+  AUTOBIOGRAPHICAL_REPAIR_MOMENTS,
+  HYPOTHETICAL_REPAIR_MOMENTS,
+  REPAIR_SOURCE_SIGNALS_VERSION,
+  SPONTANEOUS_REPAIR_MOMENTS,
+} from '../../../src/config/scoring/repairSourceSignals.ts';
+import {
+  REGULATION_SOURCE_MOMENTS,
+  REGULATION_SOURCE_SIGNALS_VERSION,
+} from '../../../src/config/scoring/regulationSourceSignals.ts';
 import {
   mergeAccountabilityPillarWhenM4SituationallyExempt,
   resolveMoment4AccountabilitySituationalExempt,
@@ -83,7 +98,9 @@ function isNoEvidenceText(text: string | null | undefined): boolean {
     /\bnot scored\b.*\bskip\b.*\bfrustration\b/i.test(t) ||
     /rubric excerpt omitted in model json/i.test(t) ||
     /moment 4 incomplete model output/i.test(t) ||
-    /score present, evidence not returned by model/i.test(t)
+    /score present, evidence not returned by model/i.test(t) ||
+    /no assessable repair evidence/i.test(t) ||
+    /repair (was )?not (meaningfully )?assessed/i.test(t)
   );
 }
 
@@ -202,7 +219,8 @@ export type PillarMomentLabel =
   | 'scenario_2'
   | 'scenario_3'
   | 'moment_4'
-  | 'moment_5';
+  | 'moment_5'
+  | 'moment_support';
 
 export type LabeledMarkerSlice = {
   moment: PillarMomentLabel;
@@ -218,29 +236,183 @@ const SLICE_LABELS: PillarMomentLabel[] = [
   'scenario_3',
   'moment_4',
   'moment_5',
+  'moment_support',
 ];
 
 type StandardMarkerId = Exclude<
   (typeof INTERVIEW_MARKER_IDS)[number],
-  'contempt' | 'commitment_threshold'
+  'destructive_conflict' | 'commitment_persistence'
 >;
 
 /** Bump when rollup rules change (surfaced in admin recalculation_notes). */
-export const PILLAR_ROLLUP_ALGORITHM_VERSION = 'scenario_only_integers_v3_m4_exempt_accountability';
+export const PILLAR_ROLLUP_ALGORITHM_VERSION = PILLAR_ROLLUP_ALGORITHM_VERSION_CURRENT;
 
 export type PillarAggregateRollupOptions = {
   /** When true (default), apply M4 situational accountability reweight on top of v3 pooling. */
   applyM4AccountabilityExempt?: boolean;
 };
 
+export type RepairSourceSignals = {
+  version: string;
+  hypothetical_repair: number | null;
+  autobiographical_repair: number | null;
+  spontaneous_repair: number | null;
+  spontaneous_scenario_1: number | null;
+  spontaneous_scenario_2: number | null;
+  spontaneous_moment_4: number | null;
+  spontaneous_moment_support: number | null;
+  /** hypothetical − autobiographical; preserved (not treated as error). */
+  hypothetical_minus_autobiographical: number | null;
+  /** Evaluation-only: never applied to the Repair pillar. */
+  no_divergence_penalty: true;
+  contributor_moments: {
+    hypothetical_repair: PillarMomentLabel[];
+    autobiographical_repair: PillarMomentLabel[];
+    spontaneous_repair: PillarMomentLabel[];
+  };
+};
+
+export type RegulationSourceSignals = {
+  version: string;
+  scenario_1: number | null;
+  scenario_3: number | null;
+  moment_4: number | null;
+  moment_5: number | null;
+  moment_support: number | null;
+  contributor_moments: PillarMomentLabel[];
+};
+
+function averageRepairFromMoments(
+  rows: LabeledMarkerSlice[],
+  moments: readonly PillarMomentLabel[],
+): { score: number | null; contributors: PillarMomentLabel[] } {
+  const vals: number[] = [];
+  const contributors: PillarMomentLabel[] = [];
+  const allowed = new Set<PillarMomentLabel>(moments);
+  for (const row of rows) {
+    if (!allowed.has(row.moment)) continue;
+    const v = scoredValue(row.pillarScores, row.keyEvidence, 'repair', row.moment);
+    if (v == null) continue;
+    vals.push(v);
+    contributors.push(row.moment);
+  }
+  const avg = averageNonNull(vals);
+  return { score: avg === undefined ? null : avg, contributors };
+}
+
+/**
+ * Persist distinguishable repair sources. The final Repair pillar is the mean of
+ * assessable S1/S2/S3/M4/M5/support repair scores — missing sources are omitted, not zeroed.
+ * Hypothetical vs autobiographical disagreement is stored, never penalized.
+ */
+export function extractRepairSourceSignals(rows: LabeledMarkerSlice[]): RepairSourceSignals {
+  const hypothetical = averageRepairFromMoments(rows, [...HYPOTHETICAL_REPAIR_MOMENTS]);
+  const autobiographical = averageRepairFromMoments(rows, [...AUTOBIOGRAPHICAL_REPAIR_MOMENTS]);
+  const spontaneous = averageRepairFromMoments(rows, [...SPONTANEOUS_REPAIR_MOMENTS]);
+  const s1 = averageRepairFromMoments(rows, ['scenario_1']);
+  const s2 = averageRepairFromMoments(rows, ['scenario_2']);
+  const m4 = averageRepairFromMoments(rows, ['moment_4']);
+  const support = averageRepairFromMoments(rows, ['moment_support']);
+  const hypo = hypothetical.score;
+  const auto = autobiographical.score;
+  return {
+    version: REPAIR_SOURCE_SIGNALS_VERSION,
+    hypothetical_repair: hypo,
+    autobiographical_repair: auto,
+    spontaneous_repair: spontaneous.score,
+    spontaneous_scenario_1: s1.score,
+    spontaneous_scenario_2: s2.score,
+    spontaneous_moment_4: m4.score,
+    spontaneous_moment_support: support.score,
+    hypothetical_minus_autobiographical:
+      hypo != null && auto != null ? Math.round((hypo - auto) * 100) / 100 : null,
+    no_divergence_penalty: true,
+    contributor_moments: {
+      hypothetical_repair: hypothetical.contributors,
+      autobiographical_repair: autobiographical.contributors,
+      spontaneous_repair: spontaneous.contributors,
+    },
+  };
+}
+
+export function extractRepairSourceSignalsFromSlices(
+  slices: Array<MarkerScoreSlice | null | undefined>,
+): RepairSourceSignals {
+  const rows: LabeledMarkerSlice[] = SLICE_LABELS.map((moment, i) => ({
+    moment,
+    pillarScores: slices[i]?.pillarScores ?? undefined,
+    keyEvidence: slices[i]?.keyEvidence ?? undefined,
+  }));
+  return extractRepairSourceSignals(rows);
+}
+
+export function extractRegulationSourceSignals(rows: LabeledMarkerSlice[]): RegulationSourceSignals {
+  const byMoment = (moment: PillarMomentLabel): number | null =>
+    averageRepairFromMomentsNamed(rows, [moment], 'regulation').score;
+  const contributors: PillarMomentLabel[] = [];
+  for (const moment of REGULATION_SOURCE_MOMENTS) {
+    const v = scoredValue(
+      rows.find((r) => r.moment === moment)?.pillarScores,
+      rows.find((r) => r.moment === moment)?.keyEvidence,
+      'regulation',
+      moment,
+    );
+    if (v != null) contributors.push(moment);
+  }
+  return {
+    version: REGULATION_SOURCE_SIGNALS_VERSION,
+    scenario_1: byMoment('scenario_1'),
+    scenario_3: byMoment('scenario_3'),
+    moment_4: byMoment('moment_4'),
+    moment_5: byMoment('moment_5'),
+    moment_support: byMoment('moment_support'),
+    contributor_moments: contributors,
+  };
+}
+
+function averageRepairFromMomentsNamed(
+  rows: LabeledMarkerSlice[],
+  moments: readonly PillarMomentLabel[],
+  key: string,
+): { score: number | null; contributors: PillarMomentLabel[] } {
+  const vals: number[] = [];
+  const contributors: PillarMomentLabel[] = [];
+  const allowed = new Set<PillarMomentLabel>(moments);
+  for (const row of rows) {
+    if (!allowed.has(row.moment)) continue;
+    const v = scoredValue(row.pillarScores, row.keyEvidence, key, row.moment);
+    if (v == null) continue;
+    vals.push(v);
+    contributors.push(row.moment);
+  }
+  const avg = averageNonNull(vals);
+  return { score: avg === undefined ? null : avg, contributors };
+}
+
+export function extractRegulationSourceSignalsFromSlices(
+  slices: Array<MarkerScoreSlice | null | undefined>,
+): RegulationSourceSignals {
+  const rows: LabeledMarkerSlice[] = SLICE_LABELS.map((moment, i) => ({
+    moment,
+    pillarScores: slices[i]?.pillarScores ?? undefined,
+    keyEvidence: slices[i]?.keyEvidence ?? undefined,
+  }));
+  return extractRegulationSourceSignals(rows);
+}
+
 /** Which interview moments may contribute numeric evidence to each pillar aggregate. */
 const STANDARD_MARKER_ALLOWED_MOMENTS: Record<StandardMarkerId, Set<PillarMomentLabel>> = {
-  repair: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
-  attunement: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
-  regulation: new Set(['scenario_3']),
-  mentalizing: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
+  repair: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_4', 'moment_5', 'moment_support']),
+  responsiveness_support: new Set([
+    'scenario_1',
+    'scenario_2',
+    'scenario_3',
+    'moment_support',
+  ]),
+  regulation: new Set(['scenario_1', 'scenario_3', 'moment_4', 'moment_5', 'moment_support']),
+  mentalizing: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_support']),
   appreciation: new Set(['scenario_1', 'scenario_2']),
-  accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3']),
+  accountability: new Set(['scenario_1', 'scenario_2', 'scenario_3', 'moment_5']),
 };
 
 /** Contempt pillar: 60% pooled expression + 40% pooled recognition. */
@@ -295,13 +467,19 @@ function averageNonNull(values: number[]): number | undefined {
 export function commitmentThresholdFromSlice(slice: MarkerScoreSlice): number | null {
   if (!slice?.pillarScores) return null;
   const filtered = normalizeScoresByEvidence(slice.pillarScores, slice.keyEvidence);
-  const v = filtered.commitment_threshold;
-  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+  const candidates = [
+    filtered.commitment_persistence,
+    filtered.persistence_exit_judgment,
+    filtered.commitment_orientation,
+    filtered.commitment_threshold,
+  ];
+  const nums = candidates.filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  if (nums.length === 0) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
 /**
- * Sets `commitment_threshold` on aggregated scores from **Moment 4 only** (grudge + walk-away follow-up).
- * Scenario C no longer contributes commitment_threshold.
+ * Sets `commitment_persistence` (and legacy `commitment_threshold`) from Moment 4 slices.
  */
 export function mergeCommitmentThresholdWeighted(
   aggregated: Record<string, number>,
@@ -310,9 +488,11 @@ export function mergeCommitmentThresholdWeighted(
 ): Record<string, number> {
   const m4 = commitmentThresholdFromSlice(moment4Slice);
   if (m4 == null) return aggregated;
+  const rounded = Math.round(m4);
   return {
     ...aggregated,
-    commitment_threshold: Math.round(m4),
+    commitment_persistence: rounded,
+    commitment_threshold: rounded,
   };
 }
 
@@ -386,6 +566,10 @@ export type PillarAggregateWithCommitmentDetailed = MomentRestrictedAggregateRes
   moment4AccountabilitySituationallyExempt?: boolean;
   moment4AccountabilityExemptReason?: string | null;
   accountabilityReweightMeta?: AccountabilityReweightMeta | null;
+  /** Distinguishable repair sources; not independently gated. */
+  repairSourceSignals: RepairSourceSignals;
+  /** Per-moment regulation; missing sources omitted from the pillar mean. */
+  regulationSourceSignals: RegulationSourceSignals;
 };
 
 function coerceHolisticEgoLevelToInt(raw: unknown): number | null {
@@ -440,12 +624,16 @@ export function aggregateMarkerScoresFromLabeledSlices(
   const contributorCounts: Record<string, number> = {};
 
   for (const id of INTERVIEW_MARKER_IDS) {
-    if (id === 'contempt' || id === 'commitment_threshold') continue;
+    if (id === 'destructive_conflict' || id === 'commitment_persistence') continue;
     const allowed = STANDARD_MARKER_ALLOWED_MOMENTS[id];
     const vals: number[] = [];
+    const alias =
+      id === 'responsiveness_support' ? 'attunement' : id === 'destructive_conflict' ? 'contempt' : null;
     for (const row of rows) {
       if (!allowed.has(row.moment)) continue;
-      const v = scoredValue(row.pillarScores, row.keyEvidence, id, row.moment);
+      const v =
+        scoredValue(row.pillarScores, row.keyEvidence, id, row.moment) ??
+        (alias ? scoredValue(row.pillarScores, row.keyEvidence, alias, row.moment) : null);
       if (v != null) vals.push(v);
     }
     const avg = averageNonNull(vals);
@@ -489,7 +677,11 @@ export function aggregateMarkerScoresFromLabeledSlices(
     contemptScore = rAvg;
     contributorCounts.contempt = 1;
   }
-  if (contemptScore !== undefined) out.contempt = contemptScore;
+  if (contemptScore !== undefined) {
+    out.destructive_conflict = contemptScore;
+    out.contempt = contemptScore;
+    contributorCounts.destructive_conflict = contributorCounts.contempt ?? 1;
+  }
 
   return { scores: out, contributorCounts };
 }
@@ -618,6 +810,7 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
     scores: merged,
     contributorCounts: {
       ...contributorCounts,
+      commitment_persistence: ctCount > 0 ? ctCount : merged.commitment_persistence != null ? 1 : 0,
       commitment_threshold: ctCount > 0 ? ctCount : merged.commitment_threshold != null ? 1 : 0,
     },
     egoDevelopmentLevel: egoIn,
@@ -632,6 +825,8 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
     moment4AccountabilitySituationallyExempt: reweightMeta != null,
     moment4AccountabilityExemptReason: reweightMeta?.reason ?? null,
     accountabilityReweightMeta: reweightMeta,
+    repairSourceSignals: extractRepairSourceSignalsFromSlices(slices),
+    regulationSourceSignals: extractRegulationSourceSignalsFromSlices(slices),
   };
   if (typeof __DEV__ !== 'undefined' && __DEV__) {
     console.log('[EgoDev] aggregation output egoDevelopmentLevel:', result.egoDevelopmentLevel);

@@ -1,4 +1,10 @@
 import { NPI_ENTITLEMENT_ENABLED } from './psychometricsFeatureFlags';
+import {
+  AMORAEA_ENTITLEMENT_ASSESSMENT_VERSION,
+  CONFLICT_CATASTROPHIZING_ASSESSMENT_VERSION,
+  EXPERIMENTAL_INSTRUMENT_META,
+  RELATIONSHIP_GROWTH_BELIEFS_ASSESSMENT_VERSION,
+} from '@config/algorithmVersions';
 
 export type PsychometricQuestion = {
   id: number;
@@ -30,6 +36,10 @@ type LikertAssessmentDef = {
     reverseItems: number[];
     reverseScale?: Record<number, number>;
   };
+  confidence?: 'experimental' | 'high' | 'moderate' | 'low';
+  amoraeaValidationStatus?: 'not_validated' | 'collecting_data' | 'validated' | 'rejected';
+  assessmentVersion?: string;
+  displayName?: string;
 };
 
 type ForcedChoiceAssessmentDef = {
@@ -599,6 +609,188 @@ export const ASSESSMENTS = {
       reverseItems: [1, 3, 5, 7],
     },
   },
+
+  /**
+   * TODO: Replace `amoraea_entitlement_v1` with the validated Psychological Entitlement Scale
+   * if/when commercial reproduction/digital-administration permission is obtained.
+   */
+  amoraea_entitlement_v1: {
+    id: 'amoraea_entitlement_v1',
+    name: 'Relationship Attitudes',
+    displayName: 'Relationship Attitudes',
+    description: 'How you tend to think about needs, consideration, and fairness in close relationships.',
+    estimatedMinutes: 1,
+    ...EXPERIMENTAL_INSTRUMENT_META,
+    assessmentVersion: AMORAEA_ENTITLEMENT_ASSESSMENT_VERSION,
+    scale: {
+      min: 1,
+      max: 7,
+      labels: {
+        1: 'Strongly disagree',
+        2: 'Disagree',
+        3: 'Somewhat disagree',
+        4: 'Neither agree nor disagree',
+        5: 'Somewhat agree',
+        6: 'Agree',
+        7: 'Strongly agree',
+      },
+    },
+    questions: [
+      {
+        id: 1,
+        text: "When I want something badly, I sometimes feel other people's needs should take a back seat.",
+        reverse: false,
+      },
+      {
+        id: 2,
+        text: "I can become frustrated when I don't receive the consideration I believe I deserve.",
+        reverse: false,
+      },
+      {
+        id: 3,
+        text: "If I've put a lot into a relationship, I expect the other person to meet my needs in return.",
+        reverse: false,
+      },
+      {
+        id: 4,
+        text: "There are times when I feel the normal rules or expectations shouldn't apply to me.",
+        reverse: false,
+      },
+      {
+        id: 5,
+        text: "When my needs conflict with someone else's, I usually believe both people's needs deserve equal consideration.",
+        reverse: true,
+      },
+      {
+        id: 6,
+        text: 'I sometimes feel I deserve more attention or accommodation than the people around me.',
+        reverse: false,
+      },
+      {
+        id: 7,
+        text: "Even when I strongly prefer an outcome, I can accept that another person's needs may matter just as much as mine.",
+        reverse: true,
+      },
+      {
+        id: 8,
+        text: 'If someone I care about disappoints me, I can feel that they owe it to me to make things right on my terms.',
+        reverse: false,
+      },
+    ],
+    scoring: {
+      method: 'mean',
+      reverseItems: [5, 7],
+    },
+  },
+
+  /**
+   * TODO: Replace `relationship_growth_beliefs` items with the validated Knee Implicit Theories of
+   * Relationships scale if/when commercial use permission is obtained from C. Raymond Knee / the
+   * appropriate rights holder.
+   */
+  relationship_growth_beliefs: {
+    id: 'relationship_growth_beliefs',
+    name: 'Relationship Growth Beliefs',
+    description: 'Beliefs about whether relationships grow through effort or are “meant to be.”',
+    estimatedMinutes: 1,
+    ...EXPERIMENTAL_INSTRUMENT_META,
+    assessmentVersion: RELATIONSHIP_GROWTH_BELIEFS_ASSESSMENT_VERSION,
+    scale: {
+      min: 1,
+      max: 6,
+      labels: {
+        1: 'Strongly Disagree',
+        2: 'Disagree',
+        3: 'Slightly Disagree',
+        4: 'Slightly Agree',
+        5: 'Agree',
+        6: 'Strongly Agree',
+      },
+    },
+    questions: [
+      {
+        id: 1,
+        text: "When a relationship is truly right, it shouldn't take much work to keep it that way.",
+        reverse: true,
+      },
+      {
+        id: 2,
+        text: "If a relationship requires a lot of effort to keep going, that's usually a sign it wasn't meant to be.",
+        reverse: true,
+      },
+      {
+        id: 3,
+        text: "Two people are either a good match from the start, or they're not.",
+        reverse: true,
+      },
+      {
+        id: 4,
+        text: 'Even a strong relationship needs ongoing effort to stay strong.',
+        reverse: false,
+      },
+      {
+        id: 5,
+        text: 'Couples who work through hard periods often end up closer than they were before.',
+        reverse: false,
+      },
+      {
+        id: 6,
+        text: "How well a relationship turns out has more to do with what both people put into it than with whether they were 'meant to be.'",
+        reverse: false,
+      },
+    ],
+    scoring: {
+      method: 'mean',
+      reverseItems: [1, 2, 3],
+    },
+  },
+
+  conflict_catastrophizing: {
+    id: 'conflict_catastrophizing',
+    name: 'Conflict Beliefs',
+    description: 'How you tend to interpret disagreement in close relationships.',
+    estimatedMinutes: 1,
+    ...EXPERIMENTAL_INSTRUMENT_META,
+    assessmentVersion: CONFLICT_CATASTROPHIZING_ASSESSMENT_VERSION,
+    scale: {
+      min: 1,
+      max: 6,
+      labels: {
+        1: 'Strongly Disagree',
+        2: 'Disagree',
+        3: 'Slightly Disagree',
+        4: 'Slightly Agree',
+        5: 'Agree',
+        6: 'Strongly Agree',
+      },
+    },
+    questions: [
+      {
+        id: 7,
+        text: 'If partners disagree about something it means their relationship is in trouble.',
+        reverse: false,
+      },
+      {
+        id: 8,
+        text: 'Arguing is a sign that two people are not compatible.',
+        reverse: false,
+      },
+      {
+        id: 9,
+        text: 'When I disagree with a partner I worry that the relationship is falling apart.',
+        reverse: false,
+      },
+      {
+        id: 10,
+        text: 'Couples who argue frequently do not truly love each other.',
+        reverse: false,
+      },
+    ],
+    scoring: {
+      method: 'mean',
+      reverseItems: [],
+    },
+  },
 } as const satisfies Record<string, AssessmentDef>;
 
 /** Retired pre-interview instruments — preserved for legacy scoring and admin display only. */
@@ -770,17 +962,16 @@ export const POST_INTERVIEW_ASSESSMENT_ORDER: PostInterviewAssessmentId[] = (
 
 export type AssessmentId = keyof typeof ASSESSMENTS;
 
-/** Pre-interview psychometrics — 9 instruments in battery flow order. */
+/** Pre-interview psychometrics — active battery (historical AAQ-II, RFQ-8, NPI, combined Dweck remain readable). */
 export const ASSESSMENT_ORDER: AssessmentId[] = [
   'brs',
   'anxiety_trait',
   'scs_sf',
   'gasp',
-  'dweck',
-  'aaq2',
+  'relationship_growth_beliefs',
+  'conflict_catastrophizing',
   'rses',
-  NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
-  'rfq',
+  'amoraea_entitlement_v1',
 ];
 
 /** Total question count across all instruments in {@link ASSESSMENT_ORDER}. */
@@ -825,10 +1016,14 @@ export const PRE_INTERVIEW_AI_INTERVIEW_ESTIMATED_MINUTES = 20;
 /** Resume targets for instruments removed from the active battery. */
 const DEPRECATED_ASSESSMENT_RESUME_TARGET: Record<string, AssessmentId> = {
   paq: 'gasp',
-  narq_s: NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
-  mspss: NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
-  scs: 'rfq',
-  sd3_narcissism: NPI_ENTITLEMENT_ENABLED ? 'npi_entitlement' : 'sd3_narcissism',
+  narq_s: 'amoraea_entitlement_v1',
+  mspss: 'amoraea_entitlement_v1',
+  scs: 'rses',
+  sd3_narcissism: 'amoraea_entitlement_v1',
+  npi_entitlement: 'amoraea_entitlement_v1',
+  aaq2: 'rses',
+  rfq: 'amoraea_entitlement_v1',
+  dweck: 'relationship_growth_beliefs',
 };
 
 /** @deprecated Use ASSESSMENT_ORDER */
@@ -858,6 +1053,9 @@ export const ASSESSMENT_HIGHER_SCORE_IS_FAVORABLE: Record<string, boolean> = {
   rses: true,
   rfq: true,
   dweck: true,
+  relationship_growth_beliefs: true,
+  conflict_catastrophizing: false,
+  amoraea_entitlement_v1: false,
   aaq2: false,
   anxiety_trait: false,
   gasp: true,
@@ -956,8 +1154,10 @@ export function resolvePsychometricsResumePosition(
   let assessmentId = assessmentIdRaw as AssessmentId;
   let qIndex = Math.max(0, questionIndex);
 
-  if (!(assessmentId in ASSESSMENTS)) {
-    const fallback = DEPRECATED_ASSESSMENT_RESUME_TARGET[assessmentIdRaw];
+  if (!(assessmentId in ASSESSMENTS) || ASSESSMENT_ORDER.indexOf(assessmentId) < 0) {
+    const fallback =
+      DEPRECATED_ASSESSMENT_RESUME_TARGET[assessmentIdRaw] ??
+      DEPRECATED_ASSESSMENT_RESUME_TARGET[assessmentId];
     if (!fallback) {
       return { assessmentIndex: 0, questionIndex: 0, allQuestionsAnswered: false };
     }
@@ -1067,7 +1267,13 @@ export function scoreAssessment(
     return { total, growth, rbi_disagreement };
   }
 
-  if (assessmentId === 'sd3_narcissism' || assessmentId === 'rfq') {
+  if (
+    assessmentId === 'sd3_narcissism' ||
+    assessmentId === 'rfq' ||
+    assessmentId === 'amoraea_entitlement_v1' ||
+    assessmentId === 'relationship_growth_beliefs' ||
+    assessmentId === 'conflict_catastrophizing'
+  ) {
     const total = meanOfItems(
       assessment,
       responses,

@@ -14,11 +14,14 @@ import {
   filterDirectorySuggestions,
   resolveDirectoryUser,
   runAdminBatchMatching,
+  runAdminOneVsListMatching,
   scoreAdminPair,
+  type AdminBatchMatchMode,
   type AdminBatchMatchResult,
   type AdminCompatDirectoryUser,
   type AdminPairScoreResult,
 } from '@features/compatibility/adminCompatibilityMatching';
+import { triggerAdminBatchMatchCsvDownload } from '@features/admin/adminCompatibilityExport';
 import { formatCompatibilityPercent } from '@features/compatibility/pairCompatibilityPresentation';
 
 function UserAutocomplete({
@@ -125,16 +128,24 @@ function PairDetailPanel({ pair }: { pair: AdminPairScoreResult }) {
 
       <DealbreakerList reasons={dealbreakerReasons} />
 
-      <Text style={styles.subsectionTitle}>Subscores</Text>
+      <Text style={styles.subsectionTitle}>Ranking contributions</Text>
       <View style={styles.subscoreGrid}>
         {(
-          [
-            ['Attachment', result.subscores.attachment],
-            ['Values', result.subscores.values],
-            ['Semantic', result.subscores.semantic],
-            ['Finance', result.subscores.finance],
-            ['Interview', result.subscores.interviewProcess],
-          ] as const
+          result.contributionBreakdown
+            ? ([
+                ['Concrete life 50%', result.contributionBreakdown.core.concreteLifeFit.contribution],
+                ['Domain importance 21%', result.contributionBreakdown.core.lifeDomainImportanceAlignment.contribution],
+                ['Finance 22%', result.contributionBreakdown.core.finance.contribution],
+                ['PVQ 5%', result.contributionBreakdown.core.valuesSimilarity.contribution],
+                ['ECR 2%', result.contributionBreakdown.core.attachmentSimilarity.contribution],
+              ] as const)
+            : ([
+                ['Concrete life', result.subscores.concreteLifeFit],
+                ['Domain importance', result.breakdown.lifeDomain],
+                ['Finance', result.breakdown.finance],
+                ['Attachment', result.breakdown.attachment],
+                ['Values', result.breakdown.values],
+              ] as const)
         ).map(([label, val]) => (
           <View key={label} style={styles.subscorePill}>
             <Text style={styles.subscoreVal}>{formatCompatibilityPercent(val)}</Text>
@@ -142,6 +153,10 @@ function PairDetailPanel({ pair }: { pair: AdminPairScoreResult }) {
           </View>
         ))}
       </View>
+      <Text style={styles.breakdownLine}>
+        Interview process {formatCompatibilityPercent(result.subscores.interviewProcess)} is diagnostic only
+        and is not in ranking.
+      </Text>
 
       <Text style={styles.subsectionTitle}>Why this match</Text>
       {insights.map((insight, i) => (
@@ -160,16 +175,14 @@ function PairDetailPanel({ pair }: { pair: AdminPairScoreResult }) {
       <Text style={styles.subsectionTitle}>Breakdown</Text>
       <View style={styles.breakdownList}>
         <Text style={styles.breakdownLine}>
-          Attachment + Values + Semantic + Finance + Interview + Baseline − Capacity + Adjustments
+          Concrete life + domain-importance sliders + Finance + PVQ + ECR + soft adjustments (weights sum to 1.00)
         </Text>
         <Text style={styles.breakdownLine}>
-          = {formatCompatibilityPercent(result.breakdown.attachment)} +{' '}
-          {formatCompatibilityPercent(result.breakdown.values)} +{' '}
-          {formatCompatibilityPercent(result.breakdown.semantic)} +{' '}
+          = {formatCompatibilityPercent(result.contributionBreakdown?.core.concreteLifeFit.contribution ?? 0)} +{' '}
+          {formatCompatibilityPercent(result.contributionBreakdown?.core.lifeDomainImportanceAlignment.contribution ?? result.breakdown.lifeDomain)} +{' '}
           {formatCompatibilityPercent(result.breakdown.finance)} +{' '}
-          {formatCompatibilityPercent(result.breakdown.interviewProcess)} +{' '}
-          {formatCompatibilityPercent(result.breakdown.baseline)} −{' '}
-          {formatCompatibilityPercent(result.breakdown.capacityDiscount)} +{' '}
+          {formatCompatibilityPercent(result.breakdown.values)} +{' '}
+          {formatCompatibilityPercent(result.breakdown.attachment)} +{' '}
           {formatCompatibilityPercent(result.breakdown.adjustments)}
         </Text>
         {dealbreakerFailed ? (
@@ -183,18 +196,37 @@ function PairDetailPanel({ pair }: { pair: AdminPairScoreResult }) {
   );
 }
 
-function BatchResults({ result }: { result: AdminBatchMatchResult }) {
+function BatchResults({
+  result,
+  onExportCsv,
+}: {
+  result: AdminBatchMatchResult;
+  onExportCsv: () => void;
+}) {
   if (
     result.pairs.length === 0 &&
     result.unmatched.length === 0 &&
     result.notFound.length === 0 &&
-    result.profileIncomplete.length === 0
+    result.profileIncomplete.length === 0 &&
+    result.duplicateIdentifiers.length === 0
   ) {
     return null;
   }
 
   return (
     <View style={styles.resultsBlock}>
+      <View style={styles.resultsHeaderRow}>
+        <Text style={styles.resultsTitle}>
+          {result.mode === 'one_vs_list'
+            ? result.anchor
+              ? `Best matches for ${result.anchor.displayLabel} (${result.pairs.length})`
+              : `Ranked matches (${result.pairs.length})`
+            : `Matched pairs (${result.pairs.length}) — highest compatibility first`}
+        </Text>
+        <TouchableOpacity style={styles.exportCsvButton} onPress={onExportCsv} accessibilityLabel="Export CSV">
+          <Text style={styles.exportCsvButtonText}>Export CSV</Text>
+        </TouchableOpacity>
+      </View>
       {result.notFound.length > 0 ? (
         <View style={styles.warnBox}>
           <Text style={styles.warnTitle}>Not found</Text>
@@ -203,8 +235,10 @@ function BatchResults({ result }: { result: AdminBatchMatchResult }) {
       ) : null}
       {result.profileIncomplete.length > 0 ? (
         <View style={styles.warnBox}>
-          <Text style={styles.warnTitle}>Profile incomplete (skipped)</Text>
-          <Text style={styles.warnText}>{result.profileIncomplete.join(', ')}</Text>
+          <Text style={styles.warnTitle}>Ineligible (skipped)</Text>
+          <Text style={styles.warnText}>
+            {result.profileIncomplete.join(', ')} — not interview-complete, not passed, or profile incomplete
+          </Text>
         </View>
       ) : null}
       {result.duplicateIdentifiers.length > 0 ? (
@@ -215,9 +249,9 @@ function BatchResults({ result }: { result: AdminBatchMatchResult }) {
 
       {result.pairs.length > 0 ? (
         <>
-          <Text style={styles.resultsTitle}>
-            Matched pairs ({result.pairs.length}) — highest compatibility first
-          </Text>
+          {result.mode === 'all_pairs' ? (
+            <Text style={styles.resultsSubtitle}>Greedy one-to-one assignment — each user matched at most once.</Text>
+          ) : null}
           {result.pairs.map((pair) => (
             <View key={`${pair.userA.id}-${pair.userB.id}`} style={styles.batchPairCard}>
               <Text style={styles.batchRank}>#{pair.rank}</Text>
@@ -241,7 +275,7 @@ function BatchResults({ result }: { result: AdminBatchMatchResult }) {
   );
 }
 
-type ListPickTarget = 'A' | 'B' | 'batch';
+type ListPickTarget = 'A' | 'B' | 'batch' | 'anchor';
 
 function userIdentifier(user: AdminCompatDirectoryUser): string {
   return user.email ?? user.phone ?? user.displayLabel;
@@ -254,10 +288,14 @@ function UserDirectoryPanel({
   onSearchChange,
   selectedAId,
   selectedBId,
+  selectedAnchorId,
   pickTarget,
   onPickTargetChange,
   onSelectUser,
   onAddToBatch,
+  showAllUsers,
+  onToggleShowAll,
+  eligibleCount,
 }: {
   users: AdminCompatDirectoryUser[];
   loading: boolean;
@@ -265,10 +303,14 @@ function UserDirectoryPanel({
   onSearchChange: (q: string) => void;
   selectedAId: string | null;
   selectedBId: string | null;
+  selectedAnchorId: string | null;
   pickTarget: ListPickTarget;
   onPickTargetChange: (target: ListPickTarget) => void;
   onSelectUser: (user: AdminCompatDirectoryUser, target: ListPickTarget) => void;
   onAddToBatch: (user: AdminCompatDirectoryUser) => void;
+  showAllUsers: boolean;
+  onToggleShowAll: () => void;
+  eligibleCount: number;
 }) {
   const filtered = useMemo(() => {
     const base = !searchQuery.trim()
@@ -280,21 +322,33 @@ function UserDirectoryPanel({
   return (
     <View style={styles.userListPane}>
       <View style={styles.userListHeader}>
-        <Text style={styles.userListTitle}>All users</Text>
+        <Text style={styles.userListTitle}>
+          {showAllUsers ? 'All users' : 'Eligible match pool'}
+        </Text>
         <Text style={styles.userListCount}>{filtered.length}</Text>
       </View>
       <Text style={styles.userListHint}>
-        Match-ready users only (complete dating profile). Click a row to fill the active slot, or use row actions.
+        {showAllUsers
+          ? 'Full user base — includes incomplete, failed, or ineligible profiles.'
+          : `Interview complete, passed, profile ready (${eligibleCount} eligible). Default for pair and batch matching.`}
       </Text>
+      <TouchableOpacity
+        style={[styles.directoryToggle, showAllUsers && styles.directoryToggleActive]}
+        onPress={onToggleShowAll}
+      >
+        <Text style={[styles.directoryToggleText, showAllUsers && styles.directoryToggleTextActive]}>
+          {showAllUsers ? 'Showing all users' : 'Show all users'}
+        </Text>
+      </TouchableOpacity>
       <View style={styles.pickTargetRow}>
-        {(['A', 'B', 'batch'] as const).map((target) => (
+        {(['A', 'B', 'anchor', 'batch'] as const).map((target) => (
           <TouchableOpacity
             key={target}
             style={[styles.pickTargetChip, pickTarget === target && styles.pickTargetChipActive]}
             onPress={() => onPickTargetChange(target)}
           >
             <Text style={[styles.pickTargetChipText, pickTarget === target && styles.pickTargetChipTextActive]}>
-              {target === 'batch' ? 'Batch' : `User ${target}`}
+              {target === 'batch' ? 'Batch' : target === 'anchor' ? 'Anchor' : `User ${target}`}
             </Text>
           </TouchableOpacity>
         ))}
@@ -320,12 +374,13 @@ function UserDirectoryPanel({
             filtered.map((user) => {
               const isA = user.id === selectedAId;
               const isB = user.id === selectedBId;
+              const isAnchor = user.id === selectedAnchorId;
               return (
                 <Pressable
                   key={user.id}
                   style={({ pressed }) => [
                     styles.userListRow,
-                    (isA || isB) && styles.userListRowSelected,
+                    (isA || isB || isAnchor) && styles.userListRowSelected,
                     pressed && styles.userListRowPressed,
                   ]}
                   onPress={() => onSelectUser(user, pickTarget)}
@@ -343,6 +398,11 @@ function UserDirectoryPanel({
                       {isB ? (
                         <View style={[styles.userListSlotBadge, styles.userListSlotBadgeB]}>
                           <Text style={styles.userListSlotBadgeText}>B</Text>
+                        </View>
+                      ) : null}
+                      {isAnchor ? (
+                        <View style={[styles.userListSlotBadge, styles.userListSlotBadgeAnchor]}>
+                          <Text style={styles.userListSlotBadgeText}>★</Text>
                         </View>
                       ) : null}
                     </View>
@@ -389,11 +449,16 @@ function UserDirectoryPanel({
 }
 
 export function CompatibilityTab() {
-  const [directory, setDirectory] = useState<AdminCompatDirectoryUser[]>([]);
+  const [directoryAll, setDirectoryAll] = useState<AdminCompatDirectoryUser[]>([]);
+  const [directoryEligible, setDirectoryEligible] = useState<AdminCompatDirectoryUser[]>([]);
+  const [showAllUsers, setShowAllUsers] = useState(false);
   const [directoryError, setDirectoryError] = useState<string | null>(null);
   const [directoryLoading, setDirectoryLoading] = useState(true);
 
+  const [batchMode, setBatchMode] = useState<AdminBatchMatchMode>('all_pairs');
   const [batchInput, setBatchInput] = useState('');
+  const [anchorInput, setAnchorInput] = useState('');
+  const [selectedAnchor, setSelectedAnchor] = useState<AdminCompatDirectoryUser | null>(null);
   const [batchLoading, setBatchLoading] = useState(false);
   const [batchError, setBatchError] = useState<string | null>(null);
   const [batchResult, setBatchResult] = useState<AdminBatchMatchResult | null>(null);
@@ -408,6 +473,11 @@ export function CompatibilityTab() {
   const [listSearchQuery, setListSearchQuery] = useState('');
   const [pickTarget, setPickTarget] = useState<ListPickTarget>('A');
 
+  const visibleDirectory = useMemo(
+    () => (showAllUsers ? directoryAll : directoryEligible),
+    [showAllUsers, directoryAll, directoryEligible],
+  );
+
   const applyUserToSlot = useCallback((user: AdminCompatDirectoryUser, slot: 'A' | 'B') => {
     const token = userIdentifier(user);
     if (slot === 'A') {
@@ -417,6 +487,11 @@ export function CompatibilityTab() {
       setSelectedB(user);
       setUserBInput(token);
     }
+  }, []);
+
+  const applyAnchorUser = useCallback((user: AdminCompatDirectoryUser) => {
+    setSelectedAnchor(user);
+    setAnchorInput(userIdentifier(user));
   }, []);
 
   const handleListSelectUser = useCallback(
@@ -434,10 +509,14 @@ export function CompatibilityTab() {
         });
         return;
       }
+      if (target === 'anchor') {
+        applyAnchorUser(user);
+        return;
+      }
       applyUserToSlot(user, target);
       setPickTarget(target === 'A' ? 'B' : 'A');
     },
-    [applyUserToSlot],
+    [applyUserToSlot, applyAnchorUser],
   );
 
   const handleAddToBatch = useCallback((user: AdminCompatDirectoryUser) => {
@@ -448,8 +527,9 @@ export function CompatibilityTab() {
     setDirectoryLoading(true);
     setDirectoryError(null);
     try {
-      const rows = await fetchAdminCompatibilityDirectory();
-      setDirectory(rows);
+      const { all, eligible } = await fetchAdminCompatibilityDirectory();
+      setDirectoryAll(all);
+      setDirectoryEligible(eligible);
     } catch (e) {
       setDirectoryError(e instanceof Error ? e.message : 'Failed to load user directory');
     } finally {
@@ -466,14 +546,33 @@ export function CompatibilityTab() {
     setBatchError(null);
     setBatchResult(null);
     try {
-      const result = await runAdminBatchMatching(batchInput);
-      setBatchResult(result);
+      if (batchMode === 'one_vs_list') {
+        const anchorToken =
+          selectedAnchor != null
+            ? userIdentifier(selectedAnchor)
+            : anchorInput.trim();
+        if (!anchorToken) {
+          throw new Error('Select an anchor user to rank against the attendee list.');
+        }
+        const result = await runAdminOneVsListMatching(anchorToken, batchInput);
+        setBatchResult(result);
+      } else {
+        const result = await runAdminBatchMatching(batchInput);
+        setBatchResult(result);
+      }
     } catch (e) {
       setBatchError(e instanceof Error ? e.message : 'Batch matching failed');
     } finally {
       setBatchLoading(false);
     }
   };
+
+  const handleBatchExportCsv = useCallback(() => {
+    if (!batchResult) return;
+    const today = new Date().toISOString().slice(0, 10);
+    const suffix = batchResult.mode === 'one_vs_list' ? 'one_vs_list' : 'all_pairs';
+    triggerAdminBatchMatchCsvDownload(`amoraea_batch_match_${suffix}_${today}.csv`, batchResult);
+  }, [batchResult]);
 
   const resolveFromInput = (input: string, selected: AdminCompatDirectoryUser | null) => {
     if (selected) {
@@ -487,7 +586,7 @@ export function CompatibilityTab() {
         return selected;
       }
     }
-    return resolveDirectoryUser(directory, input);
+    return resolveDirectoryUser(showAllUsers ? directoryAll : directoryEligible, input);
   };
 
   const handlePairCompare = async () => {
@@ -497,8 +596,8 @@ export function CompatibilityTab() {
     try {
       const userA = selectedA ?? resolveFromInput(userAInput, selectedA);
       const userB = selectedB ?? resolveFromInput(userBInput, selectedB);
-      if (!userA) throw new Error('Could not resolve User A — pick a match-ready user from the list or enter exact email/phone.');
-      if (!userB) throw new Error('Could not resolve User B — pick a match-ready user from the list or enter exact email/phone.');
+      if (!userA) throw new Error('Could not resolve User A — pick from the directory or enter exact email/phone.');
+      if (!userB) throw new Error('Could not resolve User B — pick from the directory or enter exact email/phone.');
       if (userA.id === userB.id) throw new Error('Select two different users.');
       const result = await scoreAdminPair(userA, userB);
       setPairResult(result);
@@ -523,8 +622,9 @@ export function CompatibilityTab() {
           </TouchableOpacity>
         </View>
         <Text style={styles.pageSubtitle}>
-          Score pairs using the v2 compatibility algorithm. Only users with a fully completed dating profile
-          appear here. Dealbreakers auto-fail a match but still show the hypothetical score.
+          Score pairs using the v2 compatibility algorithm. The user directory defaults to interview-complete,
+          passed users with a ready profile — expand to all users when you need to compare outside that pool.
+          Dealbreakers auto-fail a match but still show the hypothetical score.
         </Text>
 
         {directoryError ? (
@@ -534,46 +634,10 @@ export function CompatibilityTab() {
         ) : null}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Batch match</Text>
-          <Text style={styles.sectionHint}>
-            Paste emails or phone numbers (one per line, or comma-separated). Each user gets at most one match;
-            pairs are ranked highest to lowest compatibility. Incomplete profiles are skipped automatically.
-          </Text>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            value={batchInput}
-            onChangeText={setBatchInput}
-            placeholder={'alice@example.com\nbob@example.com\n+15551234567'}
-            placeholderTextColor="#5A7090"
-            multiline
-            numberOfLines={6}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TouchableOpacity
-            style={[styles.primaryBtn, batchLoading && styles.primaryBtnDisabled]}
-            onPress={() => void handleBatchMatch()}
-            disabled={batchLoading || !batchInput.trim()}
-          >
-            {batchLoading ? (
-              <ActivityIndicator size="small" color="#E8F0F8" />
-            ) : (
-              <Text style={styles.primaryBtnText}>Run batch match</Text>
-            )}
-          </TouchableOpacity>
-          {batchError ? (
-            <View style={styles.errBanner}>
-              <Text style={styles.errText}>{batchError}</Text>
-            </View>
-          ) : null}
-          {batchResult ? <BatchResults result={batchResult} /> : null}
-        </View>
-
-        <View style={styles.section}>
           <Text style={styles.sectionTitle}>Compare two users</Text>
           <Text style={styles.sectionHint}>
-            Start typing an email or phone number for autocomplete, pick from the user list, then compare for a
-            detailed breakdown.
+            Pick two users from the eligible pool (or expand the directory), then compare. The full breakdown
+            appears immediately below — no extra navigation.
           </Text>
           <UserAutocomplete
             label="User A"
@@ -585,7 +649,7 @@ export function CompatibilityTab() {
             onSelectUser={(u) => {
               applyUserToSlot(u, 'A');
             }}
-            directory={directory}
+            directory={visibleDirectory}
           />
           <UserAutocomplete
             label="User B"
@@ -597,7 +661,7 @@ export function CompatibilityTab() {
             onSelectUser={(u) => {
               applyUserToSlot(u, 'B');
             }}
-            directory={directory}
+            directory={visibleDirectory}
           />
           <TouchableOpacity
             style={[styles.primaryBtn, pairLoading && styles.primaryBtnDisabled]}
@@ -617,19 +681,120 @@ export function CompatibilityTab() {
           ) : null}
           {pairResult ? <PairDetailPanel pair={pairResult} /> : null}
         </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Batch matching</Text>
+          <Text style={styles.sectionHint}>
+            Paste emails or phone numbers (one per line, or comma-separated). Choose whether to rank every pair
+            in the list or rank one anchor person against everyone in the list.
+          </Text>
+          <View style={styles.batchModeRow}>
+            <TouchableOpacity
+              style={[styles.batchModeChip, batchMode === 'all_pairs' && styles.batchModeChipActive]}
+              onPress={() => setBatchMode('all_pairs')}
+            >
+              <Text
+                style={[
+                  styles.batchModeChipText,
+                  batchMode === 'all_pairs' && styles.batchModeChipTextActive,
+                ]}
+              >
+                Rank all pairs in list
+              </Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.batchModeChip, batchMode === 'one_vs_list' && styles.batchModeChipActive]}
+              onPress={() => setBatchMode('one_vs_list')}
+            >
+              <Text
+                style={[
+                  styles.batchModeChipText,
+                  batchMode === 'one_vs_list' && styles.batchModeChipTextActive,
+                ]}
+              >
+                Rank one person vs list
+              </Text>
+            </TouchableOpacity>
+          </View>
+          {batchMode === 'one_vs_list' ? (
+            <UserAutocomplete
+              label="Anchor user"
+              value={anchorInput}
+              onChangeText={(v) => {
+                setAnchorInput(v);
+                setSelectedAnchor(null);
+              }}
+              onSelectUser={(u) => {
+                applyAnchorUser(u);
+              }}
+              directory={visibleDirectory}
+            />
+          ) : null}
+          <TextInput
+            style={[styles.input, styles.textArea]}
+            value={batchInput}
+            onChangeText={setBatchInput}
+            placeholder={
+              batchMode === 'one_vs_list'
+                ? 'Attendee list — one email or phone per line'
+                : 'alice@example.com\nbob@example.com\n+15551234567'
+            }
+            placeholderTextColor="#5A7090"
+            multiline
+            numberOfLines={6}
+            autoCapitalize="none"
+            autoCorrect={false}
+          />
+          <TouchableOpacity
+            style={[
+              styles.primaryBtn,
+              batchLoading && styles.primaryBtnDisabled,
+              batchMode === 'one_vs_list' &&
+                !anchorInput.trim() &&
+                !selectedAnchor &&
+                styles.primaryBtnDisabled,
+            ]}
+            onPress={() => void handleBatchMatch()}
+            disabled={
+              batchLoading ||
+              !batchInput.trim() ||
+              (batchMode === 'one_vs_list' && !anchorInput.trim() && !selectedAnchor)
+            }
+          >
+            {batchLoading ? (
+              <ActivityIndicator size="small" color="#E8F0F8" />
+            ) : (
+              <Text style={styles.primaryBtnText}>
+                {batchMode === 'one_vs_list' ? 'Rank anchor vs list' : 'Run batch match'}
+              </Text>
+            )}
+          </TouchableOpacity>
+          {batchError ? (
+            <View style={styles.errBanner}>
+              <Text style={styles.errText}>{batchError}</Text>
+            </View>
+          ) : null}
+          {batchResult ? (
+            <BatchResults result={batchResult} onExportCsv={handleBatchExportCsv} />
+          ) : null}
+        </View>
       </ScrollView>
 
       <UserDirectoryPanel
-        users={directory}
+        users={visibleDirectory}
         loading={directoryLoading}
         searchQuery={listSearchQuery}
         onSearchChange={setListSearchQuery}
         selectedAId={selectedA?.id ?? null}
         selectedBId={selectedB?.id ?? null}
+        selectedAnchorId={selectedAnchor?.id ?? null}
         pickTarget={pickTarget}
         onPickTargetChange={setPickTarget}
         onSelectUser={handleListSelectUser}
         onAddToBatch={handleAddToBatch}
+        showAllUsers={showAllUsers}
+        onToggleShowAll={() => setShowAllUsers((v) => !v)}
+        eligibleCount={directoryEligible.length}
       />
     </View>
   );
@@ -713,6 +878,7 @@ const styles = StyleSheet.create({
   },
   userListSlotBadgeA: { backgroundColor: 'rgba(30,111,217,0.35)' },
   userListSlotBadgeB: { backgroundColor: 'rgba(125, 223, 168, 0.25)' },
+  userListSlotBadgeAnchor: { backgroundColor: 'rgba(245, 158, 11, 0.25)' },
   userListSlotBadgeText: { color: '#E8F0F8', fontSize: 9, fontWeight: '700' },
   userListEmail: { color: '#9BB0CC', fontSize: 11 },
   userListPhone: { color: '#7A9ABE', fontSize: 11, marginTop: 2 },
@@ -791,7 +957,53 @@ const styles = StyleSheet.create({
   suggestionLabel: { color: '#E8F0F8', fontSize: 13 },
   suggestionMeta: { color: '#7A9ABE', fontSize: 11, marginTop: 2 },
   resultsBlock: { marginTop: 16 },
-  resultsTitle: { color: '#C8E4FF', fontSize: 13, fontWeight: '600', marginBottom: 10 },
+  resultsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  resultsTitle: { color: '#C8E4FF', fontSize: 13, fontWeight: '600', flex: 1 },
+  resultsSubtitle: { color: '#7A9ABE', fontSize: 11, marginBottom: 10, lineHeight: 16 },
+  exportCsvButton: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.35)',
+    borderRadius: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    backgroundColor: 'rgba(13,17,32,0.6)',
+  },
+  exportCsvButtonText: { color: '#9BB0CC', fontSize: 11, fontWeight: '600' },
+  batchModeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  batchModeChip: {
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  batchModeChipActive: {
+    backgroundColor: 'rgba(30,111,217,0.2)',
+    borderColor: 'rgba(82,142,220,0.45)',
+  },
+  batchModeChipText: { color: '#7A9ABE', fontSize: 11, fontWeight: '600' },
+  batchModeChipTextActive: { color: '#C8E4FF' },
+  directoryToggle: {
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'rgba(82,142,220,0.22)',
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    marginBottom: 10,
+  },
+  directoryToggleActive: {
+    backgroundColor: 'rgba(30,111,217,0.15)',
+    borderColor: 'rgba(82,142,220,0.4)',
+  },
+  directoryToggleText: { color: '#7A9ABE', fontSize: 11, fontWeight: '600' },
+  directoryToggleTextActive: { color: '#C8E4FF' },
   batchPairCard: { marginBottom: 16 },
   batchRank: { color: '#7A9ABE', fontSize: 11, fontWeight: '600', marginBottom: 4 },
   detailPanel: {

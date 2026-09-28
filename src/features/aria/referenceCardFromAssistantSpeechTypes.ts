@@ -16,6 +16,7 @@ export type ApplyReferenceCardFromAssistantSpeechDeps = {
   scenarioAContemptProbeAskedRef?: MutableRefObject<boolean>;
   scenarioARepairQuestionAskedRef?: MutableRefObject<boolean>;
   s2RepairProbeDeliveredRef?: MutableRefObject<boolean>;
+  s3RepairProbeDeliveredRef?: MutableRefObject<boolean>;
   setReferenceCardScenario: Dispatch<SetStateAction<ActiveScenario | null>>;
   setReferenceCardPrompt: Dispatch<SetStateAction<string | null>>;
   setInterviewUiPhase: Dispatch<SetStateAction<InterviewUiPhase>>;

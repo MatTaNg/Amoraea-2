@@ -18,8 +18,8 @@ export function transcriptHasScenario1VignetteAssistant(
 export function buildFallbackIntroBriefingText(firstName: string): string {
   const name = firstName.trim() || 'there';
   return (
-    `Good to meet you, ${name}. The way this works is I'll first give you three situations, ` +
-    "and you just tell me what you'd do in each situation. Then I'll give you two short personal questions. " +
+    `Good to meet you, ${name}. The way this works is I'll first give you three scenarios, ` +
+    "and you just tell me what you'd do in each one. Then I'll give you three personal questions. " +
     'The whole thing usually takes about 20 to 30 minutes. Try to find a quiet, private space if you can. ' +
     "The more information you give me the better I will be able to get to know you, so try to make your answers as thorough and in depth as possible. Are you ready?"
   );
@@ -53,7 +53,7 @@ export function looksLikeIntroBriefingSpeech(text: string): boolean {
   }
   return (
     /good to meet you/i.test(lower) &&
-    (/the way this works/i.test(lower) || /three situations/i.test(lower) || /five parts/i.test(lower))
+    (/the way this works/i.test(lower) || /three scenarios/i.test(lower) || /three situations/i.test(lower) || /six parts/i.test(lower) || /five parts/i.test(lower))
   );
 }
 

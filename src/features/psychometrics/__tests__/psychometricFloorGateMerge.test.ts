@@ -18,6 +18,7 @@ import {
   collectPsychometricFloorUncertaintyFlags,
   mergeInterviewGateFailReasonsPreservingPsychometricFloors,
   mergePsychometricFloorsIntoGateState,
+  wouldTriggerAnxietyTraitHighFloor,
   normalizePsychometricFloorsGateDetail,
   RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
   RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_THRESHOLD,
@@ -103,7 +104,7 @@ describe('psychometric floor gate merge', () => {
     );
   });
 
-  it('mergePsychometricFloorsIntoGateState adds GASP and Dweck floors and fails final gate', () => {
+  it('mergePsychometricFloorsIntoGateState adds GASP floors and does not auto-fail historical Dweck', () => {
     const merged = mergePsychometricFloorsIntoGateState({
       existingFailReasons: ['weighted_score'],
       existingDetail: { weighted_score: { score: 7.2, requiredMin: GATE_PASS_WEIGHTED_MIN } },
@@ -115,14 +116,14 @@ describe('psychometric floor gate merge', () => {
       straightLineFlags: [],
     });
     expect(merged.gateFailReasons).toContain(GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE);
-    expect(merged.gateFailReasons).toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
+    expect(merged.gateFailReasons).not.toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
     expect(merged.gateFailReasons).toContain('weighted_score');
     const psychFloors = merged.gateFailDetail.psychometric_floors as Record<
       string,
       { score: number; description: string }
     >;
     expect(psychFloors[GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE]?.score).toBe(4.75);
-    expect(psychFloors[DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE]?.score).toBe(2.3);
+    expect(psychFloors[DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE]).toBeUndefined();
     expect(psychFloors[GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE]?.description).toContain('4.6');
   });
 
@@ -219,7 +220,7 @@ describe('psychometric floor gate merge', () => {
     );
     expect(result.psychometricFloorBreaches.sort()).toEqual(expected.sort());
     expect(result.psychometricFloorBreaches).toContain(RSES_LOW_SELF_ESTEEM_FLOOR_CODE);
-    expect(result.psychometricFloorBreaches).toContain(AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE);
+    expect(result.psychometricFloorBreaches).not.toContain(AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE);
   });
 
   it('ALL_PSYCHOMETRIC_GATE_FAIL_FLOOR_CODES includes new instrument floors', () => {
@@ -284,8 +285,10 @@ describe('psychometric floor gate merge', () => {
       { score: number; description: string }
     >;
     expect(Array.isArray(psychFloors)).toBe(false);
-    expect(psychFloors[RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE]?.score).toBe(1.625);
+    expect(psychFloors[RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE]).toBeUndefined();
     expect(psychFloors[GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE]?.description).toContain('4.6');
+    expect(merged.gateFailReasons).not.toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
+    expect(merged.gateFailReasons).toContain(GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE);
   });
 
   it('mergePsychometricFloorsIntoGateState produces rich detail for all triggered floors', () => {
@@ -307,21 +310,19 @@ describe('psychometric floor gate merge', () => {
     }
   });
 
-  it('triggers all eight active instrument floors for the regression user profile', () => {
+  it('triggers active new-user instrument floors for the regression user profile', () => {
     const breaches = collectPsychometricFloorGateFailReasons(REGRESSION_FLOOR_SCORES, []);
     expect(breaches).toEqual(
       expect.arrayContaining([
-        RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
         GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
-        DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
         SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE,
         BRS_LOW_RESILIENCE_FLOOR_CODE,
-        AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
         RSES_LOW_SELF_ESTEEM_FLOOR_CODE,
-        ...(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? [ACTIVE_NARCISSISM_FLOOR_CODE] : []),
       ]),
     );
-    expect(breaches).toHaveLength(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? 8 : 7);
+    expect(breaches).not.toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
+    expect(breaches).not.toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
+    expect(breaches).not.toContain(AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE);
   });
 
   it('does not trigger any floors at healthy moderate scores', () => {
@@ -354,23 +355,20 @@ describe('psychometric floor gate merge', () => {
     expect(merged.gateFailDetail.psychometric_floors).toEqual({});
   });
 
-  it('triggers anxiety_trait_high_floor at score 5.0 with gate_fail_detail', () => {
+  it('does not auto-fail new users at anxiety_trait 5.0 (historical detector only)', () => {
     const merged = mergePsychometricFloorsIntoGateState({
       existingFailReasons: [],
       existingDetail: null,
       scores: { ...HEALTHY_FLOOR_SCORES, anxietyTraitScore: 5.0 },
       straightLineFlags: [],
     });
-    expect(merged.gateFailReasons).toContain(ANXIETY_TRAIT_HIGH_FLOOR_CODE);
+    expect(merged.gateFailReasons).not.toContain(ANXIETY_TRAIT_HIGH_FLOOR_CODE);
     const psychFloors = merged.gateFailDetail.psychometric_floors as Record<
       string,
       { score: number; description: string }
     >;
-    expect(psychFloors[ANXIETY_TRAIT_HIGH_FLOOR_CODE]?.score).toBe(5);
-    expect(psychFloors[ANXIETY_TRAIT_HIGH_FLOOR_CODE]?.description).toContain('4.9');
-    expect(psychFloors[ANXIETY_TRAIT_HIGH_FLOOR_CODE]?.description).toContain(
-      'near-maximum chronic trait anxiety',
-    );
+    expect(psychFloors[ANXIETY_TRAIT_HIGH_FLOOR_CODE]).toBeUndefined();
+    expect(wouldTriggerAnxietyTraitHighFloor(5.0, [])).toBe(true);
   });
 
   it('does not trigger anxiety_trait_high_floor at score 4.0', () => {
@@ -379,14 +377,16 @@ describe('psychometric floor gate merge', () => {
       [],
     );
     expect(breaches).not.toContain(ANXIETY_TRAIT_HIGH_FLOOR_CODE);
+    expect(wouldTriggerAnxietyTraitHighFloor(4.0, [])).toBe(false);
   });
 
-  it('triggers anxiety_trait_high_floor when straight-line flag is present but score breaches threshold', () => {
+  it('does not merge anxiety_trait_high_floor into the new-user gate even with straight-line flags', () => {
     const breaches = collectPsychometricFloorGateFailReasons(
       { ...HEALTHY_FLOOR_SCORES, anxietyTraitScore: 5.0 },
       ['anxiety_trait_straight_line'],
     );
-    expect(breaches).toContain(ANXIETY_TRAIT_HIGH_FLOOR_CODE);
+    expect(breaches).not.toContain(ANXIETY_TRAIT_HIGH_FLOOR_CODE);
+    expect(wouldTriggerAnxietyTraitHighFloor(5.0, ['anxiety_trait_straight_line'])).toBe(true);
   });
 
   it('fires floors based on score alone regardless of straight-line flags', () => {
@@ -396,9 +396,9 @@ describe('psychometric floor gate merge', () => {
       expectedFloor: string;
     }> = [
       {
-        scores: { ...HEALTHY_FLOOR_SCORES, aaq2Score: 37 },
-        straightLineFlags: ['aaq2_straight_line'],
-        expectedFloor: AAQ2_HIGH_EXPERIENTIAL_AVOIDANCE_FLOOR_CODE,
+        scores: { ...HEALTHY_FLOOR_SCORES, gaspScore: 5.0 },
+        straightLineFlags: ['gasp_straight_line'],
+        expectedFloor: GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
       },
       {
         scores: { ...HEALTHY_FLOOR_SCORES, rsesScore: 13 },

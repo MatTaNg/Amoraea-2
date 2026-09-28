@@ -1,5 +1,4 @@
 import { supabase } from '@data/supabase/client';
-import { GATE_PASS_WEIGHTED_MIN, REFERRAL_WEIGHTED_PASS_MIN } from '@features/aria/computeGateResult';
 
 export const REFERRAL_BASE_DISCOUNT = 40;
 export const REFERRAL_STEP_DISCOUNT = 20;
@@ -33,29 +32,6 @@ export async function applyReferralCompletionEffects(
   } catch (e) {
     if (__DEV__) console.warn('[referral] fulfill RPC failed', e);
   }
-}
-
-/**
- * Returns the weighted pass threshold to use for gate scoring based on referral flags.
- * Referral discount fulfillment runs only after psychometrics via {@link applyReferralCompletionEffects}.
- */
-export async function resolveWeightedPassMinAfterReferralEffects(
-  userId: string | null | undefined
-): Promise<number> {
-  if (!userId) return GATE_PASS_WEIGHTED_MIN;
-
-  const { data, error } = await supabase
-    .from('users')
-    .select('referral_boost_active, referred_by_id')
-    .eq('id', userId)
-    .maybeSingle();
-
-  if (error && __DEV__) {
-    console.warn('[referral] fetch referral weighting flags', error.message);
-  }
-  return data?.referral_boost_active === true || !!data?.referred_by_id
-    ? REFERRAL_WEIGHTED_PASS_MIN
-    : GATE_PASS_WEIGHTED_MIN;
 }
 
 export type ReferralDiscountStatus = {

@@ -125,6 +125,7 @@ export async function runPreClaudeTurnGates(
     lastAssistantContent: lateIntercept.lastAssistantContent,
     isNameEntryTurn: preCommit.isNameEntryTurn,
     trimmed: params.trimmed,
+    shouldForceMoment4OrientationProbe: lateIntercept.shouldForceMoment4OrientationProbe,
     shouldForceMoment4ThresholdProbe: lateIntercept.shouldForceMoment4ThresholdProbe,
     moment4ThresholdHintInAnswer: lateIntercept.moment4ThresholdHintInAnswer,
     moment5CombinedUserText: lateIntercept.moment5CombinedUserText,

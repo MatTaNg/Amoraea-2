@@ -29,13 +29,18 @@ export function buildInterviewProgressSystemSuffix(opts: {
   const lines: string[] = [
     '',
     'PROGRESS LOCKS (internal metadata — obey strictly; never read aloud):',
-    `Current interview moment index (1–5): ${opts.currentMoment}. 1–3 = scenarios A–C; 4 = first personal segment (grudge/dislike + optional specificity follow-up + commitment-threshold follow-up — all still Moment 4); 5 = conflict/resolution personal question (+ at most one scripted accountability probe); after the user completes Moment 5 (and any probe), final closing only.`,
+    `Current interview moment index (1–5): ${opts.currentMoment}. 1–3 = scenarios A–C; 4 = personal block (grudge → keep-investing → walk-away threshold → support/stressed story + optional need-recognition probe — all still Moment 4); 5 = conflict/resolution personal question (+ at most one scripted accountability probe); after the user completes Moment 5 (and any probe), final closing only.`,
   ];
   if (opts.momentsComplete[1]) lines.push('Moment 1 COMPLETE — do not re-open Scenario A.');
   if (opts.momentsComplete[2]) lines.push('Moment 2 COMPLETE — do not re-open Scenario B.');
   if (opts.momentsComplete[3]) lines.push('Moment 3 COMPLETE — do not re-open Scenario C.');
   if (opts.personalHandoffInjected) {
     lines.push('The transition into the personal (grudge) question was already delivered. Never repeat that full handoff.');
+  }
+  if (opts.currentMoment === 4) {
+    lines.push(
+      'Still in Moment 4 — after support answers, the client delivers Moment 5 conflict next. Do NOT say "Your interview is complete" or output [INTERVIEW_COMPLETE] yet.',
+    );
   }
   if (opts.momentsComplete[5]) {
     lines.push(

@@ -60,7 +60,7 @@ describe('personalDisclosureAckGate', () => {
     ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('resolveScenarioFollowUpAfterSuppressedResponse returns S1 repair after contempt', () => {
+  it('resolveScenarioFollowUpAfterSuppressedResponse does not return retired S1 repair', () => {
     expect(
       resolveScenarioFollowUpAfterSuppressedResponse({
         interviewMoment: 1,
@@ -78,10 +78,10 @@ describe('personalDisclosureAckGate', () => {
           { role: 'user', content: 'condescending' },
         ],
       }),
-    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    ).toBeNull();
   });
 
-  it('resolveScenarioFollowUpAfterSuppressedResponse delivers repair after phantom repair in transcript', () => {
+  it('resolveScenarioFollowUpAfterSuppressedResponse does not deliver repair after phantom repair when retired', () => {
     expect(
       resolveScenarioFollowUpAfterSuppressedResponse({
         interviewMoment: 1,
@@ -100,7 +100,7 @@ describe('personalDisclosureAckGate', () => {
           { role: 'user', content: 'condescending' },
         ],
       }),
-    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    ).toBeNull();
   });
 
   it('resolveScenarioFollowUpAfterSuppressedResponse does not skip ahead to repair before contempt answer', () => {
@@ -123,7 +123,7 @@ describe('personalDisclosureAckGate', () => {
     ).toBeNull();
   });
 
-  it('resolveScenarioFollowUpAfterSuppressedResponse returns repair when contempt satisfied without probe at moment 2', () => {
+  it('resolveScenarioFollowUpAfterSuppressedResponse does not return repair when contempt satisfied without probe at moment 2', () => {
     expect(
       resolveScenarioFollowUpAfterSuppressedResponse({
         interviewMoment: 2,
@@ -140,7 +140,7 @@ describe('personalDisclosureAckGate', () => {
           { role: 'user', content: 'Emma is frustrated when she says you made that very clear.' },
         ],
       }),
-    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    ).toBeNull();
   });
 
   it('resolveScenarioFollowUpAfterSuppressedResponse returns null for personal moments', () => {

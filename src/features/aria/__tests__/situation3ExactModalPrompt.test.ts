@@ -2,6 +2,7 @@ import { describe, expect, it } from '@jest/globals';
 
 import { SCENARIO_3_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
 import { SCENARIO_3_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import { SCENARIO_B_JAMES_REPAIR_CANONICAL } from '@features/aria/scenarioBProbeLogic';
 import {
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
@@ -77,6 +78,57 @@ describe('situation3ExactModalPrompt', () => {
     expect(resolveSituation3ExactModalPrompt([], danielRepair)).toBe(
       SCENARIO_C_REPAIR_QUESTION_CANONICAL,
     );
+  });
+
+  it('prefers repair over Sophie when repair was delivered but transcript still only has Sophie', () => {
+    const sophieParaphrase =
+      'What do you think leaving has been like for Sophie over time?';
+    const transcript = [
+      { role: 'assistant', content: SCENARIO_3_TEXT },
+      { role: 'user', content: 'Daniel was overwhelmed.' },
+      { role: 'assistant', content: sophieParaphrase },
+      { role: 'user', content: 'Probably frustrating for her.' },
+    ];
+    expect(
+      resolveSituation3ExactModalPrompt(transcript, 'Got it.', {
+        sophiePerspectiveAsked: true,
+        danielRepairDelivered: true,
+      }),
+    ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+  });
+
+  it('shows repair when spoken even if Sophie paraphrase is still the last transcript question', () => {
+    const transcript = [
+      { role: 'assistant', content: SCENARIO_3_TEXT },
+      { role: 'user', content: 'Daniel shut down.' },
+      {
+        role: 'assistant',
+        content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
+      },
+      { role: 'user', content: 'She felt dismissed.' },
+    ];
+    const repairSpoken = 'Got it. How do you think this situation could be repaired?';
+    expect(resolveSituation3ExactModalPrompt(transcript, repairSpoken)).toBe(
+      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+    );
+  });
+
+  it('returns repair canonical from delivery fallback when repair is in transcript but extract missed', () => {
+    const transcript = [
+      { role: 'assistant', content: SCENARIO_3_TEXT },
+      { role: 'assistant', content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE },
+      { role: 'user', content: 'Hard for her.' },
+      {
+        role: 'assistant',
+        content: 'Got it. How do you think this situation can be repaired?',
+      },
+    ];
+    expect(
+      resolveSituation3ExactModalPrompt(transcript, null, {
+        sophiePerspectiveAsked: true,
+        danielRepairAsked: true,
+      }),
+    ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
   });
 });
 

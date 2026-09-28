@@ -12,6 +12,7 @@ import {
   WHISPER_RATIO_REASK_MAX_ATTEMPTS_PER_QUESTION,
 } from '@features/aria/interviewLanguageGate';
 import {
+  hasMinimalAssessableScenarioContent,
   hasQuestionRecoveryPromptAlreadySpokenForSeq,
   IRRELEVANT_ANSWER_RETRY_LINE,
   looksLikeCompleteShortUserReply,
@@ -119,7 +120,9 @@ export async function applyRecordingCompletePostTranscribeGates(
 
   const turnContext = getWhisperReaskTurnContext(lastQuestionText, nameCollectionCtx);
   const shortAnswerOk = isShortAnswerOkForWhisperRatioGate(lastQuestionText);
-  const ratioFlag = wps < 0.3 || (!shortAnswerOk && wc < 3);
+  // Native clips often lack decoded duration (durMs === 0); do not infer suspicious wps from unknown length.
+  const ratioFlag =
+    durMs > 0 && (wps < 0.3 || (!shortAnswerOk && wc < 3));
   const ratioReaskState = computeWhisperRatioReaskState({
     turnContext,
     transcriptText: userText,
@@ -179,14 +182,15 @@ export async function applyRecordingCompletePostTranscribeGates(
       willRatioReask = false;
     }
   }
+  const recoveryAlreadySpokenForQuestion = hasQuestionRecoveryPromptAlreadySpokenForSeq(
+    deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current,
+    deps.substantiveInterviewQuestionDeliveredSeqRef.current,
+  );
   if (
     turnContext === 'substantive' &&
     cutOffSync.isCutOff &&
     cutOffSync.confidence === 'high' &&
-    !hasQuestionRecoveryPromptAlreadySpokenForSeq(
-      deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current,
-      deps.substantiveInterviewQuestionDeliveredSeqRef.current,
-    )
+    !recoveryAlreadySpokenForQuestion
   ) {
     await deps.deleteTurnAudioFile(nativeUri);
     deps.recoveryAssistantSpokenAtSubstantiveSeqRef.current =
@@ -200,10 +204,20 @@ export async function applyRecordingCompletePostTranscribeGates(
       .speakTextSafe(IRRELEVANT_ANSWER_RETRY_LINE, {
         telemetrySource: 'turn',
         skipLastQuestionRef: true,
+        allowDuplicateConsecutiveTts: true,
       })
       .catch(() => {});
     deps.setVoiceState('idle');
     return false;
+  }
+  if (
+    turnContext === 'substantive' &&
+    cutOffSync.isCutOff &&
+    recoveryAlreadySpokenForQuestion &&
+    hasMinimalAssessableScenarioContent(userText)
+  ) {
+    // User already heard the cut-off recovery prompt — accept a substantive repeat instead of stalling.
+    willRatioReask = false;
   }
   setLastWhisperRatioTelemetry(ratioFlag, durMs, wc);
   if (deps.userId) {

@@ -6,6 +6,7 @@ import { PILLAR_ROLLUP_ALGORITHM_VERSION } from './aggregateMarkerScoresFromSlic
 import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
   extractEgoDevelopmentLevel,
+  markerSliceFromStoredScenarioMoment,
   type DefensePatternsJson,
   type MarkerScoreSlice,
 } from './aggregateMarkerScoresFromSlices';
@@ -64,6 +65,7 @@ export function recalculateAttemptScoresFromStoredSlices(
   const patterns = parseObject(input.scenario_specific_patterns);
   const m4Raw = parseObject(patterns?.moment_4_scores);
   const m5Raw = parseObject(patterns?.moment_5_scores);
+  const supportRaw = parseObject(patterns?.moment_support_scores);
   const tx = input.transcript;
   const txArr = (Array.isArray(tx) ? tx : []) as TranscriptMsg[];
 
@@ -217,6 +219,7 @@ export function recalculateAttemptScoresFromStoredSlices(
           user_slice_word_count: m5ForAgg.user_slice_word_count ?? undefined,
         }
       : null,
+    markerSliceFromStoredScenarioMoment(supportRaw),
   ];
   const egoFromRow = extractEgoDevelopmentLevel({ ego_development_level: input.ego_development_level });
   const moment4UserTextForGate = resolveMoment4UserTextForGate(txArr);
@@ -226,7 +229,7 @@ export function recalculateAttemptScoresFromStoredSlices(
     disclosureCalibrationTranscript: txArr as Array<{ role?: string; content?: string; interviewMoment?: number }>,
     moment4UserText: moment4UserTextForGate,
   });
-  const { scores: pillar_scores, mentalizingOvercertaintyCount, defensePatterns } = agg;
+  const { scores: pillar_scores, mentalizingOvercertaintyCount, defensePatterns, repairSourceSignals, regulationSourceSignals } = agg;
 
   const scenarioPillarScoresByScenario = buildScenarioPillarMapsFromStoredBundles(
     input.scenario_1_scores,
@@ -368,5 +371,7 @@ export function recalculateAttemptScoresFromStoredSlices(
     moment_4_concreteness: gateMoment4Concreteness,
     moment_5_concreteness: gateMoment5Concreteness,
     ego_development_level: egoForGate,
+    repair_source_signals: repairSourceSignals,
+    regulation_source_signals: regulationSourceSignals,
   };
 }

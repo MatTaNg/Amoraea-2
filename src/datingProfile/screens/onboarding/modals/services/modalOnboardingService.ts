@@ -980,59 +980,26 @@ class ModalOnboardingService {
         }, {} as Record<string, string>),
       });
 
-      // First, try to update existing record
-      const { data: existingData, error: selectError } = await supabase
-        .from('onboarding_progress')
-        .select('user_id')
-        .eq('user_id', userId)
-        .maybeSingle();
+      // Upsert — avoids duplicate key races when two saves run before either insert completes.
+      const { error: upsertError } = await supabase.from('onboarding_progress').upsert(
+        {
+          user_id: userId,
+          ...updateData,
+        },
+        { onConflict: 'user_id' },
+      );
 
-      if (selectError) {
-        console.error('Error checking existing progress:', selectError);
-        return { success: false, error: selectError as Error };
+      if (upsertError) {
+        console.error('Supabase error saving progress:', upsertError);
+        return { success: false, error: upsertError as Error };
       }
 
-      if (existingData) {
-        // Update existing record
-        const { error: updateError, data: updatedData } = await supabase
-          .from('onboarding_progress')
-          .update(updateData)
-          .eq('user_id', userId)
-          .select();
-
-        if (updateError) {
-          console.error('Supabase error updating progress:', updateError);
-          return { success: false, error: updateError as Error };
-        }
-        
-        console.log('Successfully updated onboarding progress in database:', {
-          userId,
-          currentStep: progress.currentStep,
-          completedStepsCount: completedSteps.length,
-          dataKeys: Object.keys(onboardingData),
-        });
-      } else {
-        // Insert new record
-        const { error: insertError, data: insertedData } = await supabase
-          .from('onboarding_progress')
-          .insert({
-            user_id: userId,
-            ...updateData,
-          })
-          .select();
-
-        if (insertError) {
-          console.error('Supabase error inserting progress:', insertError);
-          return { success: false, error: insertError as Error };
-        }
-        
-        console.log('Successfully inserted onboarding progress in database:', {
-          userId,
-          currentStep: progress.currentStep,
-          completedStepsCount: completedSteps.length,
-          dataKeys: Object.keys(onboardingData),
-        });
-      }
+      console.log('Successfully saved onboarding progress in database:', {
+        userId,
+        currentStep: progress.currentStep,
+        completedStepsCount: completedSteps.length,
+        dataKeys: Object.keys(onboardingData),
+      });
 
       return { success: true };
     } catch (error) {

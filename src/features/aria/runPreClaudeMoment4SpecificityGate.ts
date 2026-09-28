@@ -10,7 +10,10 @@ import {
   evaluateMoment4RelationshipType,
   looksLikeMisplacedNonGrudgeMoment4Answer,
   looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
+  shouldForceMoment4OrientationProbe as evaluateMoment4OrientationProbeEligibility,
   shouldForceMoment4ThresholdProbe as evaluateMoment4ThresholdProbeEligibility,
+  transcriptIncludesAssistantMatch,
   transcriptIncludesMoment4ThresholdAssistant,
 } from '@features/aria/moment4ProbeLogic';
 import {
@@ -21,6 +24,7 @@ import {
   looksLikeMoment4SpecificityFollowUpEcho,
   needsMoment4SpecificityFollowUp,
 } from '@features/aria/moment4SpecificityFollowUp';
+import { deliverMoment4CommitmentOrientationProbe } from '@features/aria/deliverMoment4CommitmentOrientationProbe';
 import { deliverMoment4CommitmentThresholdProbe } from '@features/aria/deliverMoment4CommitmentThresholdProbe';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { remoteLog } from '@utilities/remoteLog';
@@ -28,6 +32,7 @@ import { remoteLog } from '@utilities/remoteLog';
 export type PreClaudeMoment4SpecificityGateResult = {
   handled: boolean;
   answeringAfterMoment4SpecificityProbe: boolean;
+  shouldForceMoment4OrientationProbe: boolean;
   shouldForceMoment4ThresholdProbe: boolean;
   moment4ThresholdHintInAnswer: boolean;
 };
@@ -42,6 +47,7 @@ export async function runPreClaudeMoment4SpecificityGate(
   lastAssistantContent: string,
   orchestratorOwnsThresholdInject = false,
 ): Promise<PreClaudeMoment4SpecificityGateResult> {
+  const orchestratorOwnsCommitmentInject = orchestratorOwnsThresholdInject;
   const lastAssistantLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(lastAssistantContent);
   const lastQuestionLooksLikeMoment4Grudge = looksLikeMoment4GrudgePrompt(
     deps.lastQuestionTextRef.current ?? '',
@@ -138,12 +144,24 @@ export async function runPreClaudeMoment4SpecificityGate(
     }
   }
 
+  const orientationInTranscript = transcriptIncludesAssistantMatch(
+    messagesToUse,
+    looksLikeMoment4OrientationQuestion,
+  );
+  const moment4OrientationFollowUpBaseEligible = evaluateMoment4OrientationProbeEligibility({
+    isMoment4: deps.currentInterviewMomentRef.current === 4,
+    orientationProbeAlreadyAsked: orientationInTranscript,
+    lastAssistantContent,
+    userAnswerText: trimmed,
+    answeringSpecificityFollowUp: answeringAfterMoment4SpecificityProbe,
+  });
   const moment4CommitmentFollowUpBaseEligible = evaluateMoment4ThresholdProbeEligibility({
     isMoment4: deps.currentInterviewMomentRef.current === 4,
     probeAlreadyAsked: deps.moment4ThresholdProbeAskedRef.current,
     lastAssistantContent,
     userAnswerText: trimmed,
-    answeringSpecificityFollowUp: answeringAfterMoment4SpecificityProbe,
+    orientationInTranscript,
+    priorTranscript: messagesToUse.slice(0, -1),
   });
   const moment4UserExplicitPass = isExplicitPassForMoment4CommitmentFollowUp(trimmed);
   const moment4SpecificityProbePending =
@@ -155,40 +173,52 @@ export async function runPreClaudeMoment4SpecificityGate(
   if (moment4SpecificityProbePending) {
     deps.moment4PostGrudgeSpecificityResolvedRef.current = false;
   }
-  const shouldForceMoment4ThresholdProbe =
-    moment4CommitmentFollowUpBaseEligible &&
+  const shouldForceMoment4OrientationProbe =
+    moment4OrientationFollowUpBaseEligible &&
     !moment4UserExplicitPass &&
     deps.moment4PostGrudgeSpecificityResolvedRef.current &&
     !moment4SpecificityProbePending &&
     !looksLikeIncompleteCutOffUserAnswer(trimmed);
+  const shouldForceMoment4ThresholdProbe =
+    moment4CommitmentFollowUpBaseEligible &&
+    !moment4UserExplicitPass &&
+    !moment4SpecificityProbePending &&
+    !looksLikeIncompleteCutOffUserAnswer(trimmed);
+  const moment4OrientationFollowUpAlreadyInSession = orientationInTranscript;
   const moment4ThresholdFollowUpAlreadyInSession =
     deps.moment4ThresholdProbeAskedRef.current ||
     transcriptIncludesMoment4ThresholdAssistant(messagesToUse.slice(0, -1));
 
   let moment4CommitmentFollowUpReasonIfFalse: string | null = null;
-  if (!shouldForceMoment4ThresholdProbe) {
+  if (!shouldForceMoment4OrientationProbe && !shouldForceMoment4ThresholdProbe) {
     if (deps.currentInterviewMomentRef.current !== 4) moment4CommitmentFollowUpReasonIfFalse = 'not_moment_4';
-    else if (deps.moment4ThresholdProbeAskedRef.current) {
+    else if (orientationInTranscript && deps.moment4ThresholdProbeAskedRef.current) {
       moment4CommitmentFollowUpReasonIfFalse = 'commitment_follow_up_already_asked';
     } else if (moment4UserExplicitPass) moment4CommitmentFollowUpReasonIfFalse = 'explicit_pass_or_empty';
-    else if (!lastAssistantLooksLikeMoment4Grudge && !answeringAfterMoment4SpecificityProbe) {
+    else if (!lastAssistantLooksLikeMoment4Grudge && !answeringAfterMoment4SpecificityProbe && !orientationInTranscript) {
       moment4CommitmentFollowUpReasonIfFalse = 'not_replying_to_grudge_or_specificity_prompt';
     } else if (moment4AnswerLooksMisplaced) {
       moment4CommitmentFollowUpReasonIfFalse = 'misplaced_non_grudge_answer';
     } else if (moment4SpecificityProbePending) {
       moment4CommitmentFollowUpReasonIfFalse = 'specificity_probe_pending_on_current_answer';
-    } else if (!deps.moment4PostGrudgeSpecificityResolvedRef.current) {
+    } else if (!deps.moment4PostGrudgeSpecificityResolvedRef.current && !orientationInTranscript) {
       moment4CommitmentFollowUpReasonIfFalse = 'post_grudge_specificity_unresolved';
     } else if (looksLikeIncompleteCutOffUserAnswer(trimmed)) {
       moment4CommitmentFollowUpReasonIfFalse = 'incomplete_cutoff_answer';
+    } else if (orientationInTranscript && !shouldForceMoment4ThresholdProbe) {
+      moment4CommitmentFollowUpReasonIfFalse = 'orientation_answer_not_assessable';
     }
   }
 
   if (deps.currentInterviewMomentRef.current === 4) {
     const relationshipEval = evaluateMoment4RelationshipType(trimmed);
     const payload = {
-      moment4CommitmentFollowUpConditionMet: shouldForceMoment4ThresholdProbe,
+      moment4CommitmentFollowUpConditionMet:
+        shouldForceMoment4OrientationProbe || shouldForceMoment4ThresholdProbe,
+      moment4OrientationFollowUpConditionMet: shouldForceMoment4OrientationProbe,
+      moment4ThresholdFollowUpConditionMet: shouldForceMoment4ThresholdProbe,
       moment4CommitmentFollowUpBaseEligible,
+      moment4OrientationFollowUpBaseEligible,
       moment4CommitmentFollowUpReasonIfFalse,
       lastAssistantLooksLikeMoment4Grudge,
       moment4AnswerLooksMisplaced,
@@ -249,13 +279,44 @@ export async function runPreClaudeMoment4SpecificityGate(
     return {
       handled: true,
       answeringAfterMoment4SpecificityProbe,
+      shouldForceMoment4OrientationProbe,
       shouldForceMoment4ThresholdProbe,
       moment4ThresholdHintInAnswer,
     };
   }
 
   if (
-    !orchestratorOwnsThresholdInject &&
+    !orchestratorOwnsCommitmentInject &&
+    deps.isInterviewAppRoute &&
+    !deps.isAdmin &&
+    deps.status === 'active' &&
+    !deps.closingQuestionPending &&
+    deps.waitingForClosingAdditionRef.current === null &&
+    deps.currentInterviewMomentRef.current === 4 &&
+    shouldForceMoment4OrientationProbe &&
+    !moment4OrientationFollowUpAlreadyInSession &&
+    !looksLikeIncompleteCutOffUserAnswer(trimmed) &&
+    !looksLikeGoBackToPreviousScenarioRequest(trimmed)
+  ) {
+    const delivered = await deliverMoment4CommitmentOrientationProbe({
+      deps,
+      trimmed,
+      messagesToUse,
+      logTag: '[M4_COMMITMENT_ORIENTATION_PRE_INJECT]',
+    });
+    if (delivered) {
+      return {
+        handled: true,
+        answeringAfterMoment4SpecificityProbe,
+        shouldForceMoment4OrientationProbe,
+        shouldForceMoment4ThresholdProbe,
+        moment4ThresholdHintInAnswer,
+      };
+    }
+  }
+
+  if (
+    !orchestratorOwnsCommitmentInject &&
     deps.isInterviewAppRoute &&
     !deps.isAdmin &&
     deps.status === 'active' &&
@@ -277,6 +338,7 @@ export async function runPreClaudeMoment4SpecificityGate(
       return {
         handled: true,
         answeringAfterMoment4SpecificityProbe,
+        shouldForceMoment4OrientationProbe,
         shouldForceMoment4ThresholdProbe,
         moment4ThresholdHintInAnswer,
       };
@@ -286,6 +348,7 @@ export async function runPreClaudeMoment4SpecificityGate(
   return {
     handled: false,
     answeringAfterMoment4SpecificityProbe,
+    shouldForceMoment4OrientationProbe,
     shouldForceMoment4ThresholdProbe,
     moment4ThresholdHintInAnswer,
   };

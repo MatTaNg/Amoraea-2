@@ -1,19 +1,23 @@
 /**
- * Deterministic pairwise compatibility scoring (matchmaking algorithm v2).
- * Pure functions — no I/O except computeNarrativeFitScore (TODO stub).
+ * Deterministic pairwise compatibility scoring.
+ * Production ranking is {@link computeFinalCompatibilityScoreV3}.
+ * {@link computeFinalCompatibilityScore} is historical V2 only.
  */
 
-export { MAX_DISTANCE_KM } from '@config/matching/compatibilityScoring';
+import { hobbiesStringToIds } from '@/shared/utils/hobbiesHelpers';
 import {
+  isPartnerAlignmentHardBlock,
+  partnerAlignmentRankingWeight,
+} from '@/shared/constants/partnerAlignmentImportance';
+import {
+  ADJUSTMENT_ALIGNMENT_PREFERENCE,
+  ADJUSTMENT_ALIGNMENT_RANKING_CAP,
+  ADJUSTMENT_ALIGNMENT_VERY_IMPORTANT,
   ADJUSTMENT_CONFLICT_STYLE_MAX,
   ADJUSTMENT_CONFLICT_STYLE_MIN,
   ADJUSTMENT_POLITICS_MISMATCH,
   ADJUSTMENT_PSYCHOMETRIC_MAX,
   ADJUSTMENT_PSYCHOMETRIC_MIN,
-  ADJUSTMENT_SEXUAL_COMM_CLOSE_BONUS,
-  ADJUSTMENT_SEXUAL_COMM_CLOSE_MAX_DIFF,
-  ADJUSTMENT_SEXUAL_COMM_FAR_MIN_DIFF,
-  ADJUSTMENT_SEXUAL_COMM_FAR_PENALTY,
   ATTACHMENT_ANXIOUS_MIN,
   ATTACHMENT_AVOIDANT_MIN,
   ATTACHMENT_DUAL_DISTRESS_MEAN_MIN,
@@ -22,13 +26,11 @@ import {
   CAPACITY_CONTEMPT_WEIGHT,
   CAPACITY_DISCOUNT_BASE,
   CAPACITY_DISCOUNT_MULTIPLIER,
-  CAPACITY_DWECK_WEIGHT,
   CAPACITY_EXTERNALIZE_WEIGHT,
   CAPACITY_MENTALIZING_WEIGHT,
   CAPACITY_REGULATION_WEIGHT,
   CAPACITY_REPAIR_WEIGHT,
   CAPACITY_RESILIENCE_WEIGHT,
-  CAPACITY_RFQ_WEIGHT,
   CAPACITY_SELF_COMPASSION_WEIGHT,
   COMPAT_ATTACHMENT_WEIGHT,
   COMPAT_BASELINE_WEIGHT,
@@ -36,7 +38,12 @@ import {
   COMPAT_INTERVIEW_PROCESS_WEIGHT,
   COMPAT_SEMANTIC_WEIGHT,
   COMPAT_VALUES_WEIGHT,
-  DWECK_GROWTH_PAIR_MIN,
+  COMPAT_V3_ANXIOUS_AVOIDANT_SOFT_PENALTY_MAX,
+  COMPAT_V3_ATTACHMENT_SIMILARITY_WEIGHT,
+  COMPAT_V3_CONCRETE_LIFE_FIT_WEIGHT,
+  COMPAT_V3_FINANCE_WEIGHT,
+  COMPAT_V3_LIFE_DOMAIN_IMPORTANCE_WEIGHT,
+  COMPAT_V3_VALUES_SIMILARITY_WEIGHT,
   FINANCE_INCOME_WEIGHT,
   FINANCE_POOLING_MISMATCH_SCORE,
   FINANCE_POOLING_WEIGHT,
@@ -45,10 +52,7 @@ import {
   INTERVIEW_PROCESS_CONTEMPT_PENALTY_MULTIPLIER,
   INTERVIEW_PROCESS_CONTEMPT_PENALTY_THRESHOLD,
   MAX_DISTANCE_KM,
-  NPI_ENTITLEMENT_DIFF_PENALTY_MIN,
-  NPI_ENTITLEMENT_HIGH_PAIR_MIN,
   SCS_SF_COMPASSION_PAIR_MIN,
-  SEMANTIC_DEFAULT_NARRATIVE_FIT,
   SEMANTIC_LIFE_DOMAIN_WEIGHT,
   SEMANTIC_NARRATIVE_FIT_WEIGHT,
   VALUES_HIGH_SALIENCE_MAX_DIFF,
@@ -69,18 +73,14 @@ export type RelationalCapacityInput = {
   contempt: number | null;
   accountability: number | null;
   mentalizing: number | null;
-  /** Reflective functioning (1–7). */
-  rfqScore: number | null;
   /** GASP externalization (1–7), inverted in capacity formula. */
   gaspExternalizationScore: number | null;
   /** Self-compassion SCS-SF (1–5). */
   scsSfScore: number | null;
-  /** Brief Resilience Scale (1–6). */
+  /** Brief Resilience Scale (1–5 Likert mean). */
   brsScore: number | null;
-  /** Trait anxiety (1–6), inverted in capacity formula. */
+  /** Trait anxiety (1–5 Likert mean), inverted in capacity formula. */
   anxietyTraitScore: number | null;
-  /** Growth mindset / Dweck (1–6). */
-  dweckScore: number | null;
 };
 
 export type FinanceProfile = {
@@ -139,6 +139,24 @@ export type DealbreakerProfile = {
   politics?: string | null;
   location?: { lat: number; lng: number } | null;
   substance?: SubstanceUseProfile | null;
+  /** Comma-separated hobby ids from profile. */
+  hobbies?: string | null;
+  /**
+   * Onboarding hobby dealbreaker id, or null/"__none__" when none of the listed hobbies would be a dealbreaker.
+   */
+  hobbyDealbreakerId?: string | null;
+  partnerAlignmentTobacco?: string | null;
+  partnerAlignmentAlcohol?: string | null;
+  partnerAlignmentRecreationalDrugs?: string | null;
+  partnerAlignmentPsychedelics?: string | null;
+  partnerAlignmentCannabis?: string | null;
+  smoking?: string | null;
+  drinking?: string | null;
+  recreationalDrugsSocial?: string | null;
+  relationshipWithPsychedelics?: string | null;
+  relationshipWithCannabis?: string | null;
+  prefPartnerSharesSexualInterests?: string | null;
+  sexInterestCategories?: string[] | null;
 };
 
 export type InterviewProcessPillars = {
@@ -147,11 +165,55 @@ export type InterviewProcessPillars = {
   contempt: number;
 };
 
+export type CompatibilityContributionComponent = {
+  weight: number;
+  rawScore: number;
+  contribution: number;
+};
+
+export type CompatibilityUnavailableComponent = CompatibilityContributionComponent & {
+  available: false;
+  status: 'not_assessed';
+  reason: string;
+};
+
+export type CompatibilityContributionBreakdown = {
+  core: {
+    concreteLifeFit: CompatibilityContributionComponent;
+    lifeDomainImportanceAlignment: CompatibilityContributionComponent;
+    finance: CompatibilityContributionComponent;
+    valuesSimilarity: CompatibilityContributionComponent;
+    attachmentSimilarity: CompatibilityContributionComponent;
+  };
+  adjustments: {
+    anxiousAvoidant: number;
+    conflictStyle: number;
+    preferenceMismatch: number;
+    politics: number;
+    psychometricSoft: number;
+    /** Retired pair-ranking term. Always 0 in production V3. */
+    sexualDiscrepancy: number;
+    /** @deprecated Alias of preferenceMismatch. */
+    preferenceAlignment: number;
+  };
+  unavailable: {
+    narrativeFit: CompatibilityUnavailableComponent;
+    intimacy: CompatibilityUnavailableComponent;
+  };
+  hardFilters: string[];
+  duplicateInputFlags: string[];
+  coreScore: number;
+  adjustedScore: number;
+  finalScore: number;
+};
+
 export type CompatibilityResult = {
   finalScore: number;
   breakdown: {
     attachment: number;
     values: number;
+    lifeDomain: number;
+    concreteLifeFit: number;
     semantic: number;
     finance: number;
     interviewProcess: number;
@@ -160,6 +222,7 @@ export type CompatibilityResult = {
     interviewDiscount: number;
     adjustments: number;
   };
+  contributionBreakdown?: CompatibilityContributionBreakdown;
 };
 
 const VALUE_DIMS = [
@@ -175,7 +238,22 @@ const VALUE_DIMS = [
   'universalism',
 ] as const;
 
-const LIFE_DOMAIN_KEYS = ['intimacy', 'finance', 'spirituality', 'family', 'physicalHealth'] as const;
+/**
+ * Abstract life-domain importance alignment uses only these four 0–100 sliders.
+ * It is not concrete desired-life compatibility. The `finance` slider is excluded
+ * so structured finance is not double-counted.
+ */
+export const LIFE_DOMAIN_IMPORTANCE_SLIDER_KEYS = [
+  'intimacy',
+  'spirituality',
+  'family',
+  'physicalHealth',
+] as const;
+/** @deprecated Use {@link LIFE_DOMAIN_IMPORTANCE_SLIDER_KEYS}. */
+export const LIFE_VISION_RANKING_SLIDER_KEYS = LIFE_DOMAIN_IMPORTANCE_SLIDER_KEYS;
+const LIFE_DOMAIN_RANKING_KEYS = LIFE_DOMAIN_IMPORTANCE_SLIDER_KEYS;
+
+export { MAX_DISTANCE_KM };
 
 function clamp01(n: number): number {
   if (!Number.isFinite(n)) return 0;
@@ -228,16 +306,12 @@ function doesNotWantChildrenExplicitly(v: string | null | undefined): boolean {
 
 function userRequiresSameReligion(p: DealbreakerProfile): boolean {
   if (p.requireSameReligion === true) return true;
-  return String(p.partnerSameReligionRequired ?? '')
-    .trim()
-    .toLowerCase() === 'yes';
+  return isPartnerAlignmentHardBlock(p.partnerSameReligionRequired);
 }
 
 function userRequiresPoliticalAlignment(p: DealbreakerProfile): boolean {
   if (p.requiresPoliticalAlignment === true) return true;
-  return String(p.prefPartnerPoliticalAlignmentImportance ?? '')
-    .trim()
-    .toLowerCase() === 'yes';
+  return isPartnerAlignmentHardBlock(p.prefPartnerPoliticalAlignmentImportance);
 }
 
 function userWillingToRelocate(p: DealbreakerProfile): boolean {
@@ -282,59 +356,268 @@ function hardSubstanceIncompatibility(
   return substanceUses(partnerFrequency);
 }
 
-function substanceHardBlock(a: DealbreakerProfile, b: DealbreakerProfile): boolean {
+function collectSubstanceHardFilterCodes(a: DealbreakerProfile, b: DealbreakerProfile): string[] {
   const sa = a.substance ?? {};
   const sb = b.substance ?? {};
-  const pairs: [string | null | undefined, string | null | undefined][] = [
-    [sa.partnerDrinksComfort, sb.alcoholFrequency],
-    [sb.partnerDrinksComfort, sa.alcoholFrequency],
-    [sa.partnerCigarettesComfort, sb.cigaretteFrequency],
-    [sb.partnerCigarettesComfort, sa.cigaretteFrequency],
-    [sa.partnerCannabisTobaccoComfort, sb.cannabisTobaccoFrequency],
-    [sb.partnerCannabisTobaccoComfort, sa.cannabisTobaccoFrequency],
-    [sa.partnerRecreationalDrugsComfort, sb.recreationalDrugsFrequency],
-    [sb.partnerRecreationalDrugsComfort, sa.recreationalDrugsFrequency],
+  const codes: string[] = [];
+  const pairs: Array<[string, string | null | undefined, string | null | undefined]> = [
+    ['substance_comfort_no_alcohol', sa.partnerDrinksComfort, sb.alcoholFrequency],
+    ['substance_comfort_no_alcohol', sb.partnerDrinksComfort, sa.alcoholFrequency],
+    ['substance_comfort_no_cigarettes', sa.partnerCigarettesComfort, sb.cigaretteFrequency],
+    ['substance_comfort_no_cigarettes', sb.partnerCigarettesComfort, sa.cigaretteFrequency],
+    ['substance_comfort_no_cannabis', sa.partnerCannabisTobaccoComfort, sb.cannabisTobaccoFrequency],
+    ['substance_comfort_no_cannabis', sb.partnerCannabisTobaccoComfort, sa.cannabisTobaccoFrequency],
+    [
+      'substance_comfort_no_recreational_drugs',
+      sa.partnerRecreationalDrugsComfort,
+      sb.recreationalDrugsFrequency,
+    ],
+    [
+      'substance_comfort_no_recreational_drugs',
+      sb.partnerRecreationalDrugsComfort,
+      sa.recreationalDrugsFrequency,
+    ],
   ];
-  return pairs.some(([comfort, freq]) => hardSubstanceIncompatibility(comfort, freq));
+  for (const [code, comfort, freq] of pairs) {
+    if (hardSubstanceIncompatibility(comfort, freq) && !codes.includes(code)) codes.push(code);
+  }
+  return codes;
 }
 
-/** Hard dealbreaker multiplier: 0 blocks the pair, 1 allows full score. */
-export function computeDealbreakerMultiplier(a: DealbreakerProfile, b: DealbreakerProfile): 0 | 1 {
+function collectPartnerAlignmentHardFilterCodes(a: DealbreakerProfile, b: DealbreakerProfile): string[] {
+  const dims: Array<{ code: string; importanceA?: string | null; importanceB?: string | null; mismatch: boolean }> =
+    [
+      {
+        code: 'alignment_tobacco',
+        importanceA: a.partnerAlignmentTobacco,
+        importanceB: b.partnerAlignmentTobacco,
+        mismatch: valuesDiffer(a.smoking, b.smoking),
+      },
+      {
+        code: 'alignment_alcohol',
+        importanceA: a.partnerAlignmentAlcohol,
+        importanceB: b.partnerAlignmentAlcohol,
+        mismatch: valuesDiffer(a.drinking, b.drinking),
+      },
+      {
+        code: 'alignment_recreational_drugs',
+        importanceA: a.partnerAlignmentRecreationalDrugs,
+        importanceB: b.partnerAlignmentRecreationalDrugs,
+        mismatch: valuesDiffer(a.recreationalDrugsSocial, b.recreationalDrugsSocial),
+      },
+      {
+        code: 'alignment_psychedelics',
+        importanceA: a.partnerAlignmentPsychedelics,
+        importanceB: b.partnerAlignmentPsychedelics,
+        mismatch: valuesDiffer(a.relationshipWithPsychedelics, b.relationshipWithPsychedelics),
+      },
+      {
+        code: 'alignment_cannabis',
+        importanceA: a.partnerAlignmentCannabis,
+        importanceB: b.partnerAlignmentCannabis,
+        mismatch: valuesDiffer(a.relationshipWithCannabis, b.relationshipWithCannabis),
+      },
+      {
+        code: 'alignment_sex_interests',
+        importanceA: a.prefPartnerSharesSexualInterests,
+        importanceB: b.prefPartnerSharesSexualInterests,
+        mismatch: sexInterestSetsDiffer(a.sexInterestCategories, b.sexInterestCategories),
+      },
+    ];
+  return dims
+    .filter(
+      (d) =>
+        d.mismatch &&
+        (isPartnerAlignmentHardBlock(d.importanceA) || isPartnerAlignmentHardBlock(d.importanceB)),
+    )
+    .map((d) => d.code);
+}
+
+/** Machine-readable hard-filter codes for audit + concreteLifeFit skip lists. */
+export function listDealbreakerHardFilterCodes(a: DealbreakerProfile, b: DealbreakerProfile): string[] {
+  const codes: string[] = [];
   const aWants = wantsChildrenExplicitly(a.wantKids);
   const aNo = doesNotWantChildrenExplicitly(a.wantKids);
   const bWants = wantsChildrenExplicitly(b.wantKids);
   const bNo = doesNotWantChildrenExplicitly(b.wantKids);
-  if ((aWants && bNo) || (aNo && bWants)) return 0;
+  if ((aWants && bNo) || (aNo && bWants)) codes.push('kids_want_vs_dont');
 
   if (userRequiresSameReligion(a) || userRequiresSameReligion(b)) {
     const relA = normalizeReligionKey(a.religion);
     const relB = normalizeReligionKey(b.religion);
-    if (relA && relB && relA !== relB) return 0;
+    if (relA && relB && relA !== relB) codes.push('religion_required_mismatch');
   }
 
   const styleA = normalizeRelationshipStyle(a.relationshipStyle);
   const styleB = normalizeRelationshipStyle(b.relationshipStyle);
-  if (styleA && styleB && styleA !== styleB) return 0;
+  if (styleA && styleB && styleA !== styleB) codes.push('relationship_style_mismatch');
 
   if (!userWillingToRelocate(a) && !userWillingToRelocate(b)) {
     if (a.location && b.location) {
       const distanceKm = haversineKm(a.location, b.location);
-      if (distanceKm > MAX_DISTANCE_KM) return 0;
+      if (distanceKm > MAX_DISTANCE_KM) codes.push('distance_no_relocate');
     }
   }
 
   if (userRequiresPoliticalAlignment(a) || userRequiresPoliticalAlignment(b)) {
     const polA = normalizeReligionKey(a.politics);
     const polB = normalizeReligionKey(b.politics);
-    if (polA && polB && polA !== polB) return 0;
+    if (polA && polB && polA !== polB) codes.push('politics_required_mismatch');
   }
 
-  if (substanceHardBlock(a, b)) return 0;
-
-  return 1;
+  codes.push(...collectSubstanceHardFilterCodes(a, b));
+  if (hobbyDealbreakerHardBlock(a, b)) codes.push('hobby_dealbreaker');
+  codes.push(...collectPartnerAlignmentHardFilterCodes(a, b));
+  return codes;
 }
 
-/** Single-user relational capacity from interview pillars and psychometrics. */
+/** Hard dealbreaker multiplier: 0 blocks the pair, 1 allows full score. */
+export function computeDealbreakerMultiplier(a: DealbreakerProfile, b: DealbreakerProfile): 0 | 1 {
+  return listDealbreakerHardFilterCodes(a, b).length > 0 ? 0 : 1;
+}
+
+function hobbyDealbreakerIsNone(id: string | null | undefined): boolean {
+  if (id == null) return true;
+  const t = id.trim();
+  return t === '' || t === '__none__';
+}
+
+/** Existing onboarding hobby dealbreaker: hard-block only when the named hobby is required and the other person lacks it. */
+export function hobbyDealbreakerHardBlock(a: DealbreakerProfile, b: DealbreakerProfile): boolean {
+  const idsA = new Set(hobbiesStringToIds(a.hobbies));
+  const idsB = new Set(hobbiesStringToIds(b.hobbies));
+  const aNeed = a.hobbyDealbreakerId?.trim() ?? '';
+  const bNeed = b.hobbyDealbreakerId?.trim() ?? '';
+  if (!hobbyDealbreakerIsNone(aNeed) && !idsB.has(aNeed)) return true;
+  if (!hobbyDealbreakerIsNone(bNeed) && !idsA.has(bNeed)) return true;
+  return false;
+}
+
+function valuesDiffer(a: string | null | undefined, b: string | null | undefined): boolean {
+  const na = String(a ?? '')
+    .trim()
+    .toLowerCase();
+  const nb = String(b ?? '')
+    .trim()
+    .toLowerCase();
+  if (!na || !nb) return false;
+  return na !== nb;
+}
+
+function sexInterestSetsDiffer(a?: string[] | null, b?: string[] | null): boolean {
+  const key = (cats?: string[] | null) =>
+    (cats ?? [])
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean)
+      .sort()
+      .join('|');
+  const ka = key(a);
+  const kb = key(b);
+  if (!ka || !kb) return false;
+  return ka !== kb;
+}
+
+function rankingPenaltyFor(importance: string | null | undefined, mismatch: boolean): number {
+  if (!mismatch) return 0;
+  const weight = partnerAlignmentRankingWeight(importance);
+  if (weight === 'very_important') return ADJUSTMENT_ALIGNMENT_VERY_IMPORTANT;
+  if (weight === 'preference') return ADJUSTMENT_ALIGNMENT_PREFERENCE;
+  return 0;
+}
+
+function partnerAlignmentHardBlock(a: DealbreakerProfile, b: DealbreakerProfile): boolean {
+  const dims: Array<{
+    importanceA?: string | null;
+    importanceB?: string | null;
+    mismatch: boolean;
+  }> = [
+    {
+      importanceA: a.partnerAlignmentTobacco,
+      importanceB: b.partnerAlignmentTobacco,
+      mismatch: valuesDiffer(a.smoking, b.smoking),
+    },
+    {
+      importanceA: a.partnerAlignmentAlcohol,
+      importanceB: b.partnerAlignmentAlcohol,
+      mismatch: valuesDiffer(a.drinking, b.drinking),
+    },
+    {
+      importanceA: a.partnerAlignmentRecreationalDrugs,
+      importanceB: b.partnerAlignmentRecreationalDrugs,
+      mismatch: valuesDiffer(a.recreationalDrugsSocial, b.recreationalDrugsSocial),
+    },
+    {
+      importanceA: a.partnerAlignmentPsychedelics,
+      importanceB: b.partnerAlignmentPsychedelics,
+      mismatch: valuesDiffer(a.relationshipWithPsychedelics, b.relationshipWithPsychedelics),
+    },
+    {
+      importanceA: a.partnerAlignmentCannabis,
+      importanceB: b.partnerAlignmentCannabis,
+      mismatch: valuesDiffer(a.relationshipWithCannabis, b.relationshipWithCannabis),
+    },
+    {
+      importanceA: a.prefPartnerSharesSexualInterests,
+      importanceB: b.prefPartnerSharesSexualInterests,
+      mismatch: sexInterestSetsDiffer(a.sexInterestCategories, b.sexInterestCategories),
+    },
+  ];
+  return dims.some(
+    (d) =>
+      d.mismatch &&
+      (isPartnerAlignmentHardBlock(d.importanceA) || isPartnerAlignmentHardBlock(d.importanceB)),
+  );
+}
+
+/** Soft ranking from very-important / preference alignment mismatches. Hard blocks are handled separately. */
+export function computePartnerAlignmentRankingAdjustment(
+  a: DealbreakerProfile,
+  b: DealbreakerProfile,
+): number {
+  const religionMismatch = valuesDiffer(a.religion, b.religion);
+  const politicsMismatch = valuesDiffer(a.politics, b.politics);
+  const sexMismatch = sexInterestSetsDiffer(a.sexInterestCategories, b.sexInterestCategories);
+
+  let total = 0;
+  total += rankingPenaltyFor(a.partnerSameReligionRequired, religionMismatch);
+  total += rankingPenaltyFor(b.partnerSameReligionRequired, religionMismatch);
+  total += rankingPenaltyFor(a.prefPartnerPoliticalAlignmentImportance, politicsMismatch);
+  total += rankingPenaltyFor(b.prefPartnerPoliticalAlignmentImportance, politicsMismatch);
+  total += rankingPenaltyFor(a.partnerAlignmentTobacco, valuesDiffer(a.smoking, b.smoking));
+  total += rankingPenaltyFor(b.partnerAlignmentTobacco, valuesDiffer(a.smoking, b.smoking));
+  total += rankingPenaltyFor(a.partnerAlignmentAlcohol, valuesDiffer(a.drinking, b.drinking));
+  total += rankingPenaltyFor(b.partnerAlignmentAlcohol, valuesDiffer(a.drinking, b.drinking));
+  total += rankingPenaltyFor(
+    a.partnerAlignmentRecreationalDrugs,
+    valuesDiffer(a.recreationalDrugsSocial, b.recreationalDrugsSocial),
+  );
+  total += rankingPenaltyFor(
+    b.partnerAlignmentRecreationalDrugs,
+    valuesDiffer(a.recreationalDrugsSocial, b.recreationalDrugsSocial),
+  );
+  total += rankingPenaltyFor(
+    a.partnerAlignmentPsychedelics,
+    valuesDiffer(a.relationshipWithPsychedelics, b.relationshipWithPsychedelics),
+  );
+  total += rankingPenaltyFor(
+    b.partnerAlignmentPsychedelics,
+    valuesDiffer(a.relationshipWithPsychedelics, b.relationshipWithPsychedelics),
+  );
+  total += rankingPenaltyFor(
+    a.partnerAlignmentCannabis,
+    valuesDiffer(a.relationshipWithCannabis, b.relationshipWithCannabis),
+  );
+  total += rankingPenaltyFor(
+    b.partnerAlignmentCannabis,
+    valuesDiffer(a.relationshipWithCannabis, b.relationshipWithCannabis),
+  );
+  total += rankingPenaltyFor(a.prefPartnerSharesSexualInterests, sexMismatch);
+  total += rankingPenaltyFor(b.prefPartnerSharesSexualInterests, sexMismatch);
+
+  return Math.max(ADJUSTMENT_ALIGNMENT_RANKING_CAP, total);
+}
+
+/** Diagnostic capacity from interview pillars and live psychometrics. Not a ranking input. */
 export function computeRelationalCapacity(user: RelationalCapacityInput): number {
   const repairNorm = normPillar(user.repair);
   const regulationNorm = normPillar(user.regulation);
@@ -342,15 +625,12 @@ export function computeRelationalCapacity(user: RelationalCapacityInput): number
   const accountabilityNorm = normPillar(user.accountability);
   const mentalizingNorm = normPillar(user.mentalizing);
 
-  const rfq = normPsychOrNeutral(user.rfqScore, (s) => (s - 1) / 6);
   const externalize = normPsychOrNeutral(user.gaspExternalizationScore, (s) => 1 - (s - 1) / 6);
   const selfCompassion = normPsychOrNeutral(user.scsSfScore, (s) => (s - 1) / 4);
   const resilience = normPsychOrNeutral(user.brsScore, (s) => (s - 1) / 5);
   const lowAnxiety = normPsychOrNeutral(user.anxietyTraitScore, (s) => 1 - (s - 1) / 5);
-  const dweck = normPsychOrNeutral(user.dweckScore, (s) => (s - 1) / 5);
 
   const capacity =
-    CAPACITY_RFQ_WEIGHT * rfq +
     CAPACITY_CONTEMPT_WEIGHT * contemptNorm +
     CAPACITY_REPAIR_WEIGHT * repairNorm +
     CAPACITY_ACCOUNTABILITY_WEIGHT * accountabilityNorm +
@@ -358,8 +638,7 @@ export function computeRelationalCapacity(user: RelationalCapacityInput): number
     CAPACITY_MENTALIZING_WEIGHT * mentalizingNorm +
     CAPACITY_EXTERNALIZE_WEIGHT * externalize +
     CAPACITY_SELF_COMPASSION_WEIGHT * selfCompassion +
-    CAPACITY_RESILIENCE_WEIGHT * resilience +
-    CAPACITY_DWECK_WEIGHT * dweck;
+    CAPACITY_RESILIENCE_WEIGHT * resilience;
 
   const anxietyDiscount = 1 - CAPACITY_ANXIETY_DISCOUNT_FACTOR * (1 - lowAnxiety);
   return clamp01(capacity * anxietyDiscount);
@@ -512,28 +791,31 @@ export function computeLifeDomainAlignment(
   bSettings: Record<string, number>,
 ): number {
   let total = 0;
-  for (const d of LIFE_DOMAIN_KEYS) {
+  for (const d of LIFE_DOMAIN_RANKING_KEYS) {
     const aVal = (aSettings[d] ?? 50) / 100;
     const bVal = (bSettings[d] ?? 50) / 100;
     total += 1 - Math.abs(aVal - bVal);
   }
-  return total / LIFE_DOMAIN_KEYS.length;
+  return total / LIFE_DOMAIN_RANKING_KEYS.length;
+}
+
+/** Alias: four-slider importance alignment, not concrete desired-life fit. */
+export const computeLifeDomainImportanceAlignment = computeLifeDomainAlignment;
+
+/**
+ * Narrative/semantic fit is not assessed in production ranking.
+ * The historical stub returned a constant 0.5; that value must not enter ranking.
+ */
+export async function computeNarrativeFitScore(_userIdA: string, _userIdB: string): Promise<null> {
+  return null;
 }
 
 /**
- * TODO: Wire LLM call for narrative fit scoring.
- * Inputs: matchmaker_summary from communication_style_profiles,
- *         life_domain_answers free text, hobbies from profile_json
- * Cache result in pair_compatibility_cache keyed by sorted user ID pair
- * Prompt focus: goal congruence, life stage alignment, lifestyle compatibility
- * Return score 0-1, default 0.5 when insufficient data
+ * @deprecated Historical helper. Production ranking does not use narrative fit.
+ * Returning the argument does not make it a ranking input.
  */
-export async function computeNarrativeFitScore(_userIdA: string, _userIdB: string): Promise<number> {
-  return SEMANTIC_DEFAULT_NARRATIVE_FIT;
-}
-
-export function computeSemanticScore(lifeDomainAlignment: number, narrativeFitScore: number): number {
-  return clamp01(lifeDomainAlignment * SEMANTIC_LIFE_DOMAIN_WEIGHT + narrativeFitScore * SEMANTIC_NARRATIVE_FIT_WEIGHT);
+export function computeSemanticScore(_lifeDomainAlignment: number, narrativeFitScore: number): number {
+  return clamp01(narrativeFitScore);
 }
 
 export function computeInterviewProcessScore(
@@ -571,34 +853,14 @@ export function computePoliticsAdjustment(a: PoliticsProfile, b: PoliticsProfile
   return polA !== polB ? ADJUSTMENT_POLITICS_MISMATCH : 0;
 }
 
-export function computeSexualCommAdjustment(scoreA: number, scoreB: number): number {
-  const diff = Math.abs(scoreA - scoreB);
-  if (diff <= ADJUSTMENT_SEXUAL_COMM_CLOSE_MAX_DIFF) return ADJUSTMENT_SEXUAL_COMM_CLOSE_BONUS;
-  if (diff > ADJUSTMENT_SEXUAL_COMM_FAR_MIN_DIFF) return ADJUSTMENT_SEXUAL_COMM_FAR_PENALTY;
-  return 0;
-}
-
 export function computePsychometricSoftAdjustments(
   a: PsychometricProfile,
   b: PsychometricProfile,
 ): number {
   let adj = 0;
-
-  if (a.npiEntitlementScore != null && b.npiEntitlementScore != null) {
-    if (a.npiEntitlementScore >= NPI_ENTITLEMENT_HIGH_PAIR_MIN && b.npiEntitlementScore >= NPI_ENTITLEMENT_HIGH_PAIR_MIN) {
-      adj -= 0.04;
-    }
-    if (Math.abs(a.npiEntitlementScore - b.npiEntitlementScore) > NPI_ENTITLEMENT_DIFF_PENALTY_MIN) adj -= 0.03;
-  }
-
-  if (a.dweckScore != null && b.dweckScore != null) {
-    if (a.dweckScore >= DWECK_GROWTH_PAIR_MIN && b.dweckScore >= DWECK_GROWTH_PAIR_MIN) adj += 0.02;
-  }
-
   if (a.scsSfScore != null && b.scsSfScore != null) {
     if (a.scsSfScore >= SCS_SF_COMPASSION_PAIR_MIN && b.scsSfScore >= SCS_SF_COMPASSION_PAIR_MIN) adj += 0.02;
   }
-
   return Math.max(ADJUSTMENT_PSYCHOMETRIC_MIN, Math.min(ADJUSTMENT_PSYCHOMETRIC_MAX, adj));
 }
 
@@ -609,6 +871,12 @@ export function computeInterviewConfidenceDiscount(weightedScore: number): numbe
   return INTERVIEW_DISCOUNT_TIERS[INTERVIEW_DISCOUNT_TIERS.length - 1]!.discount;
 }
 
+/**
+ * Historical V2 ranking. Not used in production matching.
+ *
+ * `sexualCommAdjustment` exists only so historical V2 tests remain reproducible.
+ * Production V3 ignores this field and must never depend on it.
+ */
 export function computeFinalCompatibilityScore(params: {
   attachmentScore: number;
   valuesScore: number;
@@ -619,6 +887,7 @@ export function computeFinalCompatibilityScore(params: {
   capacityB: number;
   interviewWeightedScoreA: number;
   interviewWeightedScoreB: number;
+  /** @deprecated Historical V2 only. Sexual-communication pair similarity is not a production ranking input. */
   sexualCommAdjustment: number;
   conflictStyleAdjustment: number;
   politicsAdjustment: number;
@@ -653,6 +922,8 @@ export function computeFinalCompatibilityScore(params: {
     breakdown: {
       attachment: params.attachmentScore * COMPAT_ATTACHMENT_WEIGHT,
       values: params.valuesScore * COMPAT_VALUES_WEIGHT * interviewDiscount,
+      lifeDomain: 0,
+      concreteLifeFit: 0,
       semantic: params.semanticScore * COMPAT_SEMANTIC_WEIGHT,
       finance: params.financeScore * COMPAT_FINANCE_WEIGHT,
       interviewProcess: params.interviewProcessScore * COMPAT_INTERVIEW_PROCESS_WEIGHT,
@@ -661,5 +932,160 @@ export function computeFinalCompatibilityScore(params: {
       interviewDiscount,
       adjustments: totalAdjustments,
     },
+  };
+}
+
+function normalizeEcrDimension(score: number): number {
+  return clamp01((score - 1) / 6);
+}
+
+/** Level C: continuous ECR anxious×avoidant — small soft penalty, never a hard block. */
+export function computeAnxiousAvoidantSoftPenalty(
+  a: AttachmentProfile,
+  b: AttachmentProfile,
+): number {
+  const riskAB = normalizeEcrDimension(a.anxiety) * normalizeEcrDimension(b.avoidance);
+  const riskBA = normalizeEcrDimension(b.anxiety) * normalizeEcrDimension(a.avoidance);
+  const interactionRisk = Math.max(riskAB, riskBA);
+  if (interactionRisk <= 0) return 0;
+  return -(COMPAT_V3_ANXIOUS_AVOIDANT_SOFT_PENALTY_MAX * interactionRisk);
+}
+
+function contribution(
+  weight: number,
+  rawScore: number,
+): CompatibilityContributionComponent {
+  return { weight, rawScore, contribution: rawScore * weight };
+}
+
+function unavailableNarrative(): CompatibilityUnavailableComponent {
+  return {
+    available: false,
+    status: 'not_assessed',
+    reason: 'llm_narrative_fit_job_not_wired',
+    weight: 0,
+    rawScore: 0,
+    contribution: 0,
+  };
+}
+
+function unavailableIntimacy(): CompatibilityUnavailableComponent {
+  return {
+    available: false,
+    status: 'not_assessed',
+    reason: 'pairwise_intimacy_model_not_implemented',
+    weight: 0,
+    rawScore: 0,
+    contribution: 0,
+  };
+}
+
+/**
+ * Production ranking. Generic ECR/PVQ similarity is experimental and low-weight.
+ * Narrative fit and sexual-communication pair similarity are not ranking inputs.
+ */
+export function computeFinalCompatibilityScoreV3(params: {
+  attachmentScore: number;
+  valuesScore: number;
+  lifeDomainImportanceAlignment: number;
+  /** @deprecated Ignored. Narrative is unavailable until a pair-specific LLM job is wired. */
+  semanticScore?: number;
+  concreteLifeFitScore: number;
+  financeScore: number;
+  interviewProcessScore: number;
+  capacityA: number;
+  capacityB: number;
+  /** @deprecated Historical V2 only. Ignored in V3; production ranking must not pass a live value. */
+  sexualCommAdjustment?: number;
+  conflictStyleAdjustment: number;
+  politicsAdjustment: number;
+  psychometricSoftAdjustment: number;
+  anxiousAvoidantSoftPenalty: number;
+  partnerAlignmentAdjustment?: number;
+  dealbreakerMultiplier: 0 | 1;
+  hardFilters?: string[];
+}): CompatibilityResult {
+  void params.semanticScore;
+  void params.sexualCommAdjustment;
+  void params.interviewProcessScore;
+  void params.capacityA;
+  void params.capacityB;
+
+  const concreteLifeFit = contribution(COMPAT_V3_CONCRETE_LIFE_FIT_WEIGHT, params.concreteLifeFitScore);
+  const lifeDomainImportanceAlignment = contribution(
+    COMPAT_V3_LIFE_DOMAIN_IMPORTANCE_WEIGHT,
+    params.lifeDomainImportanceAlignment,
+  );
+  const finance = contribution(COMPAT_V3_FINANCE_WEIGHT, params.financeScore);
+  const valuesSimilarity = contribution(COMPAT_V3_VALUES_SIMILARITY_WEIGHT, params.valuesScore);
+  const attachmentSimilarity = contribution(
+    COMPAT_V3_ATTACHMENT_SIMILARITY_WEIGHT,
+    params.attachmentScore,
+  );
+
+  const coreScore =
+    concreteLifeFit.contribution +
+    lifeDomainImportanceAlignment.contribution +
+    finance.contribution +
+    valuesSimilarity.contribution +
+    attachmentSimilarity.contribution;
+
+  const preferenceMismatch = params.partnerAlignmentAdjustment ?? 0;
+  const totalAdjustments =
+    params.conflictStyleAdjustment +
+    params.politicsAdjustment +
+    params.psychometricSoftAdjustment +
+    params.anxiousAvoidantSoftPenalty +
+    preferenceMismatch;
+
+  const adjustedScore = clamp01(coreScore + totalAdjustments);
+  const hardFilters =
+    params.hardFilters ?? (params.dealbreakerMultiplier === 0 ? ['dealbreaker_ineligible'] : []);
+  const finalScore = adjustedScore * params.dealbreakerMultiplier;
+
+  const contributionBreakdown: CompatibilityContributionBreakdown = {
+    core: {
+      concreteLifeFit,
+      lifeDomainImportanceAlignment,
+      finance,
+      valuesSimilarity,
+      attachmentSimilarity,
+    },
+    adjustments: {
+      anxiousAvoidant: params.anxiousAvoidantSoftPenalty,
+      conflictStyle: params.conflictStyleAdjustment,
+      preferenceMismatch,
+      politics: params.politicsAdjustment,
+      psychometricSoft: params.psychometricSoftAdjustment,
+      sexualDiscrepancy: 0,
+      preferenceAlignment: preferenceMismatch,
+    },
+    unavailable: {
+      narrativeFit: unavailableNarrative(),
+      intimacy: unavailableIntimacy(),
+    },
+    hardFilters,
+    duplicateInputFlags: [],
+    coreScore,
+    adjustedScore,
+    finalScore,
+  };
+
+  return {
+    finalScore,
+    breakdown: {
+      attachment: attachmentSimilarity.contribution,
+      values: valuesSimilarity.contribution,
+      lifeDomain: lifeDomainImportanceAlignment.contribution,
+      concreteLifeFit: concreteLifeFit.contribution,
+      semantic: 0,
+      finance: finance.contribution,
+      interviewProcess: 0,
+      baseline: 0,
+      capacityDiscount: 0,
+      interviewDiscount: 1,
+      adjustments: totalAdjustments,
+    },
+    contributionBreakdown,
   };
 }

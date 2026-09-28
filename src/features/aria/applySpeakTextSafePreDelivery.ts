@@ -56,6 +56,7 @@ import {
 } from '@features/aria/interviewRepeatRequestTarget';
 import { substituteCanonicalInterviewScenarioBodiesForTts } from '@features/aria/substituteCanonicalInterviewScenarioBodiesForTts';
 import { isLockedShowScenarioExactTtsText } from '@features/aria/showScenarioCardCanonicalTts';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import { remoteLog } from '@utilities/remoteLog';
 import { isResumeWelcomeBackAssistantText } from '@utilities/interviewResumeCursor';
 import { getSessionLogRuntime, writeSessionLog } from '@utilities/sessionLogging';
@@ -119,7 +120,7 @@ export function applySpeakTextSafePreDelivery(
     (args.interviewSpeechRole === 'assistant_response' || telemetryEarlyForS2Repair === 'turn') &&
     isActiveScenarioBConstructProbeTurn(args.currentScenario, args.currentInterviewMoment) &&
     looksLikeScenarioBRepairAsJamesQuestion(stripControlTokens(text).trim()) &&
-    args.s2RepairProbeDelivered
+    (args.s2RepairProbeDelivered || isInterviewCanonicalProbeRetired('s2_james_repair'))
   ) {
     const dedupedRepairStripped = stripScenarioBRepairAsJamesQuestion(text).trim();
     if (!dedupedRepairStripped) {

@@ -14,7 +14,6 @@ import { IncomeDropdown } from "@/shared/components/IncomeDropdown";
 import { DietDropdown } from "@/shared/components/DietDropdown";
 import { styles } from "./AdditionalInfoScreen.styled";
 import { useAdditionalInfoForm } from "./hooks/useAdditionalInfoForm";
-import { DualInputField } from "./components/DualInputField";
 import { PickerField } from "./components/PickerField";
 import {
   CURRENCIES,

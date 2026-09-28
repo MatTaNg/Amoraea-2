@@ -49,7 +49,7 @@ describe('runPreClaudeScenarioBAheadOfScheduleAnswerGate', () => {
     );
   });
 
-  it('accepts James-differently content on Q1 and asks repair Q3', async () => {
+  it('accepts James-differently content on Q1 and asks Q2 instead of retired repair', async () => {
     const deps = buildDeps();
     const answer =
       'James could have pushed his deadline and met her right after she told him about the offer and celebrated with her instead of leading with salary questions.';
@@ -58,6 +58,10 @@ describe('runPreClaudeScenarioBAheadOfScheduleAnswerGate', () => {
 
     expect(result.handled).toBe(true);
     expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL),
+      expect.anything(),
+    );
+    expect(deps.speakTextSafe).not.toHaveBeenCalledWith(
       expect.stringContaining(SCENARIO_B_JAMES_REPAIR_CANONICAL),
       expect.anything(),
     );

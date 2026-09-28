@@ -49,6 +49,7 @@ import {
 import { buildScenario1To2BundleForInterview } from '@features/aria/interviewTransitionBundles';
 import { enrichScenarioBoundaryHandoffBundleWithDynamicLead } from '@features/aria/resolveScenarioBoundaryLeadForInterview';
 import { shouldAdvanceScenarioAAfterSatisfiedRepair } from '@features/aria/interviewDisengagementProbes';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import { hasScenarioBoundaryWrapPhrase } from '@features/aria/emotionModalTransitionOrchestration';
 import { textContainsScenarioBVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
 import { ALPHA_MODE } from '@features/aria/scoreInterviewModuleConstants';
@@ -211,6 +212,7 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
   } else if (params.elongatingSuppressedForUserTurn) {
     if (
       ctx.shouldInjectScenarioARepairAfterContemptAnswer &&
+      !isInterviewCanonicalProbeRetired('s1_repair') &&
       shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)
     ) {
       nextDisplayText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
@@ -455,12 +457,26 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
       looksLikeScenarioARepairQuestionLoose(displayText) ||
       looksLikeScenarioARepairQuestionLoose(ctx.streamFullTrimmed))
   ) {
-    nextDisplayText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-    void remoteLog('[S1_REPAIR_EMPTY_FALLBACK_AFTER_DEDUP_STRIP]', {
-      interviewSessionId: deps.interviewSessionIdRef.current,
-      preview: nextDisplayText.slice(0, 220),
-      modelPreview: text.slice(0, 220),
-    });
+    if (isInterviewCanonicalProbeRetired('s1_repair')) {
+      nextText = `[SCENARIO_COMPLETE:1]\n\n${buildScenario1To2BundleForInterview(
+        params.participantFirstNameForSpoken,
+        SCENARIO_2_TEXT,
+        resolveScenarioUserTextForBoundaryReflection(params.messagesToUse, 1),
+      )}`;
+      nextDisplayText = stripControlTokens(nextText);
+      void remoteLog('[S1_REPAIR_RETIRED_HANDOFF_AFTER_DEDUP_STRIP]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        preview: nextDisplayText.slice(0, 220),
+        modelPreview: text.slice(0, 220),
+      });
+    } else {
+      nextDisplayText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+      void remoteLog('[S1_REPAIR_EMPTY_FALLBACK_AFTER_DEDUP_STRIP]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        preview: nextDisplayText.slice(0, 220),
+        modelPreview: text.slice(0, 220),
+      });
+    }
   } else {
     const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
       '',

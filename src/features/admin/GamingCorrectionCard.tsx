@@ -8,10 +8,11 @@ import type {
 const INSTRUMENT_LABELS: Record<string, string> = {
   gasp: 'GASP',
   brs: 'BRS',
-  aaq2: 'AAQ-II',
-  rfq: 'RFQ',
-  sd3_narcissism: 'SD3',
-  dweck: 'Dweck/RBI',
+  anxiety_trait: 'Trait anxiety',
+  aaq2: 'AAQ-II (historical)',
+  rfq: 'RFQ (historical)',
+  sd3_narcissism: 'SD3 (historical)',
+  dweck: 'Dweck/RBI (historical)',
   rses: 'RSES',
   scs_sf: 'SCS-SF',
 };
@@ -27,7 +28,7 @@ export function gamingCorrectionBadgeLabel(level: 0 | 1 | 2 | 3): string {
   if (level === 0) return 'No correction';
   if (level === 1) return 'Partial correction';
   if (level === 2) return 'All positives stripped';
-  return 'Severe correction + penalty';
+  return 'Severe correction (positives stripped)';
 }
 
 type Props = {
@@ -147,8 +148,8 @@ export function GamingCorrectionBanner({
   const color = gamingCorrectionBadgeColor(level);
   const message =
     level >= 3
-      ? '⚠ Psychometric gaming correction applied — all positive modifier contributions stripped and penalty applied'
-      : '⚠ Psychometric gaming correction applied — positive modifier contributions stripped';
+      ? '⚠ Psychometric gaming correction applied — all positive live-instrument contributions stripped (no extra penalty)'
+      : '⚠ Psychometric gaming correction applied — positive live-instrument contributions stripped';
 
   return (
     <View style={[styles.banner, { borderColor: color, backgroundColor: `${color}18` }]}>

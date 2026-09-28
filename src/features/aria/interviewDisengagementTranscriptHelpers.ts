@@ -25,6 +25,7 @@ import {
   looksLikeScenarioBQ1Question,
   looksLikeScenarioBRepairAsJamesQuestion,
   SCENARIO_B_Q1_CANONICAL,
+  transcriptHasUserResponseAfterScenarioBJamesDifferently,
 } from './scenarioBProbeLogic';
 import { detectActiveScenarioFromMessage } from './interviewScenarioOpeningStreamGate';
 import { resolveSituation3ExactModalPrompt } from './situation3ExactModalPrompt';
@@ -70,9 +71,15 @@ import { looksLikeCheckingInClientOwnedAckAssistantLine } from './metaCommentPat
 import { stripControlTokens } from './interviewControlTokens';
 import {
   looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportQuestion,
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_QUESTION_CARD_BODY,
   transcriptIncludesMoment4ThresholdAssistant,
 } from './moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from './moment4SpecificityFollowUp';
@@ -211,6 +218,9 @@ export function isRepeatableMainInterviewQuestionLine(content: string): boolean 
   if (isScenarioCRepairAssistantPrompt(raw)) return true;
   if (looksLikeScenarioCSophiePerspectiveQuestion(raw)) return true;
   if (looksLikeMoment4GrudgePrompt(raw)) return true;
+  if (looksLikeMomentSupportQuestion(raw)) return true;
+  if (looksLikeMomentSupportConditionalProbe(raw)) return true;
+  if (looksLikeMoment4OrientationQuestion(raw)) return true;
   if (looksLikeMoment4ThresholdQuestion(raw)) return true;
   return false;
 }
@@ -221,6 +231,7 @@ export function isNonRepeatableAssistantLineForVerbatimReplay(content: string): 
   if (looksLikeScenarioCSophiePerspectiveQuestion(content)) return false;
   if (isClientAudioRecoveryAssistantLine(content)) return true;
   if (looksLikeCheckingInClientOwnedAckAssistantLine(content)) return true;
+  if (looksLikeBriefStreamAckOnly(content)) return true;
   if (looksLikeNonQuestionScenarioTransitionLine(content)) return true;
   if (looksLikeScenarioTransitionBridgeAssistantLine(content)) return true;
   // Bridge-only skip-accept line (no trailing question) — never verbatim-repeat.
@@ -334,6 +345,31 @@ function resolveScenarioAResumeReplayQuestion(
   return getScenarioResumeIntroAssistantBody(2);
 }
 
+/**
+ * After James-differently is answered (retired S2 repair), resume must not replay a short ack,
+ * residual repair ask, or the already-answered Q2 — open Situation 3 instead.
+ */
+function resolveScenarioBResumeReplayQuestion(
+  messages: Array<{ role: string; content?: string | null }>,
+  candidate: string,
+): string {
+  if (!transcriptHasUserResponseAfterScenarioBJamesDifferently(messages)) return candidate;
+  const hasScenarioCIntro = messages.some(
+    (m) => m.role === 'assistant' && textContainsScenarioCVignetteBody(m.content ?? ''),
+  );
+  if (hasScenarioCIntro) return candidate;
+  const t = (candidate ?? '').trim();
+  if (
+    !t ||
+    looksLikeBriefStreamAckOnly(t) ||
+    looksLikeScenarioBRepairAsJamesQuestion(t) ||
+    looksLikeScenarioBJamesDifferentlyQuestion(t)
+  ) {
+    return getScenarioResumeIntroAssistantBody(3);
+  }
+  return candidate;
+}
+
 function inferActiveScenarioForRepeat(
   messages: Array<{ role: string; content?: string | null; scenarioNumber?: number }>,
   explicit?: number | null,
@@ -403,7 +439,10 @@ function finalizeRepeatableInterviewQuestionText(
 ): string {
   let resolved = resolveScenarioCResumeReplayQuestion(
     messages,
-    resolveScenarioAResumeReplayQuestion(messages, candidate),
+    resolveScenarioBResumeReplayQuestion(
+      messages,
+      resolveScenarioAResumeReplayQuestion(messages, candidate),
+    ),
   );
   resolved = coerceScenarioBJamesDifferentlyQuestionForTts(
     coerceScenarioBJamesRepairQuestionForTts(resolved),
@@ -415,7 +454,7 @@ function finalizeRepeatableInterviewQuestionText(
   if (activeScenario === 2 && isPriorScenarioBleedForActiveScenario(resolved, 2)) {
     /**
      * S1 repair bleed stays repair-shaped so {@link resolveInterviewQuestionRepeatTtsText}
-     * can remap it to James repair. Contempt/Q1 bleed falls back to Situation 2 Q1.
+     * can remap it to James-differently. Contempt/Q1 bleed falls back to Situation 2 Q1.
      */
     if (
       looksLikeScenarioARepairQuestion(resolved) ||
@@ -426,12 +465,26 @@ function finalizeRepeatableInterviewQuestionText(
     }
     return resolveScenario2RepeatFallbackQuestion(messages);
   }
+  // Coerce may strip retired James-repair to "" / brief ack — recover Situation 3 when Q2 is done.
+  if (
+    activeScenario === 2 &&
+    transcriptHasUserResponseAfterScenarioBJamesDifferently(messages) &&
+    (!resolved.trim() || looksLikeBriefStreamAckOnly(resolved))
+  ) {
+    return getScenarioResumeIntroAssistantBody(3);
+  }
   return resolved;
 }
 
 function resolveScenario2RepeatFallbackQuestion(
   messages: Array<{ role: string; content?: string | null }>,
 ): string {
+  if (transcriptHasUserResponseAfterScenarioBJamesDifferently(messages)) {
+    const hasScenarioCIntro = messages.some(
+      (m) => m.role === 'assistant' && textContainsScenarioCVignetteBody(m.content ?? ''),
+    );
+    if (!hasScenarioCIntro) return getScenarioResumeIntroAssistantBody(3);
+  }
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant') continue;
@@ -476,6 +529,9 @@ function transcriptHasPersonalPartProgress(
       !m.isWelcomeBack &&
       !m.isScoreCard &&
       (looksLikeMoment4GrudgePrompt(m.content ?? '') ||
+        looksLikeMomentSupportQuestion(m.content ?? '') ||
+        looksLikeMomentSupportConditionalProbe(m.content ?? '') ||
+        looksLikeMoment4OrientationQuestion(m.content ?? '') ||
         looksLikeMoment4ThresholdQuestion(m.content ?? '') ||
         looksLikeMoment4SpecificityFollowUpEcho(m.content ?? '')),
   );
@@ -497,6 +553,15 @@ export function findLastMoment4RepeatableQuestionText(
     if (m.role !== 'assistant' || m.isScoreCard || m.isWelcomeBack) continue;
     const raw = stripControlTokens(m.content ?? '').trim();
     if (!raw) continue;
+    if (looksLikeMomentSupportConditionalProbe(raw)) {
+      return MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY;
+    }
+    if (looksLikeMomentSupportQuestion(raw)) {
+      return MOMENT_SUPPORT_QUESTION_CARD_BODY;
+    }
+    if (looksLikeMoment4OrientationQuestion(raw)) {
+      return MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY;
+    }
     if (looksLikeMoment4ThresholdQuestion(raw)) {
       return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
     }

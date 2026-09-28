@@ -24,10 +24,16 @@ import { resolveSituation2ExactModalPrompt } from '@features/aria/situation2Exac
 import { resolveSituation3ExactModalPrompt } from '@features/aria/situation3ExactModalPrompt';
 import { isLockedShowScenarioExactTtsText } from '@features/aria/showScenarioCardCanonicalTts';
 import {
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
   looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportQuestion,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_QUESTION_CARD_BODY,
 } from '@features/aria/moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from '@features/aria/moment4SpecificityFollowUp';
 import {
@@ -65,11 +71,14 @@ export type Moment4ThresholdReferenceCardDeps = {
   lastQuestionTextRef?: MutableRefObject<string>;
 };
 
-/** Show scenario card: swap grudge body for the commitment-threshold question. */
-export function applyMoment4ThresholdReferenceCard(deps: Moment4ThresholdReferenceCardDeps): void {
+/** Show scenario card: swap grudge body for a Moment 4 personal question in the card body. */
+function applyMoment4PersonalQuestionReferenceCard(
+  deps: Moment4ThresholdReferenceCardDeps,
+  cardBody: string,
+): void {
   const personalScenario: ActiveScenario = {
     label: MOMENT_4_PERSONAL_LABEL,
-    text: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+    text: cardBody,
   };
   if (deps.committedScenarioRef) {
     deps.committedScenarioRef.current = personalScenario;
@@ -78,8 +87,34 @@ export function applyMoment4ThresholdReferenceCard(deps: Moment4ThresholdReferen
   deps.setReferenceCardPrompt(null);
   deps.setInterviewUiPhase?.('scenario_active');
   if (deps.lastQuestionTextRef) {
-    deps.lastQuestionTextRef.current = MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
+    deps.lastQuestionTextRef.current = cardBody;
   }
+}
+
+/** Show scenario card: swap grudge body for the commitment-threshold question. */
+export function applyMoment4ThresholdReferenceCard(deps: Moment4ThresholdReferenceCardDeps): void {
+  applyMoment4PersonalQuestionReferenceCard(
+    deps,
+    MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  );
+}
+
+/** Show scenario card: swap grudge body for the keep-investing orientation question. */
+export function applyMoment4OrientationReferenceCard(deps: Moment4ThresholdReferenceCardDeps): void {
+  applyMoment4PersonalQuestionReferenceCard(
+    deps,
+    MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
+  );
+}
+
+/** Show scenario card: partner-support personal question (second personal question block). */
+export function applyMomentSupportReferenceCard(deps: Moment4ThresholdReferenceCardDeps): void {
+  applyMoment4PersonalQuestionReferenceCard(deps, MOMENT_SUPPORT_QUESTION_CARD_BODY);
+}
+
+/** Show scenario card: conditional need-recognition follow-up after the support story. */
+export function applyMomentSupportConditionalReferenceCard(deps: Moment4ThresholdReferenceCardDeps): void {
+  applyMoment4PersonalQuestionReferenceCard(deps, MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY);
 }
 
 type ReferenceCardTranscriptTurn = {
@@ -137,6 +172,15 @@ export function resolveLastMoment4QuestionCardBodyFromTranscript(
     const raw = stripControlTokens(m.content ?? '').trim();
     if (!raw) continue;
     if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) continue;
+    if (looksLikeMomentSupportConditionalProbe(raw)) {
+      return MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY;
+    }
+    if (looksLikeMomentSupportQuestion(raw)) {
+      return MOMENT_SUPPORT_QUESTION_CARD_BODY;
+    }
+    if (looksLikeMoment4OrientationQuestion(raw)) {
+      return MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY;
+    }
     if (looksLikeMoment4ThresholdQuestion(raw)) {
       return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
     }
@@ -153,6 +197,21 @@ export function resolveLastMoment4QuestionCardBodyFromTranscript(
 function moment4ReferenceCardRank(text: string): number {
   const t = text.trim();
   if (!t) return 0;
+  if (
+    t === MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY ||
+    looksLikeMomentSupportConditionalProbe(t)
+  ) {
+    return 6;
+  }
+  if (t === MOMENT_SUPPORT_QUESTION_CARD_BODY || looksLikeMomentSupportQuestion(t)) {
+    return 5;
+  }
+  if (
+    t === MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY ||
+    looksLikeMoment4OrientationQuestion(t)
+  ) {
+    return 4;
+  }
   if (
     t === MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY ||
     looksLikeMoment4ThresholdQuestion(t)

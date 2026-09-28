@@ -18,14 +18,11 @@ export const styles = StyleSheet.create({
     flex: 1,
   },
   unitPicker: {
-    width: 100,
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 8,
-    overflow: 'hidden',
+    width: 112,
   },
-  picker: {
-    height: 50,
+  unitTrigger: {
+    width: '100%',
+    minHeight: 48,
   },
 });
 

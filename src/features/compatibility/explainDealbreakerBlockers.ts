@@ -3,6 +3,7 @@ import {
   MAX_DISTANCE_KM,
   type DealbreakerProfile,
 } from './computeCompatibilityScore';
+import { isPartnerAlignmentHardBlock } from '@/shared/constants/partnerAlignmentImportance';
 
 function normalizeKey(v: string | null | undefined): string {
   return String(v ?? '')
@@ -22,17 +23,24 @@ function doesNotWantChildrenExplicitly(v: string | null | undefined): boolean {
 
 function userRequiresSameReligion(p: DealbreakerProfile): boolean {
   if (p.requireSameReligion === true) return true;
-  return normalizeKey(p.partnerSameReligionRequired) === 'yes';
+  return isPartnerAlignmentHardBlock(p.partnerSameReligionRequired);
 }
 
 function userRequiresPoliticalAlignment(p: DealbreakerProfile): boolean {
   if (p.requiresPoliticalAlignment === true) return true;
-  return normalizeKey(p.prefPartnerPoliticalAlignmentImportance) === 'yes';
+  return isPartnerAlignmentHardBlock(p.prefPartnerPoliticalAlignmentImportance);
 }
 
 function userWillingToRelocate(p: DealbreakerProfile): boolean {
   if (p.willingToRelocate === true) return true;
   return normalizeKey(p.relocationPreference) === 'yes';
+}
+
+function valuesDifferExplain(a: string | null | undefined, b: string | null | undefined): boolean {
+  const na = normalizeKey(a);
+  const nb = normalizeKey(b);
+  if (!na || !nb) return false;
+  return na !== nb;
 }
 
 function normalizeRelationshipStyle(v: string | null | undefined): string {
@@ -134,6 +142,37 @@ export function explainDealbreakerBlockers(a: DealbreakerProfile, b: Dealbreaker
   for (const [label, comfort, freq] of substancePairs) {
     if (hardSubstanceIncompatibility(comfort, freq)) {
       reasons.push(`Substance use dealbreaker (${label}).`);
+    }
+  }
+
+  const alignmentDims: Array<[string, string | null | undefined, string | null | undefined, boolean]> = [
+    ['tobacco', a.partnerAlignmentTobacco, b.partnerAlignmentTobacco, valuesDifferExplain(a.smoking, b.smoking)],
+    ['alcohol', a.partnerAlignmentAlcohol, b.partnerAlignmentAlcohol, valuesDifferExplain(a.drinking, b.drinking)],
+    [
+      'recreational drugs',
+      a.partnerAlignmentRecreationalDrugs,
+      b.partnerAlignmentRecreationalDrugs,
+      valuesDifferExplain(a.recreationalDrugsSocial, b.recreationalDrugsSocial),
+    ],
+    [
+      'psychedelics',
+      a.partnerAlignmentPsychedelics,
+      b.partnerAlignmentPsychedelics,
+      valuesDifferExplain(a.relationshipWithPsychedelics, b.relationshipWithPsychedelics),
+    ],
+    [
+      'cannabis',
+      a.partnerAlignmentCannabis,
+      b.partnerAlignmentCannabis,
+      valuesDifferExplain(a.relationshipWithCannabis, b.relationshipWithCannabis),
+    ],
+  ];
+  for (const [label, importanceA, importanceB, mismatch] of alignmentDims) {
+    if (
+      mismatch &&
+      (isPartnerAlignmentHardBlock(importanceA) || isPartnerAlignmentHardBlock(importanceB))
+    ) {
+      reasons.push(`Non-negotiable ${label} alignment mismatch.`);
     }
   }
 

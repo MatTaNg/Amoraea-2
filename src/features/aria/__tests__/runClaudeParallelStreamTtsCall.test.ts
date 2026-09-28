@@ -70,6 +70,7 @@ function baseParams(textToParallelStream = { full: '', spokenStarted: false, clo
     shouldForceScenarioBJamesRepairProbe: false,
     shouldForceScenarioCRepairProbe: false,
     shouldForceScenarioCSophiePerspectiveProbe: false,
+    shouldForceMoment4OrientationProbe: false,
     shouldForceMoment4ThresholdProbe: false,
     userScenarioTag: 1,
     hadPriorSubstantiveAnswerForFrustrationOffer: false,

@@ -69,20 +69,18 @@ import {
   shouldAdvanceScenarioBAfterSatisfiedRepair,
   stripScenarioARepairQuestion,
   userAnswerSatisfiesScenarioARepairPrompt,
-  userAnswerSatisfiesScenarioBJamesRepairPrompt,
 } from '@features/aria/interviewDisengagementProbes';
 import { textContainsScenarioBVignetteBody, textContainsScenarioCVignetteBody } from '@features/aria/emotionScenarioTransitionInference';
 import {
   assistantTextLooksLikeScenarioBPrematureAnswerRedirect,
   coerceScenarioBPrematureRepairRedirectToJamesDifferently,
-  coerceScenarioBJamesRepairQuestionForTts,
   isIncompleteScenarioBQ1LeadSentence,
   looksLikeScenarioBQ1Question,
   looksLikeScenarioBJamesDifferentlyQuestion,
-  scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent,
+  looksLikeScenarioBRepairAsJamesQuestion,
   lastAssistantPromptIsScenarioBQ1OrPrematureRedirect,
   userAnswerLooksLikeAheadOfScheduleScenarioBOnQ1,
-  userAnswerLooksLikeAheadOfScheduleScenarioBJamesDifferentlyOnQ1,
+  stripScenarioBRepairAsJamesQuestion,
 } from '@features/aria/scenarioBProbeLogic';
 import { applyPostClaudeScenarioAdvanceBundleOverride } from '@features/aria/interviewScenarioAdvanceAfterRepair';
 import { assistantTextLooksLikeMoment4HandoffLead } from '@features/aria/interviewTransitionBundles';
@@ -90,6 +88,7 @@ import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { stripStandalonePersonalDisclosureAckOutsidePersonalMoments } from '@features/aria/personalDisclosureAckGate';
 import { computeMoment5InterviewCloseGate } from '@features/aria/interviewProgressSync';
 import { ensureScenario2BundleWhenOpeningWithoutVignette } from '@features/aria/interviewTransitionBundles';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import { logPostClaudeAssistantDraftSanitizeChange } from '@features/aria/postClaudeAssistantDraftSanitizeLog';
 import {
   shouldSkipBriefAckBeforeMoveForUserTurn,
@@ -288,19 +287,6 @@ export function stripPostClaudeAssistantDraftText(
     messagesToUse: params.messagesToUse,
     lastDeliveredQuestionText: deps.lastQuestionTextRef.current,
   });
-  if (
-    !strippedText.trim() &&
-    shouldInjectScenarioARepairAfterContemptAnswer &&
-    !looksLikeScenarioARepairQuestion(strippedText)
-  ) {
-    if (shouldDeliverScenarioFollowUpQuestion(params.messagesToUse, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)) {
-      strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-      void remoteLog('[S1_REPAIR_INJECTED_AFTER_DUPLICATE_CONTEMPT_STRIP]', {
-        preview: strippedText.slice(0, 260),
-        s1ContemptFixVersion: 9,
-      });
-    }
-  }
 
   const scenarioHandoffAssistantTurn = isNaturalLanguageScenarioHandoffTransition(strippedText);
   if (!scenarioHandoffAssistantTurn) {
@@ -316,21 +302,6 @@ export function stripPostClaudeAssistantDraftText(
       beforeS1RepairDupStrip,
       strippedText,
     );
-    if (
-      !strippedText.trim() &&
-      beforeS1RepairDupStrip.trim() &&
-      !looksLikeScenarioARepairQuestion(beforeS1RepairDupStrip) &&
-      shouldDeliverScenarioFollowUpQuestion(
-        params.messagesToUse,
-        SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-      )
-    ) {
-      strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-      void remoteLog('[S1_REPAIR_REINJECTED_AFTER_PHANTOM_DEDUP_STRIP]', {
-        preview: strippedText.slice(0, 220),
-        beforePreview: beforeS1RepairDupStrip.slice(0, 220),
-      });
-    }
   }
 
   const beforeClosingWithinTurnDupStrip = strippedText;
@@ -371,6 +342,30 @@ export function stripPostClaudeAssistantDraftText(
     strippedText,
   );
 
+  if (looksLikeInterviewClosingAssistantMessage(strippedText)) {
+    const closeGateForPrematureClosingStrip = computeMoment5InterviewCloseGate(params.messagesToUse, {
+      moment5QuestionDelivered: deps.moment5QuestionDeliveredRef.current,
+      moment5PrimaryAnchorSession: deps.moment5PrimaryAnchorDeliveredSessionRef.current,
+      postM5UserTurnsRef: deps.moment5PostPromptUserTurnCountRef.current,
+      accountabilityProbeFired: deps.moment5AccountabilityProbeFiredRef.current,
+      currentInterviewMoment: deps.currentInterviewMomentRef.current,
+      moment5ResolutionDelivered: deps.moment5ResolutionDeliveredRef.current,
+    });
+    if (!closeGateForPrematureClosingStrip.moment5CloseAllowed) {
+      void remoteLog('[INTERVIEW_CLOSING_STRIPPED_PRE_M5_GATE]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        interviewMoment: deps.currentInterviewMomentRef.current,
+        postM5UserTurns: closeGateForPrematureClosingStrip.postM5UserTurns,
+        hasMoment5PrimaryAnchorInTranscript:
+          closeGateForPrematureClosingStrip.hasMoment5PrimaryAnchorInTranscript,
+        resolutionFollowUpStillRequired: closeGateForPrematureClosingStrip.resolutionFollowUpStillRequired,
+        accountabilityProbeStillRequired: closeGateForPrematureClosingStrip.accountabilityProbeStillRequired,
+        preview: strippedText.slice(0, 260),
+      });
+      strippedText = '';
+    }
+  }
+
   if (deps.currentInterviewMomentRef.current === 5) {
     const beforeM5ResolutionStrip = strippedText;
     if (looksLikeMoment5ResolutionFollowUpPrompt(strippedText)) {
@@ -381,27 +376,6 @@ export function stripPostClaudeAssistantDraftText(
         beforeM5ResolutionStrip,
         strippedText,
       );
-    }
-    const closeGateForPrematureClosingStrip = computeMoment5InterviewCloseGate(params.messagesToUse, {
-      moment5QuestionDelivered: deps.moment5QuestionDeliveredRef.current,
-      moment5PrimaryAnchorSession: deps.moment5PrimaryAnchorDeliveredSessionRef.current,
-      postM5UserTurnsRef: deps.moment5PostPromptUserTurnCountRef.current,
-      accountabilityProbeFired: deps.moment5AccountabilityProbeFiredRef.current,
-      currentInterviewMoment: deps.currentInterviewMomentRef.current,
-      moment5ResolutionDelivered: deps.moment5ResolutionDeliveredRef.current,
-    });
-    if (
-      !closeGateForPrematureClosingStrip.moment5CloseAllowed &&
-      looksLikeInterviewClosingAssistantMessage(strippedText)
-    ) {
-      void remoteLog('[INTERVIEW_CLOSING_STRIPPED_PRE_M5_GATE]', {
-        interviewSessionId: deps.interviewSessionIdRef.current,
-        postM5UserTurns: closeGateForPrematureClosingStrip.postM5UserTurns,
-        resolutionFollowUpStillRequired: closeGateForPrematureClosingStrip.resolutionFollowUpStillRequired,
-        accountabilityProbeStillRequired: closeGateForPrematureClosingStrip.accountabilityProbeStillRequired,
-        preview: strippedText.slice(0, 260),
-      });
-      strippedText = '';
     }
   }
 
@@ -440,9 +414,14 @@ export function stripPostClaudeAssistantDraftText(
     const beforeProbeStrip = strippedText;
     strippedText = stripScenarioAContemptProbeQuestion(strippedText);
     if (strippedText !== beforeProbeStrip) {
-      if (!strippedText && shouldInjectScenarioARepairAfterContemptAnswer) {
+      if (
+        !isInterviewCanonicalProbeRetired('s1_repair') &&
+        !strippedText &&
+        shouldInjectScenarioARepairAfterContemptAnswer
+      ) {
         strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
       } else if (
+        !isInterviewCanonicalProbeRetired('s1_repair') &&
         !strippedText &&
         (shouldInjectScenarioARepairAfterContemptAnswer || params.specificEmmaLineAlreadyAddressed)
       ) {
@@ -472,29 +451,33 @@ export function stripPostClaudeAssistantDraftText(
     }
     strippedText = stripScenarioModalFollowUpProbeParagraphs(strippedText);
     strippedText = stripScenarioANonScriptedParaphraseParagraphs(strippedText);
-    if (
-      !strippedText.trim() &&
-      shouldDeliverScenarioFollowUpQuestion(
-        params.messagesToUse,
-        SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-      )
-    ) {
-      strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-    }
-    if (
-      !looksLikeScenarioARepairQuestion(strippedText) &&
-      shouldDeliverScenarioFollowUpQuestion(
-        params.messagesToUse,
-        SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-      )
-    ) {
-      if (params.specificEmmaLineAlreadyAddressed && contemptSatisfiedWithoutProbe) {
+    if (!isInterviewCanonicalProbeRetired('s1_repair')) {
+      if (
+        !strippedText.trim() &&
+        shouldDeliverScenarioFollowUpQuestion(
+          params.messagesToUse,
+          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+        )
+      ) {
         strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-      } else {
-        strippedText = strippedText.trim()
-          ? `${strippedText.trim()}\n\n${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`
-          : SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
       }
+      if (
+        !looksLikeScenarioARepairQuestion(strippedText) &&
+        shouldDeliverScenarioFollowUpQuestion(
+          params.messagesToUse,
+          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+        )
+      ) {
+        if (params.specificEmmaLineAlreadyAddressed && contemptSatisfiedWithoutProbe) {
+          strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+        } else {
+          strippedText = strippedText.trim()
+            ? `${strippedText.trim()}\n\n${SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}`
+            : SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+        }
+      }
+    } else if (looksLikeScenarioARepairQuestion(strippedText)) {
+      strippedText = stripScenarioARepairQuestion(strippedText);
     }
     if (strippedText !== beforeFollowUpStrip) {
       void remoteLog('[S1_CONTEMPT_ANSWER_REPLACED_RYAN_COACHING]', {
@@ -571,6 +554,7 @@ export function stripPostClaudeAssistantDraftText(
   if (
     scenarioAConstructProbeTurn &&
     !repairSatisfiedForScenarioAAdvance &&
+    !isInterviewCanonicalProbeRetired('s1_repair') &&
     shouldDeliverScenarioFollowUpQuestion(
       params.messagesToUse,
       SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -605,13 +589,9 @@ export function stripPostClaudeAssistantDraftText(
       (looksLikeScenarioBQ1Question(strippedText) && !looksLikeScenarioBJamesDifferentlyQuestion(strippedText)))
   ) {
     const beforeAheadOfScheduleCoerce = strippedText;
-    if (
-      userAnswerLooksLikeAheadOfScheduleScenarioBJamesDifferentlyOnQ1(lastScenarioBUserAnswer) &&
-      !scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(lastScenarioBUserAnswer)
-    ) {
-      strippedText = coerceScenarioBJamesRepairQuestionForTts(strippedText);
-    } else {
-      strippedText = coerceScenarioBPrematureRepairRedirectToJamesDifferently(strippedText);
+    strippedText = coerceScenarioBPrematureRepairRedirectToJamesDifferently(strippedText);
+    if (looksLikeScenarioBRepairAsJamesQuestion(strippedText)) {
+      strippedText = stripScenarioBRepairAsJamesQuestion(strippedText);
     }
     if (strippedText !== beforeAheadOfScheduleCoerce) {
       void remoteLog('[S2_AHEAD_OF_SCHEDULE_REDIRECT_COERCED]', {
@@ -621,22 +601,22 @@ export function stripPostClaudeAssistantDraftText(
       });
     }
   }
-  const { lastUserContent: lastUserForS2Advance, priorJamesRepairAssistantContent: priorAsstForS2Advance } =
-    findLastUserWithPriorScenarioBJamesRepairContext(params.messagesToUse);
-  const priorJamesRepairContextForS2Advance =
-    priorAsstForS2Advance ??
-    findLastUserWithPriorAssistantContent(params.messagesToUse).priorAssistantContent;
-  const jamesRepairSatisfiedForScenarioBAdvance =
-    scenarioBConstructProbeTurn &&
-    !!lastUserForS2Advance &&
-    !!priorJamesRepairContextForS2Advance &&
-    userAnswerSatisfiesScenarioBJamesRepairPrompt(
-      lastUserForS2Advance,
-      priorJamesRepairContextForS2Advance,
-    );
   if (
-    jamesRepairSatisfiedForScenarioBAdvance &&
-    strippedText.trim() &&
+    scenarioBConstructProbeTurn &&
+    isInterviewCanonicalProbeRetired('s2_james_repair') &&
+    looksLikeScenarioBRepairAsJamesQuestion(strippedText)
+  ) {
+    const beforeRetiredS2RepairStrip = strippedText;
+    strippedText = stripScenarioBRepairAsJamesQuestion(strippedText);
+    if (strippedText !== beforeRetiredS2RepairStrip) {
+      void remoteLog('[S2_JAMES_REPAIR_PROBE_RETIRED_STRIPPED_IN_SANITIZE]', {
+        beforePreview: beforeRetiredS2RepairStrip.slice(0, 220),
+        afterPreview: strippedText.slice(0, 220),
+      });
+    }
+  }
+  if (
+    scenarioBConstructProbeTurn &&
     !textContainsScenarioCVignetteBody(strippedText) &&
     shouldAdvanceScenarioBAfterSatisfiedRepair(
       params.messagesToUse,
@@ -995,11 +975,16 @@ export function stripPostClaudeAssistantDraftText(
     const beforeRepairNormalize = strippedText;
     strippedText = normalizeScenarioARepairQuestionInAssistantDraft(strippedText);
     if (strippedText !== beforeRepairNormalize) {
-      void remoteLog('[S1_REPAIR_TRANSCRIPT_NORMALIZED]', {
-        interviewSessionId: deps.interviewSessionIdRef.current,
-        beforePreview: beforeRepairNormalize.slice(0, 220),
-        afterPreview: strippedText.slice(0, 220),
-      });
+      void remoteLog(
+        isInterviewCanonicalProbeRetired('s1_repair')
+          ? '[S1_REPAIR_PROBE_RETIRED_STRIPPED_FROM_DRAFT]'
+          : '[S1_REPAIR_TRANSCRIPT_NORMALIZED]',
+        {
+          interviewSessionId: deps.interviewSessionIdRef.current,
+          beforePreview: beforeRepairNormalize.slice(0, 220),
+          afterPreview: strippedText.slice(0, 220),
+        },
+      );
     }
   }
 

@@ -284,34 +284,41 @@ export function countScenarioBUserTurns(messages: readonly MessageWithScenario[]
   return messages.filter((m) => m.role === 'user' && m.scenarioNumber === 2).length;
 }
 
-export function scenarioBMinimumEngagementForHandoff(messages: readonly MessageWithScenario[]): boolean {
-  const userTurns = countScenarioBSubstantiveUserTurns(messages);
-  if (userTurns >= 2) return true;
-
-  const jamesRepairCtx = findLastUserWithPriorScenarioBJamesRepairContext(messages);
-  if (
-    jamesRepairCtx.lastUserContent &&
-    jamesRepairCtx.priorJamesRepairAssistantContent &&
-    userAnswerSatisfiesScenarioBJamesRepairPrompt(
-      jamesRepairCtx.lastUserContent,
-      jamesRepairCtx.priorJamesRepairAssistantContent,
-    )
-  ) {
-    return true;
+export function transcriptHasUserResponseAfterScenarioBJamesDifferently(
+  messages: readonly MessageWithScenario[],
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const content = m.content ?? '';
+    if (
+      !looksLikeScenarioBJamesDifferentlyQuestion(content) ||
+      looksLikeScenarioBRepairAsJamesQuestion(content)
+    ) {
+      continue;
+    }
+    return messages.slice(i + 1).some((t) => t.role === 'user' && (t.content ?? '').trim());
   }
-
-  const { lastUserContent, priorAssistantContent } = findLastUserWithPriorAssistantContent(messages);
-  if (
-    lastUserContent &&
-    priorAssistantContent &&
-    looksLikeScenarioBJamesDifferentlyQuestion(priorAssistantContent) &&
-    !looksLikeScenarioBRepairAsJamesQuestion(priorAssistantContent) &&
-    scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(lastUserContent)
-  ) {
-    return userTurns >= 1;
-  }
-
   return false;
+}
+
+function transcriptHasUserResponseAfterScenarioBJamesRepair(
+  messages: readonly MessageWithScenario[],
+): boolean {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i];
+    if (m.role !== 'assistant') continue;
+    const content = m.content ?? '';
+    if (!looksLikeScenarioBRepairAsJamesQuestion(content)) continue;
+    return messages.slice(i + 1).some((t) => t.role === 'user' && (t.content ?? '').trim());
+  }
+  return false;
+}
+
+export function scenarioBMinimumEngagementForHandoff(messages: readonly MessageWithScenario[]): boolean {
+  if (scenarioBJamesRepairProbeAlreadySatisfied(messages)) return true;
+  if (transcriptHasUserResponseAfterScenarioBJamesDifferently(messages)) return true;
+  return transcriptHasUserResponseAfterScenarioBJamesRepair(messages);
 }
 
 /**
@@ -330,7 +337,7 @@ export function resolveScenarioBNextRequiredFollowUpPrompt(
   if (!hasJamesDifferentlyOrAppreciation) {
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }
-  return SCENARIO_B_JAMES_REPAIR_CANONICAL;
+  return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
 }
 
 /** Active Scenario B question while S2 is in progress — never replay S1→S2 boundary copy. */
@@ -344,7 +351,7 @@ export function resolveScenarioBActiveQuestionWhenInProgress(
     if (!raw) continue;
     if (hasScenarioBoundaryWrapPhrase(raw)) continue;
     if (looksLikeScenarioBRepairAsJamesQuestion(raw)) {
-      return coerceScenarioBJamesRepairQuestionForTts(raw);
+      continue;
     }
     if (
       looksLikeScenarioBJamesDifferentlyQuestion(raw) &&
@@ -534,11 +541,11 @@ export function isIncompleteScenarioBJamesSayToJamesLeadSentence(text: string): 
 /** Replace off-script / truncated "say that to James" with canonical Q2 or Q3 (one question only). */
 export function coerceScenarioBJamesSayToJamesQuestionForTts(
   text: string,
-  preferRepair = false,
+  _preferRepair = false,
 ): string {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t) {
-    return preferRepair ? SCENARIO_B_JAMES_REPAIR_CANONICAL : SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   }
   if (
     !looksLikeScenarioBJamesSayToJamesRolePlayQuestion(t) &&
@@ -546,13 +553,7 @@ export function coerceScenarioBJamesSayToJamesQuestionForTts(
   ) {
     return t;
   }
-  const preferRepairFromText =
-    preferRepair ||
-    looksLikeScenarioBRepairAsJamesQuestion(t) ||
-    isIncompleteScenarioBJamesRepairLeadSentence(t);
-  const canonical = preferRepairFromText
-    ? SCENARIO_B_JAMES_REPAIR_CANONICAL
-    : SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+  const canonical = SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
   const ack =
     extractBriefAckBeforeIncompleteJamesProbe(t) ??
     extractBriefAckBeforeIncompleteJamesRepairProbe(t);
@@ -590,13 +591,13 @@ export function collapseScenarioBJamesSayToJamesWithRepairDuplicate(
       preferRepair,
     );
   }
-  return coerceScenarioBJamesSayToJamesQuestionForTts(sayToJamesParagraph, true);
+  return coerceScenarioBJamesSayToJamesQuestionForTts(sayToJamesParagraph, false);
 }
 
 /** Brief ack before a truncated James-repair probe (e.g. "Got it. And if you were James, how would you repair things now that"). */
 function extractBriefAckBeforeIncompleteJamesRepairProbe(text: string): string | null {
   const m = text.match(
-    /^((?:got it|that'?s (?:a )?real read on it|good read|great read|nice work|that makes sense|you(?:'re| are) seeing that|i hear you|makes sense)[^.!?]{0,80})[\.,!]?\s+(?:and\s+)?(?:if you were james|how would you)\b/i,
+    /^((?:got it|that'?s (?:a )?real read on it|good read|great read|nice work|that makes sense|you(?:'re| are) seeing that|i hear you|makes sense)[^.!?]{0,80})[\.,!]?\s+(?:and\s+)?(?:if you were james|how would you|if james|how would james)\b/i,
   );
   const ack = m?.[1]?.trim();
   return ack ? ack.replace(/\.$/, '') : null;
@@ -633,30 +634,32 @@ export function looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(text: str
   ) {
     return true;
   }
+  // "If James wanted to repair this with Sarah the next day, what would that look like…"
+  if (/\bif james (?:wanted|wants|were) to repair\b/.test(t)) return true;
+  if (
+    /\bjames\b/.test(t) &&
+    /\brepair(?:ing|s)? this with sarah\b/.test(t) &&
+    /\b(what would|how would|look like|what would (?:he|she|james) say)\b/.test(t)
+  ) {
+    return true;
+  }
   return false;
 }
 
-/** Replace truncated / garbled James-repair asks with the canonical scripted Q3. */
+/**
+ * S2 hypothetical repair is retired — strip Q3 asks (keep a brief ack when present) so
+ * resume/replay never re-asks repair or accidentally re-asks James-differently mid-handoff.
+ */
 export function coerceScenarioBJamesRepairQuestionForTts(text: string): string {
   return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
   const t = (raw ?? '').replace(/\s+/g, ' ').trim();
-  if (!t) return SCENARIO_B_JAMES_REPAIR_CANONICAL;
-  if (looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(t)) {
-    const ack = extractBriefAckBeforeIncompleteJamesRepairProbe(t);
-    return ack ? `${ack}. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}` : `Got it. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`;
-  }
-  if (looksLikeScenarioBRepairAsJamesQuestion(t) && /\?\s*$/.test(t)) {
-    const ack = extractBriefAckBeforeIncompleteJamesRepairProbe(t);
-    if (ack) return `${ack}. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`;
-    if (t.toLowerCase() !== SCENARIO_B_JAMES_REPAIR_CANONICAL.toLowerCase()) {
-      return SCENARIO_B_JAMES_REPAIR_CANONICAL;
-    }
-    return t;
-  }
-  if (isIncompleteScenarioBJamesRepairLeadSentence(t)) {
-    const ack = extractBriefAckBeforeIncompleteJamesRepairProbe(t);
-    if (ack) return `${ack}. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}`;
-    return SCENARIO_B_JAMES_REPAIR_CANONICAL;
+  if (!t) return '';
+  if (
+    looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(t) ||
+    looksLikeScenarioBRepairAsJamesQuestion(t) ||
+    isIncompleteScenarioBJamesRepairLeadSentence(t)
+  ) {
+    return extractBriefAckBeforeIncompleteJamesRepairProbe(t) ?? '';
   }
   return t;
   });
@@ -693,7 +696,27 @@ export function looksLikeScenarioBRepairAsJamesQuestion(text: string): boolean {
     /\bhow do you think james\b/.test(t) &&
     /\b(could|would|might|can)\b/.test(t) &&
     /\brepair\b/.test(t);
-  return asJames || howRepairJames || howJamesRepairThirdPerson || howThinkJamesCouldRepair || compact;
+  // Paraphrases like: "If James wanted to repair this with Sarah the next day, what would that actually look like — what would he say?"
+  const jamesWantedToRepair =
+    /\bjames\b/.test(t) &&
+    /\b(?:wanted|wants|were) to repair\b/.test(t) &&
+    (/\b(?:sarah|with her|next day|look like|what would (?:he|she|james) say)\b/.test(t) ||
+      /\brepair this\b/.test(t));
+  const jamesRepairLookLike =
+    /\bjames\b/.test(t) &&
+    /\brepair\b/.test(t) &&
+    /\b(?:with sarah|the next day)\b/.test(t) &&
+    /\b(?:what would|how would|look like|what would (?:he|she|james) say)\b/.test(t);
+  return (
+    asJames ||
+    howRepairJames ||
+    howJamesRepairThirdPerson ||
+    howThinkJamesCouldRepair ||
+    compact ||
+    jamesWantedToRepair ||
+    jamesRepairLookLike ||
+    looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(text)
+  );
 }
 
 /** Model jumped to Scenario C (or completion) without asking what James could have done differently first. */
@@ -710,14 +733,25 @@ export function looksLikeAssistantSkipsScenarioBJamesIntermediateQuestion(text: 
 }
 
 export function stripScenarioBRepairAsJamesQuestion(text: string): string {
-  return text
-    .replace(/(?:^|\n)\s*If you were James,?\s+how would you repair\??\s*/gi, '\n')
-    .replace(
-      /(?:^|\n)\s*How would you repair[^?.!\n]*if you were James[^?.!\n]*[?.!]?\s*/gi,
-      '\n',
-    )
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  const paragraphs = (text ?? '')
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter(Boolean)
+    .map((p) => {
+      if (
+        looksLikeScenarioBRepairAsJamesQuestion(p) ||
+        isIncompleteScenarioBJamesRepairLeadSentence(p) ||
+        looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(p)
+      ) {
+        return extractBriefAckBeforeIncompleteJamesRepairProbe(p) ?? '';
+      }
+      return p
+        .replace(/\s*(?:And\s+)?if you were James,?\s+how would you repair\??/gi, '')
+        .replace(/\s*How would you repair[^?.!\n]*if you were James[^?.!\n]*[?.!]?/gi, '')
+        .trim();
+    })
+    .filter(Boolean);
+  return paragraphs.join('\n\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Last user turn in `messages` with the assistant message they were answering. */
@@ -1076,41 +1110,15 @@ export function userSidesEntirelyWithJames(text: string): boolean {
   return blamesSarah || jamesOnlyRight;
 }
 
-function priorScenarioBAssistantTurns(msgs: readonly MessageWithScenario[]) {
-  return msgs.filter(
-    (m) =>
-      m.role === 'assistant' &&
-      !(m as { isWelcomeBack?: boolean }).isWelcomeBack &&
-      !(m as { isScoreCard?: boolean }).isScoreCard,
-  );
-}
-
-function transcriptAlreadyContainsScenarioBRepairAsJamesQuestion(
-  msgs: readonly MessageWithScenario[],
-): boolean {
-  return priorScenarioBAssistantTurns(msgs).some((m) =>
-    looksLikeScenarioBRepairAsJamesQuestion((m as { content?: string }).content ?? ''),
-  );
-}
-
-/** Force canonical James repair Q3 after a substantive answer to James-differently Q2. */
-export function shouldForceScenarioBJamesRepairProbe(params: {
+/** S2 hypothetical repair-as-James is retired — spontaneous repair still scores. */
+export function shouldForceScenarioBJamesRepairProbe(_params: {
   currentMoment: number;
   messages: readonly MessageWithScenario[];
   lastAssistantContent: string;
   userAnswer: string;
   suppressForcedConstructProbesForMetaFrustration: boolean;
 }): boolean {
-  if (params.suppressForcedConstructProbesForMetaFrustration) return false;
-  if (params.currentMoment !== 2) return false;
-  if (scenarioBJamesRepairProbeAlreadySatisfied(params.messages)) return false;
-  if (isDecline(params.userAnswer)) return false;
-  if (classifyUserMetaComment(params.userAnswer)?.type === 'checking_in') return false;
-  if (looksLikeIncompleteCutOffUserAnswer(params.userAnswer)) return false;
-  if (!looksLikeScenarioBJamesDifferentlyQuestion(params.lastAssistantContent)) return false;
-  if (transcriptAlreadyContainsScenarioBRepairAsJamesQuestion(params.messages)) return false;
-  if (scenarioBJamesDifferenceOrAppreciationAnswerHasRepairContent(params.userAnswer)) return false;
-  return true;
+  return false;
 }
 
 /** Scripted Scenario B follow-ups that must never be treated as paraphrased show-scenario-card vignettes. */

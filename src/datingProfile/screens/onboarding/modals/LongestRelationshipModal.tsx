@@ -7,6 +7,7 @@ import { SingleChoiceOptionList } from "@/shared/components/profileFields/Single
 import { LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS } from "@/shared/constants/longestRomanticRelationshipOptions";
 import { OnboardingHeader } from "./components/OnboardingHeader";
 import { styles } from "./RelationshipStyleModal.styled";
+import { ONBOARDING_LONGEST_RELATIONSHIP_DESCRIPTION } from "./onboardingStepCopy";
 
 interface LongestRelationshipModalProps {
   value: string;
@@ -31,11 +32,12 @@ export const LongestRelationshipModal: React.FC<LongestRelationshipModalProps> =
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            What has been your longest romantic relationship?
+            {ONBOARDING_LONGEST_RELATIONSHIP_DESCRIPTION}
           </Text>
           <SingleChoiceOptionList
             options={LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS}
             value={value}
+            deferSelectUntilPaint
             onSelect={(v) => {
               onValueChange(v);
               onNext();

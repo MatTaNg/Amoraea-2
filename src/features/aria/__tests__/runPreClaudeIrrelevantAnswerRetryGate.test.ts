@@ -2,6 +2,7 @@ import { IRRELEVANT_ANSWER_RETRY_LINE } from '@features/aria/interviewAnswerRele
 import {
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
+  MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT,
 } from '@features/aria/moment4ProbeLogic';
 import { moment4UserDeclinesSpecificityReask } from '@features/aria/moment4SpecificityFollowUp';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
@@ -12,7 +13,7 @@ import {
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
 } from '@features/aria/scenarioAContemptProbeTtsStrip';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
-import { SCENARIO_B_JAMES_REPAIR_CANONICAL } from '@features/aria/scenarioBProbeLogic';
+import { SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, SCENARIO_B_JAMES_REPAIR_CANONICAL } from '@features/aria/scenarioBProbeLogic';
 
 function buildDeps(overrides: Partial<PreClaudeTurnGateDeps> = {}): PreClaudeTurnGateDeps {
   return {
@@ -756,6 +757,48 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
     expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
+  it('accepts "I asked her" on the support need-recognition probe without retry', async () => {
+    const answer = 'I asked her';
+    const probe = MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT;
+    const messages = [
+      { role: 'assistant' as const, content: probe, scenarioNumber: 3 as const },
+      { role: 'user' as const, content: answer, scenarioNumber: 3 as const },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      currentScenarioRef: { current: 3 },
+      currentInterviewMomentRef: { current: 4 },
+      lastQuestionTextRef: { current: probe },
+    });
+
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(deps, answer, messages, probe);
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('accepts Whisper mishear "I asked for a" on need-recognition without cut-off retry', async () => {
+    const answer = 'I asked for a';
+    const probe = MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT;
+    const messages = [
+      { role: 'assistant' as const, content: probe, scenarioNumber: 3 as const },
+      { role: 'user' as const, content: answer, scenarioNumber: 3 as const },
+    ];
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      currentScenarioRef: { current: 3 },
+      currentInterviewMomentRef: { current: 4 },
+      lastQuestionTextRef: { current: probe },
+    });
+
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(deps, answer, messages, probe);
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
   it('accepts Sophie affect answer cut off on "for so" without retry', async () => {
     const answer = 'I think it was probably very frustrating for so';
     const messages = [
@@ -865,6 +908,40 @@ describe('runPreClaudeIrrelevantAnswerRetryGate', () => {
       'I did.',
       messages,
       SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+    );
+
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('accepts substantive Scenario B James-differently replies after recovery on the same question', async () => {
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+        scenarioNumber: 2 as const,
+      },
+    ];
+    const answer =
+      'Got excited with her, asked her how she went, and told her how proud of her she was.';
+    const deps = buildDeps({
+      messages,
+      currentMessagesRef: { current: messages },
+      currentScenarioRef: { current: 2 },
+      currentInterviewMomentRef: { current: 2 },
+      lastQuestionTextRef: { current: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL },
+      substantiveInterviewQuestionDeliveredSeqRef: { current: 3 },
+      recoveryAssistantSpokenAtSubstantiveSeqRef: { current: 3 },
+      lastUserTurnMicStopTelemetryRef: {
+        current: { ratioFlag: true, wordsPerSecond: 0, wordCount: 18, audioDurationMs: 0 },
+      },
+    });
+
+    const result = await runPreClaudeIrrelevantAnswerRetryGate(
+      deps,
+      answer,
+      messages,
+      SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     );
 
     expect(result.handled).toBe(false);

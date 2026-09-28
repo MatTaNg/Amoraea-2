@@ -6,9 +6,12 @@ import {
   validateProfilePromptsForSetup,
   wouldRemovalBreakRequiredCategoryFloor,
   assertValidProfilePromptsForServerSave,
-  PROFILE_PROMPT_ANSWER_MAX_LENGTH,
+  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
 } from '@/features/profile/profilePromptValidation';
 import type { ProfilePromptAnswer } from '@domain/models/Profile';
+
+const REQUIRED_ANSWER = 'Honesty, warmth, and showing up when things get hard.';
+const HIS_ANSWER = 'Space and a calm check-in when I am stressed.';
 
 const requiredPrompt = (
   promptId: string,
@@ -39,7 +42,7 @@ describe('profilePromptValidation', () => {
 
   it('allows setup with exactly one required-category prompt', () => {
     const result = validateProfilePromptsForSetup([
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'Honesty and warmth.'),
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', REQUIRED_ANSWER),
     ]);
     expect(result.ok).toBe(true);
   });
@@ -47,7 +50,7 @@ describe('profilePromptValidation', () => {
   it('validates required category when that prompt is second, not first', () => {
     const prompts = [
       funPrompt('fun_date', 'Coffee shop.'),
-      requiredPrompt('his_stress', 'how_i_show_up', 'Space and a calm check-in.'),
+      requiredPrompt('his_stress', 'how_i_show_up', HIS_ANSWER),
     ];
     expect(hasRequiredCategoryPrompt(prompts)).toBe(true);
     expect(validateProfilePromptsForSetup(prompts).ok).toBe(true);
@@ -57,14 +60,14 @@ describe('profilePromptValidation', () => {
     const prompts = [
       funPrompt('fun_date', 'Coffee shop.'),
       funPrompt('fun_flirt', 'Bad puns.'),
-      requiredPrompt('wmtm_trust', 'what_matters_to_me', 'Consistency over grand gestures.'),
+      requiredPrompt('wmtm_trust', 'what_matters_to_me', REQUIRED_ANSWER),
     ];
     expect(validateProfilePromptsForSetup(prompts).ok).toBe(true);
   });
 
   it('rejects more than three prompts', () => {
     const result = validateProfilePromptsForSetup([
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'Honesty.'),
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', REQUIRED_ANSWER),
       funPrompt('fun_date', 'Walks.'),
       funPrompt('fun_flirt', 'Teasing.'),
       funPrompt('fun_food', 'Tacos.'),
@@ -75,28 +78,53 @@ describe('profilePromptValidation', () => {
 
   it('rejects duplicate prompt ids', () => {
     const result = validateProfilePromptsForSetup([
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'Honesty.'),
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'Different answer.'),
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', REQUIRED_ANSWER),
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', HIS_ANSWER),
     ]);
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe('duplicate_prompt');
   });
 
-  it('rejects answers over 150 characters', () => {
-    const long = 'a'.repeat(PROFILE_PROMPT_ANSWER_MAX_LENGTH + 1);
+  it('rejects required-category answers under the minimum', () => {
+    const short = 'a'.repeat(PROFILE_PROMPT_ANSWER_MIN_LENGTH - 1);
     const result = validateProfilePromptsForSetup([
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', long),
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', short),
     ]);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe('answer_too_long');
+    if (!result.ok) expect(result.code).toBe('answer_too_short');
   });
 
-  it('server save assertion rejects long answers independently of UI', () => {
+  it('allows required-category answers that meet the minimum', () => {
+    const justEnough = 'a'.repeat(PROFILE_PROMPT_ANSWER_MIN_LENGTH);
+    const result = validateProfilePromptsForSetup([
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', justEnough),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('does not require a minimum on optional-category answers', () => {
+    const result = validateProfilePromptsForSetup([
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', REQUIRED_ANSWER),
+      funPrompt('fun_date', 'Hi.'),
+    ]);
+    expect(result.ok).toBe(true);
+  });
+
+  it('server save assertion rejects short required answers independently of UI', () => {
     expect(() =>
       assertValidProfilePromptsForServerSave([
-        requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'x'.repeat(151)),
+        requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'x'.repeat(10)),
       ]),
-    ).toThrow(/150/);
+    ).toThrow(/30/);
+  });
+
+  it('server save assertion allows long required and optional answers', () => {
+    expect(() =>
+      assertValidProfilePromptsForServerSave([
+        requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'x'.repeat(400)),
+        funPrompt('fun_date', 'x'.repeat(400)),
+      ]),
+    ).not.toThrow();
   });
 
   it('blocks removal that would drop below required-category floor', () => {

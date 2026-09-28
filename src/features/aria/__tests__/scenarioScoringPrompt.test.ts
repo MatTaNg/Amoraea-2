@@ -10,6 +10,7 @@ describe('buildScenarioScoringPrompt', () => {
     ]);
     expect(prompt).toContain('"appreciation"');
     expect(prompt).toContain('SCENARIO A (Emma/Ryan) — APPRECIATION');
+    expect(prompt).toContain('SCENARIO A — REPAIR SCORING AFTER PROBE REMOVAL');
     expect(prompt).toContain('repair-as-Ryan');
   });
 

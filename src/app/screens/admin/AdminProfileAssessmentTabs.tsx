@@ -6,6 +6,7 @@ import {
   GamingCorrectionBanner,
   GamingCorrectionCard,
 } from '@features/admin/GamingCorrectionCard';
+import { PsychInstrumentTitle } from '@features/admin/interviewDashboard/PsychInstrumentTitle';
 import type { GamingCorrectionResult } from '@features/psychometrics/computeGamingCorrection';
 import {
   formatPsychometricGateFailDescription,
@@ -469,6 +470,14 @@ function psychometricFloorScoresFromUser(user: AdminUserProfileRecord) {
 
 function getBrsBand(score: number | null): { band: string; modifier: number; description: string } {
   if (score === null) return { band: 'Not assessed', modifier: 0, description: '' };
+  if (score <= 1.8) {
+    return {
+      band: 'Floor — low resilience',
+      modifier: 0,
+      description:
+        'At or below the BRS admission floor (≤ 1.8 on the 1–5 scale). Hard fail; this instrument does not add an extra modifier.',
+    };
+  }
   if (score >= 4.0) {
     return {
       band: 'High resilience',
@@ -499,7 +508,7 @@ function getAnxietyTraitBand(score: number | null): { band: string; modifier: nu
       band: 'High chronic anxiety',
       modifier: -0.15,
       description:
-        'Elevated trait worry and tension in daily life. Associated with relational hypervigilance and difficulty settling after minor setbacks.',
+        'Elevated trait worry and tension in daily life. Live psychometric modifier only — not a new-user auto-fail. Associated with relational hypervigilance and difficulty settling after minor setbacks.',
     };
   }
   if (score >= 3.0) {
@@ -519,7 +528,15 @@ function getAnxietyTraitBand(score: number | null): { band: string; modifier: nu
 
 function getScsSfBand(score: number | null): { band: string; modifier: number; description: string } {
   if (score === null) return { band: 'Not assessed', modifier: 0, description: '' };
-  if (score >= 4.0) {
+  if (score < 2.5) {
+    return {
+      band: 'Floor — low self-compassion',
+      modifier: 0,
+      description:
+        'Below the Amoraea admission floor (< 2.5). Hard fail; this instrument does not add an extra modifier.',
+    };
+  }
+  if (score >= 3.3) {
     return {
       band: 'High self-compassion',
       modifier: 0,
@@ -527,23 +544,31 @@ function getScsSfBand(score: number | null): { band: string; modifier: number; d
         'Treats themselves with kindness and balance during difficulty. Associated with healthier self-talk and recovery after relational setbacks.',
     };
   }
-  if (score >= 3.0) {
+  if (score >= 2.9) {
     return {
-      band: 'Moderate self-compassion',
-      modifier: 0,
-      description: 'Average self-kindness under stress with some self-criticism or rumination.',
+      band: 'Mild concern — self-compassion',
+      modifier: -0.05,
+      description: 'Below-average self-kindness under stress with some self-criticism or rumination. Still above the admission floor.',
     };
   }
   return {
-    band: 'Low self-compassion',
-    modifier: -0.2,
+    band: 'Moderate concern — self-compassion',
+    modifier: -0.1,
     description:
-      'Harsh self-judgment and difficulty soothing themselves when things go wrong. May amplify shame and withdrawal in relationships.',
+      'Low self-compassion still above the 2.5 admission floor. May amplify shame and withdrawal in relationships.',
   };
 }
 
 function getGaspBand(score: number | null): { band: string; modifier: number; description: string } {
   if (score === null) return { band: 'Not assessed', modifier: 0, description: '' };
+  if (score >= 4.6) {
+    return {
+      band: 'Floor — extreme externalization',
+      modifier: 0,
+      description:
+        'At or above the GASP externalization admission floor (≥ 4.6). Hard fail; this instrument does not add an extra modifier.',
+    };
+  }
   if (score <= 2.5) {
     return {
       band: 'Low externalization',
@@ -730,38 +755,34 @@ function getAaq2Band(score: number | null): { band: string; modifier: number; de
 
 function getRsesBand(score: number | null): { band: string; modifier: number; description: string } {
   if (score === null) return { band: 'Not assessed', modifier: 0, description: '' };
-  if (score >= 30)
+  if (score <= 20) {
     return {
-      band: 'High self-esteem',
+      band: 'Floor — Amoraea admissions threshold',
+      modifier: 0,
+      description:
+        'At or below the Amoraea admissions threshold (RSES ≤ 20 on the 10–40 range). Hard fail; this instrument does not add an extra modifier. This is an Amoraea admissions threshold, not a clinically validated universal partner-suitability cutoff.',
+    };
+  }
+  if (score >= 24) {
+    return {
+      band: 'Healthy self-esteem',
       modifier: 0,
       description:
         'Stable self-regard. Associated with lower rejection sensitivity and more secure relational functioning.',
     };
-  if (score >= 23)
+  }
+  if (score >= 22) {
     return {
-      band: 'Moderate-high self-esteem',
-      modifier: 0,
-      description: 'Generally positive self-regard with some variability.',
+      band: 'Below-average self-esteem',
+      modifier: -0.1,
+      description: 'Mild concern above the admissions floor. Some variability in self-regard.',
     };
-  if (score >= 17)
-    return {
-      band: 'Moderate-low self-esteem',
-      modifier: -0.2,
-      description:
-        "Below-average self-regard. May create validation-seeking patterns or difficulty trusting partner's positive regard.",
-    };
-  if (score >= 11)
-    return {
-      band: 'Low self-esteem',
-      modifier: -0.4,
-      description:
-        'Significantly impaired self-regard. Heightened rejection sensitivity and risk of emotional dependency or withdrawal patterns.',
-    };
+  }
   return {
-    band: 'Floor self-esteem',
-    modifier: -0.6,
+    band: 'Low self-esteem',
+    modifier: -0.15,
     description:
-      'Severe self-worth deficit. Requires therapeutic support before relationship readiness can be established.',
+      'Last admissible band (RSES 21). Below-average self-regard still above the Amoraea admissions threshold.',
   };
 }
 
@@ -1057,11 +1078,9 @@ export function buildPsychometricInstrumentImpacts(
     anxiety_trait: makeInstrumentImpact(
       `Score: ${anxietyScore ?? '—'}/5.0 — ${anxietyTraitInfo.band}`,
       anxietyTraitInfo,
-      wouldTriggerAnxietyTraitHighFloor(anxietyScore, straightLineFlags),
+      false,
       ANXIETY_TRAIT_HIGH_FLOOR_CODE,
-      anxietyScore != null
-        ? formatPsychometricGateFailDescription(ANXIETY_TRAIT_HIGH_FLOOR_CODE, anxietyScore)
-        : null,
+      null,
       'anxiety_trait_straight_line',
       straightLineFlags,
     ),
@@ -1335,7 +1354,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Resilience Assessment</Text>
+              <PsychInstrumentTitle
+                name="Resilience Assessment"
+                abbr="BRS"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1363,7 +1387,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Emotional Patterns Assessment</Text>
+              <PsychInstrumentTitle
+                name="Emotional Patterns Assessment"
+                abbr="Anxiety Trait"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1381,8 +1410,8 @@ export function FullAssessmentTab({
               user.psychometrics_anxiety_trait_score,
               straightLineFlags,
             ) ? (
-              <Text style={tabStyles.floorWarning}>
-                ⛔ Floor breach — {ANXIETY_TRAIT_HIGH_FLOOR_CODE} gate fail triggered
+              <Text style={tabStyles.instrumentDescription}>
+                High trait anxiety is a live modifier signal, not an automatic gate fail.
               </Text>
             ) : null}
             {straightLineFlags.includes('anxiety_trait_straight_line') ? (
@@ -1394,7 +1423,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Self-Compassion Assessment</Text>
+              <PsychInstrumentTitle
+                name="Self-Compassion Assessment"
+                abbr="SCS-SF"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1436,7 +1470,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Responsibility Assessment</Text>
+              <PsychInstrumentTitle
+                name="Responsibility Assessment"
+                abbr="GASP"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1472,7 +1511,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Relationship Beliefs Assessment</Text>
+              <PsychInstrumentTitle
+                name="Relationship Beliefs Assessment"
+                abbr="Dweck"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1500,7 +1544,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Emotional Flexibility Assessment</Text>
+              <PsychInstrumentTitle
+                name="Emotional Flexibility Assessment"
+                abbr="AAQ-2"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1531,7 +1580,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Self-Esteem Assessment</Text>
+              <PsychInstrumentTitle
+                name="Self-Esteem Assessment"
+                abbr="RSES"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1632,7 +1686,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Social Perceptions Assessment (SD3 Narcissism)</Text>
+              <PsychInstrumentTitle
+                name="Social Perceptions Assessment"
+                abbr="SD3 Narcissism"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1660,7 +1719,12 @@ export function FullAssessmentTab({
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
-              <Text style={tabStyles.instrumentName}>Self-Reflection Assessment (RFQ)</Text>
+              <PsychInstrumentTitle
+                name="Self-Reflection Assessment"
+                abbr="RFQ"
+                nameStyle={tabStyles.instrumentName}
+                abbrStyle={tabStyles.instrumentAbbr}
+              />
               <Text
                 style={[
                   tabStyles.instrumentModifier,
@@ -1723,7 +1787,12 @@ export function FullAssessmentTab({
       ) : (
         <View style={tabStyles.instrumentCard}>
           <View style={tabStyles.instrumentHeader}>
-            <Text style={tabStyles.instrumentName}>Sexual Communication</Text>
+            <PsychInstrumentTitle
+              name="Sexual Communication"
+              abbr="Sexual Communication"
+              nameStyle={tabStyles.instrumentName}
+              abbrStyle={tabStyles.instrumentAbbr}
+            />
             <Text style={tabStyles.instrumentModifier}>Matching signal</Text>
           </View>
           <Text style={tabStyles.instrumentScore}>
@@ -1914,7 +1983,8 @@ const tabStyles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 4,
   },
-  instrumentName: { fontSize: 14, fontWeight: '600', color: '#fff', flex: 1 },
+  instrumentName: { fontSize: 14, fontWeight: '600', color: '#fff' },
+  instrumentAbbr: { fontSize: 11, fontWeight: '600', color: '#9BB0CC' },
   instrumentModifier: { fontSize: 16, fontWeight: '700' },
   instrumentScore: { fontSize: 13, color: '#ccc', marginBottom: 4 },
   instrumentDescription: { fontSize: 12, color: '#888', lineHeight: 17 },

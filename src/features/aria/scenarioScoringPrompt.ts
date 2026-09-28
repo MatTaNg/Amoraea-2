@@ -129,6 +129,20 @@ Scenario C — REPAIR (this slice does not score commitment_threshold):
 ${SCENARIO_A_APPRECIATION_ANCHORS}
 `
       : '';
+  const scenario1RetiredRepairScoring =
+    scenarioNumber === 1
+      ? `
+SCENARIO A — REPAIR SCORING AFTER PROBE REMOVAL:
+The dedicated repair-as-Ryan prompt is **retired**. Score **repair** only if (a) a repair-as-Ryan question actually appears in this transcript, or (b) the user volunteered meaningful repair process unprompted. Otherwise **repair = JSON null** with keyEvidence that there is no assessable repair evidence. Do **not** assign a low repair score because they analyzed Emma/Ryan without volunteering repair.
+`
+      : '';
+  const scenario2RetiredRepairScoring =
+    scenarioNumber === 2
+      ? `
+SCENARIO B — REPAIR SCORING AFTER PROBE REMOVAL:
+The dedicated "if you were James, how would you repair" prompt is **retired**. Score **repair** only if that (or equivalent) question appears in this transcript, or the user volunteered meaningful repair process (not mere appreciation of Sarah). Otherwise **repair = JSON null**. Absence of spontaneous repair is missing evidence, not a low score.
+`
+      : '';
   const scenario1MentalizingRepairCeiling =
     scenarioNumber === 1
       ? `
@@ -296,6 +310,8 @@ Scenario A repair calibration:
 - If the repair answer **redirects fault to Emma** (e.g. "Emma needs to communicate better" as the main move, or **"I would apologize if she had just been clearer"** in a way that makes her the problem), score **repair** in the 4-5 range. **Do not** use **"if she doesn't communicate it well"**-style **conditionals alone** as deflection: if the clause **leads into** the respondent’s **own** limits, learning, and ownership (see directionality block), that can support **6+** and often **7–8** for **repair** on the prompted turn.
 - Reserve 6+ for answers that keep Ryan’s contribution and repair move **central** (including humbly naming **one’s own** listening/understanding limits with **her** in the room).
 - Reserve 9-10 for strong repair with explicit ownership and no **blame-redirecting** conditional (per directionality), not 9-10 for mere absence of the word "if."
+${scenario1RetiredRepairScoring}
+${scenario2RetiredRepairScoring}
 ${scenario1ContemptCalibration}
 ${scenario1AppreciationCalibration}
 ${scenario1MentalizingRepairCeiling}

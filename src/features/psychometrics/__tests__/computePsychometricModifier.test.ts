@@ -82,7 +82,7 @@ describe('computePsychometricModifier', () => {
     const floor = computePsychometricModifier({ ...FULL_SCORES, aaq2Score: 33 });
     expect(floor.aaq2Component).toBe(0);
     expect(floor.breakdown.aaq2Band).toBe('floor breach');
-    expect(floor.psychometricFloorBreaches).toContain('aaq2_high_experiential_avoidance_floor');
+    expect(floor.psychometricFloorBreaches).not.toContain('aaq2_high_experiential_avoidance_floor');
   });
 
   it('returns zero modifier for strong scores on all instruments (no positive boost)', () => {
@@ -123,15 +123,20 @@ describe('computePsychometricModifier', () => {
   });
 
   it('recalibrated RSES modifier bands apply expected penalties', () => {
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 24 }).rsesComponent).toBe(0);
     expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 26 }).rsesComponent).toBe(0);
     expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 28 }).rsesComponent).toBe(0);
-    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 30 }).rsesComponent).toBe(0);
-    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 19 }).rsesComponent).toBe(-0.15);
-    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 18 }).rsesComponent).toBe(-0.25);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 23 }).rsesComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 22 }).rsesComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 21 }).rsesComponent).toBe(-0.15);
 
     const atFloor = computePsychometricModifier({ ...FULL_SCORES, rsesScore: 20 });
-    expect(atFloor.rsesComponent).toBe(-0.15);
+    expect(atFloor.rsesComponent).toBe(0);
+    expect(atFloor.breakdown.rsesBand).toBe('floor breach');
     expect(atFloor.psychometricFloorBreaches).toContain('rses_low_self_esteem_floor');
+
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 19 }).rsesComponent).toBe(0);
+    expect(computePsychometricModifier({ ...FULL_SCORES, rsesScore: 18 }).rsesComponent).toBe(0);
   });
 
   it('flags low self-esteem floor at RSES <= 20', () => {
@@ -204,9 +209,9 @@ describe('computePsychometricModifier', () => {
     expect(finalPass).toBe(false);
   });
 
-  it('flags RFQ low reflective functioning floor below 2.0 without straight-line', () => {
+  it('does not flag RFQ low reflective functioning as a new-user gate floor', () => {
     const result = computePsychometricModifier({ ...FULL_SCORES, rfqScore: 1.8 });
-    expect(result.psychometricFloorBreaches).toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
+    expect(result.psychometricFloorBreaches).not.toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
     expect(result.rfqComponent).toBe(0);
     expect(result.breakdown.rfqBand).toBe('floor breach');
   });
@@ -221,7 +226,7 @@ describe('computePsychometricModifier', () => {
       { rfq: straightLineResponses },
     );
     expect(result.straightLineFlags).toContain('rfq_straight_line');
-    expect(result.psychometricFloorBreaches).toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
+    expect(result.psychometricFloorBreaches).not.toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
   });
 
   it('flags GASP extreme externalization floor at >= 4.6 without straight-line', () => {
@@ -246,9 +251,9 @@ describe('computePsychometricModifier', () => {
     expect(result.psychometricFloorBreaches).toContain(GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE);
   });
 
-  it('flags Dweck extreme fixed mindset floor below 2.4 without straight-line', () => {
+  it('does not apply historical Dweck combined-score floor to new-user gate scoring', () => {
     const result = computePsychometricModifier({ ...FULL_SCORES, dweckScore: 2.3 });
-    expect(result.psychometricFloorBreaches).toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
+    expect(result.psychometricFloorBreaches).not.toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
     expect(result.dweckComponent).toBe(0);
     expect(result.breakdown.dweckBand).toBe('floor breach');
   });
@@ -268,20 +273,24 @@ describe('computePsychometricModifier', () => {
       { dweck: straightLineResponses },
     );
     expect(result.straightLineFlags).toContain('dweck_straight_line');
-    expect(result.psychometricFloorBreaches).toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
+    expect(result.psychometricFloorBreaches).not.toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
   });
 
   it('flags SCS-SF low self-compassion floor below 2.5 on reverse-scored mean', () => {
     const result = computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.417 });
     expect(result.psychometricFloorBreaches).toContain(SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE);
-    expect(result.scsSfComponent).toBe(-0.1);
-    expect(result.breakdown.scsSfBand).toBe('low self-compassion');
+    expect(result.scsSfComponent).toBe(0);
+    expect(result.breakdown.scsSfBand).toBe('floor breach');
   });
 
   it('recalibrated SCS-SF modifier bands apply expected penalties', () => {
     expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 3.875 }).scsSfComponent).toBe(0);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 3.3 }).scsSfComponent).toBe(0);
     expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 3.0 }).scsSfComponent).toBe(-0.05);
-    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.3 }).scsSfComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.9 }).scsSfComponent).toBe(-0.05);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.7 }).scsSfComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.5 }).scsSfComponent).toBe(-0.1);
+    expect(computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.3 }).scsSfComponent).toBe(0);
   });
 
   it('does not flag SCS-SF floor at moderate self-compassion scores', () => {
@@ -324,9 +333,9 @@ describe('computePsychometricModifier', () => {
     expect(result.psychometricFloorBreaches).toEqual(
       expect.arrayContaining([
         GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
-        DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
       ]),
     );
+    expect(result.psychometricFloorBreaches).not.toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
     const allFailReasons = [...result.psychometricFloorBreaches];
     const finalPass =
       allFailReasons.length === 0 && 9.0 >= GATE_PASS_WEIGHTED_MIN && 9.0 >= GATE_PASS_WEIGHTED_MIN;
@@ -350,7 +359,7 @@ describe('computePsychometricModifier', () => {
     expect(partial.straightLineFlags).not.toContain('gasp_straight_line');
   });
 
-  it('applies average three-tier bands across 9 active instruments (~-0.9 total)', () => {
+  it('applies average three-tier bands on active instruments (retired AAQ/RFQ/Dweck/NPI not in total)', () => {
     const result = computePsychometricModifier({
       ...FULL_SCORES,
       brsScore: 2.6,
@@ -359,11 +368,10 @@ describe('computePsychometricModifier', () => {
       gaspScore: 4.2,
       dweckScore: 3.05,
       aaq2Score: 32,
-      rsesScore: 20,
+      rsesScore: 21,
       ...narcissismModifierAverageBandScores(),
       rfqScore: 3.1,
     });
-    expect(result.modifier).toBe(NPI_ENTITLEMENT_ENABLED ? -0.8 : -0.9);
     expect(result.brsComponent).toBe(-0.1);
     expect(result.anxietyTraitComponent).toBe(-0.1);
     expect(result.scsSfComponent).toBe(-0.05);
@@ -371,15 +379,13 @@ describe('computePsychometricModifier', () => {
     expect(result.dweckComponent).toBe(-0.1);
     expect(result.aaq2Component).toBe(-0.1);
     expect(result.rsesComponent).toBe(-0.15);
-    if (NPI_ENTITLEMENT_ENABLED) {
-      expect(result.npiEntitlementComponent).toBe(0);
-    } else {
-      expect(result.sd3NarcissismComponent).toBe(-0.1);
-    }
+    expect(result.npiEntitlementComponent).toBe(0);
     expect(result.rfqComponent).toBe(-0.1);
+    // Uncapped live sum would be -0.50; Amoraea heuristic cap is -0.35.
+    expect(result.modifier).toBe(-0.35);
   });
 
-  it('applies poor three-tier bands just above floors (~-1.75 worst-case across 9 instruments)', () => {
+  it('applies poor three-tier bands on active instruments (retired instruments not in total)', () => {
     const result = computePsychometricModifier({
       ...FULL_SCORES,
       brsScore: 1.9,
@@ -392,7 +398,7 @@ describe('computePsychometricModifier', () => {
       ...narcissismModifierPoorBandScores(),
       rfqScore: 2.0,
     });
-    expect(result.modifier).toBe(NPI_ENTITLEMENT_ENABLED ? -1.4 : -1.5);
+    expect(result.modifier).toBe(-0.35);
     expect(result.psychometricFloorBreaches).toHaveLength(0);
   });
 
@@ -418,7 +424,7 @@ describe('computePsychometricModifier', () => {
     expect(result.gaspComponent).toBe(-0.1);
     expect(result.dweckComponent).toBe(-0.1);
     expect(result.aaq2Component).toBe(-0.1);
-    expect(result.rsesComponent).toBe(-0.1);
+    expect(result.rsesComponent).toBe(-0.15);
     expect(result.rfqComponent).toBe(-0.1);
   });
 
@@ -432,7 +438,7 @@ describe('computePsychometricModifier', () => {
       gaspScore: ref.gaspExternalization - 0.5,
       dweckScore: ref.dweck + 0.2,
       aaq2Score: ref.aaq2 - 1,
-      rsesScore: ref.rses + 1,
+      rsesScore: 24,
       rfqScore: ref.rfq + 0.1,
     });
 
@@ -440,7 +446,7 @@ describe('computePsychometricModifier', () => {
     expect(result.psychometricFloorBreaches).toHaveLength(0);
   });
 
-  it('worst-case modifier across 9 active instruments uses poor bands (-1.75)', () => {
+  it('worst-case modifier across active instruments uses poor bands', () => {
     const result = computePsychometricModifier({
       ...FULL_SCORES,
       brsScore: 1.9,
@@ -453,7 +459,7 @@ describe('computePsychometricModifier', () => {
       ...narcissismModifierPoorBandScores(),
       rfqScore: 2.0,
     });
-    expect(result.modifier).toBe(NPI_ENTITLEMENT_ENABLED ? -1.4 : -1.5);
+    expect(result.modifier).toBe(-0.35);
   });
 
   it('fires floor breaches independently of modifier bands', () => {
@@ -472,26 +478,88 @@ describe('computePsychometricModifier', () => {
     expect(floorBreach.psychometricFloorBreaches).toEqual(
       expect.arrayContaining([
         'brs_low_resilience_floor',
-        'anxiety_trait_high_floor',
         SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE,
         GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE,
-        DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE,
-        'aaq2_high_experiential_avoidance_floor',
         'rses_low_self_esteem_floor',
-        RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE,
         ...(NARCISSISM_PSYCHOMETRIC_GATE_FLOOR_ENABLED ? [ACTIVE_NARCISSISM_FLOOR_CODE] : []),
       ]),
     );
+    expect(floorBreach.psychometricFloorBreaches).not.toContain('anxiety_trait_high_floor');
+    expect(floorBreach.psychometricFloorBreaches).not.toContain(DWECK_EXTREME_FIXED_MINDSET_FLOOR_CODE);
+    expect(floorBreach.psychometricFloorBreaches).not.toContain('aaq2_high_experiential_avoidance_floor');
+    expect(floorBreach.psychometricFloorBreaches).not.toContain(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE);
     expect(floorBreach.brsComponent).toBe(0);
-    expect(floorBreach.anxietyTraitComponent).toBe(0);
+    expect(floorBreach.anxietyTraitComponent).toBe(-0.25);
     expect(floorBreach.scsSfComponent).toBe(0);
     expect(floorBreach.gaspComponent).toBe(0);
     expect(floorBreach.dweckComponent).toBe(0);
     expect(floorBreach.aaq2Component).toBe(0);
-    expect(floorBreach.rsesComponent).toBe(-0.15);
+    expect(floorBreach.rsesComponent).toBe(0);
     expect(floorBreach.sd3NarcissismComponent).toBe(0);
     expect(floorBreach.rfqComponent).toBe(0);
-    expect(floorBreach.modifier).toBe(-0.15);
+    expect(floorBreach.modifier).toBe(-0.25);
+  });
+
+  it('clamps the summed live psychometric modifier to PSYCHOMETRIC_MODIFIER_MIN', () => {
+    const underCap = computePsychometricModifier({
+      ...FULL_SCORES,
+      anxietyTraitScore: 3.4,
+      scsSfScore: 2.7,
+    });
+    expect(underCap.anxietyTraitComponent + underCap.scsSfComponent).toBeCloseTo(-0.2, 10);
+    expect(underCap.modifier).toBe(-0.2);
+
+    const atCap = computePsychometricModifier({
+      ...FULL_SCORES,
+      brsScore: 2.6,
+      anxietyTraitScore: 3.4,
+      scsSfScore: 3.0,
+      gaspScore: 4.2,
+    });
+    expect(
+      atCap.brsComponent + atCap.anxietyTraitComponent + atCap.scsSfComponent + atCap.gaspComponent,
+    ).toBeCloseTo(-0.35, 10);
+    expect(atCap.modifier).toBe(-0.35);
+
+    const overCap = computePsychometricModifier({
+      ...FULL_SCORES,
+      brsScore: 1.9,
+      anxietyTraitScore: 4.89,
+    });
+    expect(overCap.brsComponent + overCap.anxietyTraitComponent).toBeCloseTo(-0.5, 10);
+    expect(overCap.modifier).toBe(-0.35);
+    expect(overCap.psychometricFloorBreaches).toHaveLength(0);
+  });
+
+  it('hard floors still fail when the modifier is already at the cap', () => {
+    const result = computePsychometricModifier({
+      ...FULL_SCORES,
+      brsScore: 1.9,
+      anxietyTraitScore: 4.89,
+      gaspScore: 4.2,
+      rsesScore: 20,
+    });
+    expect(result.modifier).toBe(-0.35);
+    expect(result.rsesComponent).toBe(0);
+    expect(result.psychometricFloorBreaches).toContain('rses_low_self_esteem_floor');
+  });
+
+  it('floor-instrument breaches contribute 0 modifier for that instrument', () => {
+    const brs = computePsychometricModifier({ ...FULL_SCORES, brsScore: 1.8 });
+    expect(brs.psychometricFloorBreaches).toContain('brs_low_resilience_floor');
+    expect(brs.brsComponent).toBe(0);
+
+    const scs = computePsychometricModifier({ ...FULL_SCORES, scsSfScore: 2.49 });
+    expect(scs.psychometricFloorBreaches).toContain(SCS_SF_LOW_SELF_COMPASSION_FLOOR_CODE);
+    expect(scs.scsSfComponent).toBe(0);
+
+    const gasp = computePsychometricModifier({ ...FULL_SCORES, gaspScore: 4.6 });
+    expect(gasp.psychometricFloorBreaches).toContain(GASP_EXTREME_EXTERNALIZATION_FLOOR_CODE);
+    expect(gasp.gaspComponent).toBe(0);
+
+    const rses = computePsychometricModifier({ ...FULL_SCORES, rsesScore: 20 });
+    expect(rses.psychometricFloorBreaches).toContain('rses_low_self_esteem_floor');
+    expect(rses.rsesComponent).toBe(0);
   });
 });
 

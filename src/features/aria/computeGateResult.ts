@@ -13,7 +13,6 @@ export {
   GATE_MARKER_BASE_WEIGHTS,
   GATE_MARKER_FLOORS,
   GATE_PASS_WEIGHTED_MIN,
-  REFERRAL_WEIGHTED_PASS_MIN,
   type GateFailCode,
   type GateFailDetailJson,
   type GateResult,

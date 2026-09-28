@@ -4,7 +4,7 @@ import { computeGateResult } from '@features/aria/computeGateResult';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import { FALLBACK_MARKER_SCORES_MID } from '@features/aria/scoreInterviewModuleConstants';
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
-import { resolveWeightedPassMinAfterReferralEffects } from '@features/referrals/referralInterview';
+import { GATE_PASS_WEIGHTED_MIN } from '@features/aria/computeGateResult';
 
 export type RunNoAnthropicScoringFallbackParams = {
   deps: ScoreInterviewDeps;
@@ -15,10 +15,9 @@ export type RunNoAnthropicScoringFallbackParams = {
 /** Completion when neither API key nor proxy is configured — mid-marker gate + save. */
 export async function runNoAnthropicScoringFallback(params: RunNoAnthropicScoringFallbackParams): Promise<void> {
   const { deps, isOnboardingFlow, isAdminConsoleAccount } = params;
-  const weightedMinFallback = await resolveWeightedPassMinAfterReferralEffects(deps.userId);
   const skipOptsFallback = attachSkipPenaltyGateOptions(deps.scenarioSkipConfirmedCountRef.current);
   const fallbackGate = computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }, null, {
-    weightedPassMin: weightedMinFallback,
+    weightedPassMin: GATE_PASS_WEIGHTED_MIN,
     scenarioPillarScoresByScenario: {
       1: deps.scenarioScoresRef.current[1]?.pillarScores,
       2: deps.scenarioScoresRef.current[2]?.pillarScores,

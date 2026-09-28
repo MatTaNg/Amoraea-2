@@ -8,10 +8,10 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Linking,
 } from 'react-native';
 import {
-  AUTH_EMAIL_RESEND_COOLDOWN_MS,
-  getAuthEmailSendErrorMessage,
+  AUTH_SMS_RESEND_COOLDOWN_MS,
   useAuth,
 } from '@features/authentication/hooks/useAuth';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
@@ -22,11 +22,21 @@ import { supabase } from '@data/supabase/client';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import {
   isBareDevScenarioJumpReferralCode,
-  isDevScenarioJumpEmail,
 } from '@features/aria/devScenarioJumpReferral';
 import { isRelationshipValidationReferralCode } from '@features/relationshipValidation/constants';
 import { readAuthErrorMessageForDisplay } from '@features/authentication/confirmTestAccountEmail';
 import type { Gender } from '@domain/models/Profile';
+import { LEGAL_PRIVACY_POLICY_URL, LEGAL_TERMS_OF_SERVICE_URL } from '@/constants/legalUrls';
+import {
+  getRegisterFormFieldErrors,
+  type RegisterFormFieldErrors,
+} from '@features/authentication/registerFormValidation';
+import {
+  persistSignupLeadToken,
+  readSignupLeadFromWebUrl,
+  normalizeSignupLeadToken,
+} from '@features/authentication/signupLead';
+import { useRoute } from '@react-navigation/native';
 
 const GOOGLE_FONTS_URL =
   "https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300&family=Jost:wght@200;300;400&display=swap";
@@ -41,7 +51,22 @@ function mapRegisterGenderToProfileGender(value: RegisterGenderOption): Gender {
   return 'Non-binary';
 }
 
+function openLegalUrl(url: string): void {
+  void Linking.openURL(url).catch((err) => console.warn('[Register] Failed to open legal URL:', err));
+}
+
+function RegisterFieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return <Text style={authStyles.fieldErrorText}>{message}</Text>;
+}
+
+/** Temporary email signup while Twilio SMS verification is pending (matches login). */
+
 export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const route = useRoute();
+  const routeLead = normalizeSignupLeadToken(
+    (route.params as { lead?: string } | undefined)?.lead,
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
@@ -52,6 +77,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
   const [inviteCode, setInviteCode] = useState('');
   const [referralHint, setReferralHint] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<RegisterFormFieldErrors>({});
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
   const [resendSent, setResendSent] = useState(false);
@@ -71,28 +97,37 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
     };
   }, []);
 
+  useEffect(() => {
+    const leadToken = routeLead ?? readSignupLeadFromWebUrl();
+    if (!leadToken) return;
+    void persistSignupLeadToken(leadToken);
+  }, [routeLead]);
+
+  const clearFieldError = (field: keyof RegisterFormFieldErrors) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev;
+      const next = { ...prev };
+      delete next[field];
+      return next;
+    });
+  };
+
   const handleRegister = async () => {
-    if (password !== confirm) {
-      setError("Passwords don't match.");
+    if (loading) return;
+    const nextFieldErrors = getRegisterFormFieldErrors({
+      email,
+      password,
+      confirm,
+      age,
+      gender,
+    });
+    setFieldErrors(nextFieldErrors);
+    if (Object.keys(nextFieldErrors).length > 0) {
+      setError(null);
       return;
     }
-    if (password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (!email?.trim() || !password || !confirm) {
-      setError('Please fill in email and password.');
-      return;
-    }
+    if (!gender) return;
     const parsedAge = Number.parseInt(age, 10);
-    if (!age.trim() || Number.isNaN(parsedAge) || parsedAge <= 0) {
-      setError('Please enter your age.');
-      return;
-    }
-    if (!gender) {
-      setError('Please select a gender.');
-      return;
-    }
     setError(null);
     setReferralHint(null);
     setLoading(true);
@@ -101,11 +136,6 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
       let codeToSend: string | undefined;
       if (raw) {
         if (isBareDevScenarioJumpReferralCode(raw)) {
-          if (!isDevScenarioJumpEmail(email.trim())) {
-            setReferralHint("That code doesn't look right.");
-            setLoading(false);
-            return;
-          }
           codeToSend = raw;
         } else if (isRelationshipValidationReferralCode(raw)) {
           codeToSend = raw;
@@ -137,12 +167,6 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
       if (signUpResult.session) {
         return;
       }
-      if (isDevScenarioJumpEmail(email.trim())) {
-        setError(
-          'Test account could not sign in automatically. Try signing in — your account should be confirmed after the latest update.',
-        );
-        return;
-      }
       lastResendMsRef.current = Date.now();
       setSent(true);
     } catch (err) {
@@ -156,9 +180,9 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
     if (!email?.trim() || resending) return;
     const now = Date.now();
     const elapsed = now - lastResendMsRef.current;
-    if (lastResendMsRef.current > 0 && elapsed < AUTH_EMAIL_RESEND_COOLDOWN_MS) {
-      const waitSec = Math.ceil((AUTH_EMAIL_RESEND_COOLDOWN_MS - elapsed) / 1000);
-      setResendError(`Please wait ${waitSec} seconds before requesting another confirmation email.`);
+    if (lastResendMsRef.current > 0 && elapsed < AUTH_SMS_RESEND_COOLDOWN_MS) {
+      const waitSec = Math.ceil((AUTH_SMS_RESEND_COOLDOWN_MS - elapsed) / 1000);
+      setResendError(`Please wait ${waitSec} seconds before requesting another email.`);
       return;
     }
     setResending(true);
@@ -171,9 +195,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
     } catch (err) {
       lastResendMsRef.current = Date.now();
       setResendSent(false);
-      setResendError(
-        getAuthEmailSendErrorMessage(err, 'Failed to resend confirmation email'),
-      );
+      setResendError(err instanceof Error ? err.message : 'Failed to resend confirmation email.');
     } finally {
       setResending(false);
     }
@@ -194,27 +216,24 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
             <Text style={styles.sentIcon}>✦</Text>
             <Text style={authStyles.sentScreenTitle}>Check your email.</Text>
             <Text style={authStyles.sentScreenBody}>
-              {resendSent
-                ? 'Confirmation email sent successfully. Open the link in your inbox to complete registration.'
-                : `We've sent a confirmation link to `}
-              {!resendSent ? (
-                <>
-                  <Text style={{ color: '#C8E4FF' }}>{email}</Text>
-                  {`. Open it to complete your registration and begin your interview.`}
-                </>
-              ) : null}
+              We sent a confirmation link to {email.trim()}. Open it to finish creating your account,
+              then sign in.
             </Text>
-            <Text style={authStyles.sentScreenBody}>
-              If you don&apos;t see it within a few minutes, check your junk or spam folder.
-            </Text>
+            {resendSent ? (
+              <Text style={[authStyles.confirmationNote, { marginTop: 20 }]}>Confirmation email sent.</Text>
+            ) : null}
             {resendError ? <Text style={authStyles.errorText}>{resendError}</Text> : null}
             <Pressable
               onPress={() => void handleResendConfirmation()}
-              disabled={resending}
-              style={[authStyles.primaryButton, styles.button, styles.sentResendButton]}
+              disabled={resendSent || resending}
+              style={[
+                authStyles.primaryButton,
+                styles.sentResendButton,
+                (resendSent || resending) && authStyles.primaryButtonDisabled,
+              ]}
             >
               <Text style={authStyles.primaryButtonText}>
-                {resending ? 'Sending…' : resendSent ? 'Resend again' : 'Resend confirmation email'}
+                {resendSent ? 'Email sent' : resending ? 'Sending…' : 'Resend confirmation email'}
               </Text>
             </Pressable>
             <View style={authStyles.divider} />
@@ -267,35 +286,60 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
               placeholder="Email"
               placeholderTextColor="#5B6B80"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(t) => {
+                setEmail(t);
+                clearFieldError('email');
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
+              autoComplete="email"
               autoCorrect={false}
-              style={authStyles.input}
+              style={[
+                authStyles.input,
+                fieldErrors.email && authStyles.inputWithFieldError,
+                fieldErrors.email && authStyles.inputError,
+              ]}
             />
+            <RegisterFieldError message={fieldErrors.email} />
 
             <TextInput
               placeholder="Password"
               placeholderTextColor="#5B6B80"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(t) => {
+                setPassword(t);
+                clearFieldError('password');
+              }}
               secureTextEntry
-              style={authStyles.input}
+              style={[
+                authStyles.input,
+                fieldErrors.password && authStyles.inputWithFieldError,
+                fieldErrors.password && authStyles.inputError,
+              ]}
             />
+            <RegisterFieldError message={fieldErrors.password} />
 
             <TextInput
               placeholder="Confirm password"
               placeholderTextColor="#5B6B80"
               value={confirm}
-              onChangeText={setConfirm}
+              onChangeText={(t) => {
+                setConfirm(t);
+                clearFieldError('confirm');
+              }}
               secureTextEntry
-              style={authStyles.input}
+              style={[
+                authStyles.input,
+                fieldErrors.confirm && authStyles.inputWithFieldError,
+                fieldErrors.confirm && authStyles.inputError,
+              ]}
             />
+            <RegisterFieldError message={fieldErrors.confirm} />
 
-            <View style={styles.demographicsRow}>
+            <View style={[styles.demographicsRow, (fieldErrors.gender || fieldErrors.age) && styles.demographicsRowWithError]}>
               <View style={styles.genderPickerColumn}>
                 <Pressable
-                  style={styles.genderPickerWrap}
+                  style={[styles.genderPickerWrap, fieldErrors.gender && authStyles.inputError]}
                   onPress={() => setGenderOpen((open) => !open)}
                   accessibilityRole="button"
                   accessibilityLabel="Select gender"
@@ -317,6 +361,7 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                           setGender(option);
                           setGenderOpen(false);
                           setHoveredGender(null);
+                          clearFieldError('gender');
                         }}
                       >
                         <Text style={styles.genderOptionText}>{option}</Text>
@@ -324,17 +369,29 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
                     ))}
                   </View>
                 ) : null}
+                <RegisterFieldError message={fieldErrors.gender} />
               </View>
 
-              <TextInput
-                placeholder="Age"
-                placeholderTextColor="#5B6B80"
-                value={age}
-                onChangeText={(t) => setAge(t.replace(/\D/g, '').slice(0, 2))}
-                keyboardType="number-pad"
-                maxLength={2}
-                style={[authStyles.input, styles.ageInput]}
-              />
+              <View style={styles.ageColumn}>
+                <TextInput
+                  placeholder="Age"
+                  placeholderTextColor="#5B6B80"
+                  value={age}
+                  onChangeText={(t) => {
+                    setAge(t.replace(/\D/g, '').slice(0, 2));
+                    clearFieldError('age');
+                  }}
+                  keyboardType="number-pad"
+                  maxLength={2}
+                  style={[
+                    authStyles.input,
+                    styles.ageInput,
+                    fieldErrors.age && authStyles.inputWithFieldError,
+                    fieldErrors.age && authStyles.inputError,
+                  ]}
+                />
+                <RegisterFieldError message={fieldErrors.age} />
+              </View>
             </View>
 
             <TextInput
@@ -358,19 +415,31 @@ export const RegisterScreen: React.FC<{ navigation: any }> = ({ navigation }) =>
 
             {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
 
+            <Text style={[authStyles.confirmationNote, styles.termsNote]}>
+              By creating an account, you agree to our{' '}
+              <Text style={authStyles.link} onPress={() => openLegalUrl(LEGAL_PRIVACY_POLICY_URL)}>
+                Privacy Policy
+              </Text>
+              {' '}and{' '}
+              <Text style={authStyles.link} onPress={() => openLegalUrl(LEGAL_TERMS_OF_SERVICE_URL)}>
+                Terms of Service
+              </Text>
+              . We'll send a confirmation link to your email.
+            </Text>
+
             <Pressable
               onPress={handleRegister}
               disabled={loading}
-              style={[authStyles.primaryButton, styles.button]}
+              style={[
+                authStyles.primaryButton,
+                styles.button,
+                loading && authStyles.primaryButtonDisabled,
+              ]}
             >
               <Text style={authStyles.primaryButtonText}>
                 {loading ? '...' : 'Create Account →'}
               </Text>
             </Pressable>
-
-            <Text style={authStyles.confirmationNote}>
-              {"You'll receive a confirmation email to verify your address. Check your junk or spam folder if it doesn't arrive within a few minutes."}
-            </Text>
 
             <View style={authStyles.divider} />
 
@@ -469,6 +538,13 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 12,
     zIndex: 5,
+    alignItems: 'flex-start',
+  },
+  demographicsRowWithError: {
+    marginBottom: 0,
+  },
+  ageColumn: {
+    width: 86,
   },
   genderPickerColumn: {
     flex: 1,
@@ -529,11 +605,17 @@ const styles = StyleSheet.create({
     fontWeight: '300',
   },
   ageInput: {
-    width: 86,
+    width: '100%',
     marginBottom: 0,
     textAlign: 'center',
   },
+  termsNote: {
+    marginTop: 8,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
   button: {
+    marginTop: 16,
     marginBottom: 0,
   },
   sentResendButton: {

@@ -735,6 +735,9 @@ async function commitRescore(
       modified_weighted_score: result.gate.modifiedWeightedScore ?? null,
       disclosure_calibration: result.disclosure_calibration,
       ego_development_level: result.ego_development_level ?? attempt.ego_development_level ?? null,
+      repair_source_signals: result.repair_source_signals,
+      regulation_source_signals: result.regulation_source_signals,
+      weighted_score_breakdown: result.gate.weightedScoreBreakdown ?? null,
     })
     .eq('id', attempt.id)
     .eq('user_id', attempt.user_id);

@@ -15,11 +15,14 @@ import {
   looksLikeRepairQuestionEchoAnswer,
 } from './interviewAnswerRelevance';
 import { looksLikeGoBackToPreviousScenarioRequest } from './interviewGoBackRequest';
+import { looksLikeNeedRecognitionInSupportAnswer } from './moment4ProbeLogic';
 import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
 import { classifyExplicitRepeatRequestPreClassification } from './metaCommentConfusionRepeat';
 import {
+  looksLikeClearSkipRequestPhrase,
   metaScores,
   pickMetaFromScores,
+  skipRequestScore,
   WEAK_THRESHOLD,
   withConfusionSubtype,
   wordCount,
@@ -129,6 +132,12 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
 
   if (looksLikeRepairQuestionEchoAnswer(t)) return null;
 
+  // Skip asks must beat process-meta ("…this question?") — otherwise they become confusion.
+  if (looksLikeClearSkipRequestPhrase(t) || skipRequestScore(t) >= 0.5) {
+    const skipConf = Math.max(0.95, skipRequestScore(t));
+    return { type: 'skip_request', confidence: Math.min(1, skipConf) };
+  }
+
   if (looksLikeInterviewProcessMetaComment(t)) {
     return { type: 'confusion', confidence: 0.95 };
   }
@@ -136,6 +145,8 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
   if (looksLikeGoBackToPreviousScenarioRequest(t)) return null;
 
   if (looksLikeInterviewScoreStatusRequest(t)) return null;
+
+  if (looksLikeNeedRecognitionInSupportAnswer(t)) return null;
 
   const wc = wordCount(t);
   const scores = metaScores(t);

@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, ScrollView } from 'react-native';
-import { computeGateResultCore, GATE_PASS_WEIGHTED_MIN, REFERRAL_WEIGHTED_PASS_MIN } from '@features/aria/computeGateResultCore';
+import { computeGateResultCore, GATE_PASS_WEIGHTED_MIN } from '@features/aria/computeGateResultCore';
 import { DEFAULT_DEFENSE_PATTERNS } from '@features/aria/defensePatternsDetection';
 import {
   EMOTION_INTERVIEW_MODAL_ITEMS,
@@ -27,7 +27,6 @@ import {
   concretenessAdminColor,
   defenseCrossRefConfidenceColor,
   defenseCrossRefConsistencyLabel,
-  disclosureAdminColor,
   egoLevelAdminColor,
   EGO_LEVEL_ADMIN_SHORT_DESC,
 } from '@features/admin/interviewDashboard/adminInterviewDashboardDisplayUtils';
@@ -35,6 +34,15 @@ import { parseGateFailDetailRow, reviewFlagsFromStoredAttempt } from '@features/
 import { formatScoreCell, pillarScoresForGate } from '@features/admin/interviewDashboard/adminInterviewDashboardScoreUtils';
 import type { AttemptRow } from '@features/admin/interviewDashboard/adminInterviewDashboardTypes';
 import { ADMIN_REVIEW_FLAG_DESCRIPTIONS } from '@features/admin/interviewDashboard/adminInterviewReviewFlagDescriptions';
+import { collectAdminNegativeScoreModifiers } from '@features/admin/interviewDashboard/adminInterviewDepthModifierSummary';
+import {
+  buildSuppressedDepthModifierNotice,
+  countAdminScoringDefensePatterns,
+  filterDeprecatedAdminReviewFlags,
+  formatDisclosureCalibrationForAdmin,
+} from '@features/admin/interviewDashboard/adminDeprecatedDepthConstructs';
+import { AdminGlossaryHeading, AdminInlineGlossaryIcon } from '@features/admin/interviewDashboard/AdminInlineGlossaryIcon';
+import { DEPTH_SIGNAL_GLOSSARY } from '@features/admin/interviewDashboard/adminScoringGlossary';
 
 export function AdminInterviewDepthSignalsTab({
   attempt,
@@ -46,13 +54,8 @@ export function AdminInterviewDepthSignalsTab({
   const pillars = pillarScoresForGate(attempt);
   const gateEcho = computeGateResultCore(pillars, null, buildAdminGateComputeOptions(attempt));
   const dp = attempt.defense_patterns ?? DEFAULT_DEFENSE_PATTERNS;
-  const defenseActiveCount = [
-    dp.projection_detected,
-    dp.rationalization_detected,
-    dp.splitting_detected,
-    dp.denial_detected,
-  ].filter(Boolean).length;
-  const flags = reviewFlagsFromStoredAttempt(attempt);
+  const defenseActiveCount = countAdminScoringDefensePatterns(dp);
+  const flags = filterDeprecatedAdminReviewFlags(reviewFlagsFromStoredAttempt(attempt));
   const hasFlags = flags.length > 0;
   const legacyErFloorReview = isLegacyEmotionRecognitionFloorOnlyFail(attempt);
   const responses = hydrateEmotionResponsesFromStorage(attempt.emotion_recognition_responses);
@@ -85,10 +88,23 @@ export function AdminInterviewDepthSignalsTab({
   const detailThreshold =
     typeof wReq === 'number' && Number.isFinite(wReq) ? wReq : GATE_PASS_WEIGHTED_MIN;
   const overcertaintyLabels = adminMentalizingOvercertaintyLabels(attempt);
+  const negativeModifiers = collectAdminNegativeScoreModifiers(attempt, gateEcho);
+  const suppressedModifierNotice = buildSuppressedDepthModifierNotice(attempt);
+  const disclosureLabel = formatDisclosureCalibrationForAdmin(attempt.disclosure_calibration);
 
   return (
     <ScrollView style={styles.innerTabContent}>
       <ScoreReceiptCard attempt={attempt} user={user} variant="dark" />
+      {negativeModifiers.length > 0 ? (
+        <View style={[styles.block, { marginBottom: 12, borderLeftWidth: 3, borderLeftColor: '#E87A7A' }]}>
+          <Text style={[styles.blockTitle, { marginBottom: 8 }]}>Score-reducing modifiers (ranked)</Text>
+          {negativeModifiers.map((item, index) => (
+            <Text key={item.id} style={[styles.blockText, index > 0 ? { marginTop: 6 } : null]}>
+              {index + 1}. {item.label}: {item.value.toFixed(2)}
+            </Text>
+          ))}
+        </View>
+      ) : null}
       <GamingCorrectionBanner gamingCorrection={attempt.gaming_correction ?? null} />
       <UncertaintyScoreCard
         uncertaintyScore={attempt.uncertainty_score ?? null}
@@ -143,15 +159,12 @@ export function AdminInterviewDepthSignalsTab({
       </View>
       <View style={styles.metaRow}>
         <Text style={styles.metaLabel}>Threshold (this attempt)</Text>
-        <Text style={styles.metaValue}>
-          {detailThreshold.toFixed(1)}
-          {detailThreshold <= REFERRAL_WEIGHTED_PASS_MIN + 0.01 ? ' (referral band)' : ' (standard)'}
-        </Text>
+        <Text style={styles.metaValue}>{detailThreshold.toFixed(1)}</Text>
       </View>
       <View style={styles.metaRow}>
-        <Text style={styles.metaLabel}>Also</Text>
+        <Text style={styles.metaLabel}>Pass minimum</Text>
         <Text style={[styles.metaValue, { fontSize: 12, color: 'rgba(255,255,255,0.55)' }]}>
-          Referral minimum {REFERRAL_WEIGHTED_PASS_MIN.toFixed(1)} · Standard {GATE_PASS_WEIGHTED_MIN.toFixed(1)}
+          {GATE_PASS_WEIGHTED_MIN.toFixed(1)}
         </Text>
       </View>
       <View style={styles.metaRow}>
@@ -189,6 +202,11 @@ export function AdminInterviewDepthSignalsTab({
               ? gateEcho.personalMomentConcretenessModifier.toFixed(2)
               : '—'}
           </Text>
+          {suppressedModifierNotice ? (
+            <Text style={[styles.blockText, { marginTop: 8, color: '#D4A84B' }]}>
+              {suppressedModifierNotice}
+            </Text>
+          ) : null}
         </View>
       ) : null}
       <Text style={[styles.depthSignalFootnote, { marginTop: scoreModNonZero ? 6 : 10 }]}>
@@ -224,7 +242,11 @@ export function AdminInterviewDepthSignalsTab({
 
       <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Section C — New pillar dimensions</Text>
       <View style={styles.block}>
-        <Text style={styles.blockTitle}>Ego development level</Text>
+        <AdminGlossaryHeading
+          title="Ego development level"
+          glossaryText={DEPTH_SIGNAL_GLOSSARY.ego_development_level}
+          titleStyle={styles.blockTitle}
+        />
         {egoLevel != null && egoLevel >= 1 && egoLevel <= 5 ? (
           <>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginVertical: 8 }}>
@@ -249,9 +271,6 @@ export function AdminInterviewDepthSignalsTab({
             <Text style={[styles.blockText, { fontSize: 12, color: 'rgba(255,255,255,0.65)' }]}>
               {EGO_LEVEL_ADMIN_SHORT_DESC[egoLevel] ?? ''}
             </Text>
-            <Text style={styles.depthSignalFootnote}>
-              {`Holistic assessment of response sophistication across the full interview. Based on Loevinger's ego development framework — measures the complexity and maturity of how someone makes meaning of relational situations.\n\nLevel 1 — Concrete and rule-based. Black and white framing. Characters are simply right or wrong. No complexity held. Gate modifier: -0.3.\nLevel 2 — Aware of multiple perspectives but resolves them simplistically. "Both people need to communicate better." Gate modifier: 0. Review flag.\nLevel 3 — Holds complexity without resolving it prematurely. Recognizes patterns. Uses psychological concepts naturally. Gate modifier: +0.1.\nLevel 4 — Integrates contradictions. Connects behavior to broader relational patterns. Tolerates ambiguity. Gate modifier: +0.2.\nLevel 5 — Systemic relational understanding. Recognizes how internal states drive patterns across relationships. Gate modifier: +0.3.`}
-            </Text>
           </>
         ) : (
           <Text style={styles.blockText}>—</Text>
@@ -259,24 +278,16 @@ export function AdminInterviewDepthSignalsTab({
       </View>
 
       <View style={[styles.block, { marginTop: 12 }]}>
-        <Text style={styles.blockTitle}>Emotion recognition</Text>
+        <AdminGlossaryHeading
+          title="Emotion recognition battery"
+          glossaryText={DEPTH_SIGNAL_GLOSSARY.emotion_recognition_battery}
+          titleStyle={styles.blockTitle}
+        />
         {legacyErFloorReview ? (
           <Text style={[styles.blockText, { color: '#D4A84B', marginBottom: 8 }]}>
             {LEGACY_EMOTION_RECOGNITION_FLOOR_REVIEW_NOTE}
           </Text>
         ) : null}
-        <Text style={styles.depthSignalFootnote}>
-          Ability-based test of emotion perception. Three multiple choice items — one per scenario — ask what a character
-          is most likely feeling at a key moment. Scored against consensus correct answers. Tests whether the user can
-          accurately read emotional states from situational context, independent of verbal fluency.{'\n\n'}
-          Emotion recognition affects the depth signal modifier only (not a hard gate fail).{'\n\n'}
-          Score guide:{'\n'}
-          3/3 — Strong emotion perception{'\n'}
-          2/3 — Adequate, review flag{'\n'}
-          1/3 — Review flag: limited emotion reading accuracy{'\n'}
-          0/3 — −0.20 depth modifier (no gate fail){'\n'}
-          Incomplete battery (&lt; 3 responses) — scores nulled, no modifier
-        </Text>
         <Text style={styles.blockText}>
           {!emotionBatteryComplete && countAnsweredEmotionItems(responses) > 0
             ? `Incomplete battery (${countAnsweredEmotionItems(responses)}/${EXPECTED_EMOTION_RECOGNITION_ITEMS} recorded)`
@@ -302,10 +313,11 @@ export function AdminInterviewDepthSignalsTab({
       </View>
 
       <View style={[styles.block, { marginTop: 12 }]}>
-        <Text style={styles.blockTitle}>Personal moment concreteness</Text>
-        <Text style={styles.depthSignalFootnote}>
-          {`Measures whether the user engaged with their own personal experience when asked about grudges and conflicts, or retreated to general philosophy.\n\nabsent — No personal example provided. Deflected or claimed no relevant experience.\nlow — Vague reference to a type of situation with no named person or specific event.\nmoderate — Specific person or situation named but thin on narrative detail or emotional content.\nhigh — Specific person named, concrete event described, emotional content present, personal reflection shown.\n\nBoth absent or low applies a score penalty. Users who give rich scenario responses but consistently avoid personal engagement are showing low private self-awareness.`}
-        </Text>
+        <AdminGlossaryHeading
+          title="Personal moment concreteness (M4/M5)"
+          glossaryText={DEPTH_SIGNAL_GLOSSARY.personal_moment_concreteness}
+          titleStyle={styles.blockTitle}
+        />
         <Text style={[styles.blockText, { color: concretenessAdminColor(attempt.moment_4_concreteness ?? undefined) }]}>
           Moment 4: {attempt.moment_4_concreteness ?? '—'}
         </Text>
@@ -315,10 +327,11 @@ export function AdminInterviewDepthSignalsTab({
       </View>
 
       <View style={[styles.block, { marginTop: 12 }]}>
-        <Text style={styles.blockTitle}>Mentalizing overcertainty</Text>
-        <Text style={styles.depthSignalFootnote}>
-          {`Flags responses where the user states characters' internal states as facts rather than inferences. Genuine high-level mentalizing requires holding uncertainty about others' inner lives — "Ryan might be avoiding tension" is healthy inference; "Ryan clearly doesn't care" is overcertainty.\n\nTrigger examples: "clearly doesn't care," "he's never going to change," "definitely emotionally unavailable," "the type of person who can't," attachment diagnoses stated as fact.\n\nWhen flagged: mentalizing score capped at 7 for that scenario. Count of 2+ adds a review flag.`}
-        </Text>
+        <AdminGlossaryHeading
+          title="Mentalizing overcertainty"
+          glossaryText={DEPTH_SIGNAL_GLOSSARY.mentalizing_overcertainty}
+          titleStyle={styles.blockTitle}
+        />
         <Text style={styles.blockText}>
           {typeof attempt.mentalizing_overcertainty_count === 'number'
             ? `${attempt.mentalizing_overcertainty_count} moments flagged for overcertainty`
@@ -330,34 +343,40 @@ export function AdminInterviewDepthSignalsTab({
       </View>
 
       <View style={[styles.block, { marginTop: 12 }]}>
-        <Text style={styles.blockTitle}>Disclosure calibration</Text>
-        <Text style={styles.depthSignalFootnote}>
-          {`Assesses whether the user's personal moment disclosures were appropriate for the interview context — neither too guarded nor overwhelming.\n\nCalibrated — personal disclosures were specific and emotionally honest without being either avoidant or excessive. No flag.\n\nUnderdisclosure — personal responses significantly shorter than scenario responses (below 40% of scenario average) when neither moment is substantively concrete. Gate modifier: -0.2.\n\nOverdisclosure — personal responses exceeded appropriate scope: very high word count or unsolicited clinical trauma vocabulary. Review flag only (no score modifier).`}
-        </Text>
+        <AdminGlossaryHeading
+          title="Disclosure calibration"
+          glossaryText={DEPTH_SIGNAL_GLOSSARY.disclosure_calibration}
+          titleStyle={styles.blockTitle}
+        />
         <Text
           style={[
             styles.blockText,
-            { color: disclosureAdminColor(attempt.disclosure_calibration ?? undefined), textTransform: 'capitalize' },
+            {
+              color: disclosureLabel === 'Underdisclosure' ? '#D4A84B' : disclosureLabel === 'Calibrated' ? '#2A8C6A' : '#7A9ABE',
+            },
           ]}
         >
-          {attempt.disclosure_calibration
-            ? String(attempt.disclosure_calibration).replace(/_/g, ' ')
-            : '—'}
+          {disclosureLabel}
         </Text>
+        {suppressedModifierNotice ? (
+          <Text style={[styles.blockText, { marginTop: 8, color: '#D4A84B' }]}>{suppressedModifierNotice}</Text>
+        ) : null}
       </View>
 
       <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Section D — Defense patterns</Text>
-      <Text style={[styles.depthSignalFootnote, { marginTop: 4, marginBottom: 6 }]}>
-        {`Cross-scenario detection of immature psychological defenses. Projection is tracked for review but does not count toward the depth modifier. Rationalization, splitting, and denial stack: 1 flag -0.1, 2 flags -0.2, 3+ flags -0.35. Two flags adds defense_pattern_review.`}
-      </Text>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, marginTop: 4, marginBottom: 6 }}>
+        <Text style={[styles.depthSignalFootnote, { marginTop: 0, marginBottom: 0, flex: 1 }]}>
+          Rationalization, splitting, and denial stack: 1 flag −0.1, 2 flags −0.2, 3 flags −0.35. Two flags adds
+          defense_pattern_review.
+        </Text>
+        <AdminInlineGlossaryIcon
+          text={DEPTH_SIGNAL_GLOSSARY.defense_patterns}
+          accessibilityLabel="Explain defense patterns"
+        />
+      </View>
       <View style={styles.defenseGrid}>
         {(
           [
-            [
-              'Projection',
-              'projection_detected' as const,
-              `User attributes qualities to fictional characters that their own personal moment responses demonstrate about themselves. e.g. calling Daniel conflict-avoidant while describing their own pattern of going quiet when overwhelmed.`,
-            ],
             [
               'Rationalization',
               'rationalization_detected' as const,
@@ -394,15 +413,8 @@ export function AdminInterviewDepthSignalsTab({
         })}
       </View>
       <Text style={[styles.blockText, { marginTop: 10 }]}>
-        {defenseActiveCount} of 4 immature defense patterns detected.
+        {defenseActiveCount} of 3 immature defense patterns detected.
       </Text>
-      {defenseActiveCount >= 3 ? (
-        <View style={[styles.block, { marginTop: 10, borderLeftWidth: 4, borderLeftColor: '#E87A7A' }]}>
-          <Text style={[styles.blockText, { color: '#F5A8A8', fontWeight: '600' }]}>
-            High defense pattern load — automatic gate fail triggered.
-          </Text>
-        </View>
-      ) : null}
 
       <Text style={[styles.sectionTitle, { marginTop: 22 }]}>Defense cross-reference</Text>
       <Text style={[styles.depthSignalFootnote, { marginTop: 4, marginBottom: 6 }]}>
@@ -469,10 +481,9 @@ export function AdminInterviewDepthSignalsTab({
             </View>
           ) : null}
 
-          {defenseCrossRef.flags.length === 0 ? (
-            <Text style={styles.blockText}>No cross-reference flags.</Text>
-          ) : (
-            defenseCrossRef.flags.map((flag) => (
+          {defenseCrossRef.flags
+            .filter((flag) => !String(flag.defense).includes('projection'))
+            .map((flag) => (
               <View
                 key={flag.flagName}
                 style={{
@@ -500,8 +511,10 @@ export function AdminInterviewDepthSignalsTab({
                   </Text>
                 ) : null}
               </View>
-            ))
-          )}
+            ))}
+          {defenseCrossRef.flags.filter((flag) => !String(flag.defense).includes('projection')).length === 0 ? (
+            <Text style={styles.blockText}>No cross-reference flags.</Text>
+          ) : null}
         </View>
       ) : (
         <View style={styles.block}>

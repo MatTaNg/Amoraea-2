@@ -67,16 +67,14 @@ describe('situation1ExactModalPrompt', () => {
     expect(resolveSituation1ExactModalPrompt(transcript)).toBe(SCENARIO_1_OPENING);
   });
 
-  it('returns repair exact copy after contempt when repair is last', () => {
+  it('returns contempt (not retired repair) after contempt when repair bleed is last', () => {
     const transcript = [
       { role: 'assistant', content: `${S1_VIGNETTE_SNIPPET} ${SCENARIO_1_OPENING}` },
       { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
       { role: 'user', content: 'She sounds dismissive.' },
       { role: 'assistant', content: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY },
     ];
-    expect(resolveSituation1ExactModalPrompt(transcript)).toBe(
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-    );
+    expect(resolveSituation1ExactModalPrompt(transcript)).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
   it('returns contempt when delivery ref says contempt asked even without transcript', () => {
@@ -89,15 +87,15 @@ describe('situation1ExactModalPrompt', () => {
     ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('returns repair when delivery ref says repair asked', () => {
+  it('maps retired repair delivery flag to contempt footer', () => {
     expect(
       resolveSituation1ExactModalPrompt([], null, { repairQuestionAsked: true }),
-    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('coerces truncated Emma repair stream fragments to the canonical repair footer', () => {
+  it('maps truncated Emma repair stream fragments to contempt when repair is retired', () => {
     expect(resolveSituation1ExactModalPrompt([], 'Now, things with Emma?')).toBe(
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
     );
     expect(
       resolveSituation1ExactModalPrompt(
@@ -108,14 +106,28 @@ describe('situation1ExactModalPrompt', () => {
         null,
         { contemptProbeAsked: true },
       ),
-    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('coerces truncated Emma repair tails for modal display', () => {
+  it('coerces truncated Emma repair tails to contempt for modal display when retired', () => {
     expect(isScenarioANonScriptedModalParaphrase('Now, things with Emma?')).toBe(false);
     expect(
       coerceExactScenarioModalQuestionDisplay('Now, things with Emma?', 'Situation 1'),
-    ).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+  });
+
+  it('keeps spoken contempt footer even when transcript has repair bleed from a prior bug', () => {
+    expect(
+      resolveSituation1ExactModalPrompt(
+        [
+          { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+          { role: 'user', content: "That was very condescending." },
+          { role: 'assistant', content: 'Got it. with Emma?' },
+        ],
+        SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        { contemptProbeAsked: true, repairQuestionAsked: true },
+      ),
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
   it('detects and coerces meta "play Situation 1" narration into the canonical vignette', () => {

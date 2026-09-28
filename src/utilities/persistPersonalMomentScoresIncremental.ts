@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type {
   PersonalMoment5SliceForSanitize,
   PersonalMomentSliceForSanitize,
+  PersonalMomentSupportSliceForSanitize,
 } from '@features/aria/personalMomentSliceSanitize';
 import {
   mergeMoment4ConcretenessForGate,
@@ -87,6 +88,7 @@ export function logScorePipelineBaseline(baseline: AttemptScoringBaseline): void
   console.log('[ScorePipeline] existing patterns before scoring:', {
     hasM4: !!p.moment_4_scores,
     hasM5: !!p.moment_5_scores,
+    hasSupport: !!p.moment_support_scores,
     egoDevLevel: baseline.ego_development_level,
   });
 }
@@ -134,7 +136,7 @@ export function buildMoment5ScoresRecord(
 
 export function mergeScenarioSpecificPatterns(
   existing: Record<string, unknown>,
-  patch: { moment_4_scores?: unknown; moment_5_scores?: unknown },
+  patch: { moment_4_scores?: unknown; moment_5_scores?: unknown; moment_support_scores?: unknown },
 ): Record<string, unknown> {
   return { ...existing, ...patch };
 }
@@ -142,7 +144,7 @@ export function mergeScenarioSpecificPatterns(
 export function resolveMomentScoresForFinalPersist(
   freshRecord: Record<string, unknown> | null | undefined,
   baseline: AttemptScoringBaseline,
-  key: 'moment_4_scores' | 'moment_5_scores',
+  key: 'moment_4_scores' | 'moment_5_scores' | 'moment_support_scores',
   opts?: { suppressBaselineBackfill?: boolean },
 ): unknown {
   if (freshRecord) return freshRecord;
@@ -213,6 +215,35 @@ export async function persistMoment4ScoresImmediate(
     moment_4_concreteness,
   };
   return next;
+}
+
+export async function persistMomentSupportScoresImmediate(
+  supabase: SupabaseClient,
+  attemptId: string,
+  userId: string,
+  support: PersonalMomentSupportSliceForSanitize,
+  baseline: AttemptScoringBaseline,
+): Promise<AttemptScoringBaseline> {
+  const moment_support_scores = buildMoment4ScoresRecord(
+    support as PersonalMomentSliceForSanitize,
+  );
+  const scenario_specific_patterns = mergeScenarioSpecificPatterns(baseline.patterns, {
+    moment_support_scores,
+  });
+  const { error } = await supabase
+    .from('interview_attempts')
+    .update({ scenario_specific_patterns })
+    .eq('id', attemptId)
+    .eq('user_id', userId);
+  if (error) {
+    console.error('[Support Persist] failed to persist support moment scores:', error);
+  } else {
+    console.log('[Support Persist] support moment scores persisted immediately');
+  }
+  return {
+    ...baseline,
+    patterns: scenario_specific_patterns,
+  };
 }
 
 export type PersistMoment5Extras = {

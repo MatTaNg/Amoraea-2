@@ -8,6 +8,7 @@ import { requestMyLocationLabel } from '@/screens/profile/utils/locationHelpers'
 import { looksLikeRawCoordinates } from '@/shared/utils/geocoding';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './LocationModal.styled';
+import { ONBOARDING_LOCATION_DESCRIPTION } from './onboardingStepCopy';
 
 interface LocationModalProps {
   location: string;
@@ -123,7 +124,7 @@ export const LocationModal: React.FC<LocationModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            We use your location to find matches nearby. Location is detected automatically and must be enabled to continue.
+            {ONBOARDING_LOCATION_DESCRIPTION}
           </Text>
 
           {isGettingLocation && (

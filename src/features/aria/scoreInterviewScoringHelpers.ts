@@ -23,7 +23,7 @@ export interface ScenarioScoreResult {
 }
 
 export interface PersonalMomentScoreResult {
-  momentNumber: 4 | 5;
+  momentNumber: 4 | 5 | 6;
   momentName: string;
   pillarScores: Record<string, number | null>;
   pillarConfidence: Record<string, string>;

@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import {
   getActiveRequiredLifeDomainQuestionsByDomain,
@@ -8,14 +8,8 @@ import {
   type LifeDomainQuestionDef,
 } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import type { LifeDomainAnswersMap } from '@/screens/profile/editProfile/lifeDomainProfileService';
-import { FormField, FormTextInput } from '@/shared/ui/FormField';
-import {
-  BottomSheet,
-  OptionPickerTrigger,
-  type OptionAnchor,
-} from '@/screens/profile/editProfile/BottomSheet';
-import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
-import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
+import { FormTextInput } from '@/shared/ui/FormField';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { theme } from '@/shared/theme/theme';
 
 type Props = {
@@ -23,52 +17,6 @@ type Props = {
   answers: LifeDomainAnswersMap;
   onAnswerChange: (domainId: LifeDomainId, questionId: string, value: string) => void;
 };
-
-function QuestionDropdown({
-  label,
-  value,
-  options,
-  onValueChange,
-}: {
-  label: string;
-  value: string;
-  options: { label: string; value: string }[];
-  onValueChange: (v: string) => void;
-}) {
-  const [sheetAnchor, setSheetAnchor] = React.useState<OptionAnchor | null>(null);
-  const selectedLabel = options.find((o) => o.value === value)?.label ?? 'Choose…';
-
-  return (
-    <FormField label={label}>
-      <OptionPickerTrigger
-        style={styles.dropdownTrigger}
-        onOpen={(anchor) => setSheetAnchor(anchor)}
-      >
-        <SelectTriggerRow
-          label={selectedLabel}
-          isPlaceholder={!value}
-          labelStyle={styles.dropdownValue}
-          placeholderStyle={styles.dropdownPlaceholder}
-        />
-      </OptionPickerTrigger>
-      <BottomSheet
-        visible={!!sheetAnchor}
-        title={label}
-        anchor={sheetAnchor}
-        onClose={() => setSheetAnchor(null)}
-      >
-        <SingleChoiceOptionList
-          options={options}
-          value={value}
-          onSelect={(v) => {
-            onValueChange(String(v));
-            setSheetAnchor(null);
-          }}
-        />
-      </BottomSheet>
-    </FormField>
-  );
-}
 
 function renderQuestion(
   domainId: LifeDomainId,
@@ -78,12 +26,16 @@ function renderQuestion(
 ) {
   if (q.input === 'dropdown' && q.options?.length) {
     return (
-      <QuestionDropdown
+      <AppSelect
         key={q.id}
         label={q.text}
         value={value}
         options={q.options}
         onValueChange={(v) => onAnswerChange(domainId, q.id, v)}
+        allowUnset
+        unsetLabel="Choose…"
+        placeholder="Choose…"
+        sheetTitle={q.text}
       />
     );
   }
@@ -104,7 +56,7 @@ export function LifeDomainRequiredQuestionsSection({
   answers,
   onAnswerChange,
 }: Props) {
-  const byDomain = useMemo(
+  const byDomain = React.useMemo(
     () => getActiveRequiredLifeDomainQuestionsByDomain(wantKids),
     [wantKids],
   );
@@ -148,22 +100,5 @@ const styles = StyleSheet.create({
     color: theme.colors.text,
     fontSize: 15,
     fontWeight: '600',
-  },
-  dropdownTrigger: {
-    borderWidth: 1,
-    borderColor: 'rgba(123,154,190,0.35)',
-    borderRadius: 10,
-    backgroundColor: 'rgba(15,23,42,0.6)',
-    minHeight: 48,
-    justifyContent: 'center',
-    paddingHorizontal: 12,
-  },
-  dropdownValue: {
-    color: theme.colors.text,
-    fontSize: 16,
-  },
-  dropdownPlaceholder: {
-    color: theme.colors.textSecondary,
-    fontSize: 16,
   },
 });

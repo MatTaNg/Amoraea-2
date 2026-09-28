@@ -1,4 +1,5 @@
-/** Minimal slice shape after personal-moment LLM scoring (before DB/aggregate). */
+import { isNoEvidenceText } from '@features/aria/probeEvidenceUtils';
+import { looksLikeAssessableSpontaneousRepairEvidence } from '@features/aria/spontaneousRepairEvidence';
 export type PersonalMomentSliceForSanitize = {
   momentNumber?: 4;
   pillarScores: Record<string, number | null>;
@@ -16,10 +17,8 @@ export type PersonalMomentSliceForSanitize = {
 };
 
 const M4_REMOVE: readonly string[] = [
-  'repair',
   'attunement',
   'appreciation',
-  'regulation',
 ];
 
 const M5_REMOVE: readonly string[] = [
@@ -30,9 +29,25 @@ const M5_REMOVE: readonly string[] = [
   'contempt',
 ];
 
+function keepSpontaneousRepairIfAssessable(
+  pillarScores: Record<string, number | null>,
+  keyEvidence: Record<string, string>,
+): void {
+  const scoreKey = Object.keys(pillarScores).find((k) => k.toLowerCase() === 'repair');
+  const evidenceKey = Object.keys(keyEvidence).find((k) => k.toLowerCase() === 'repair');
+  const score = scoreKey != null ? pillarScores[scoreKey] : undefined;
+  const evidence = evidenceKey != null ? keyEvidence[evidenceKey] : undefined;
+  const numeric = typeof score === 'number' && Number.isFinite(score);
+  if (!numeric || isNoEvidenceText(evidence) || !looksLikeAssessableSpontaneousRepairEvidence(evidence)) {
+    if (scoreKey) delete pillarScores[scoreKey];
+    if (evidenceKey) delete keyEvidence[evidenceKey];
+  }
+}
+
 /**
  * Personal-moment prompts score only listed constructs; strip anything else the model echoes
- * so aggregates and stored JSON cannot leak e.g. Moment 4 `repair` into pillar math or admin views.
+ * so aggregates and stored JSON cannot leak e.g. Moment 4 `attunement` into pillar math or admin views.
+ * Spontaneous repair is kept only when evidence is assessable (not a leaked midpoint).
  */
 export function sanitizePersonalMomentScoresForAggregate(
   scored: PersonalMomentSliceForSanitize | null
@@ -47,6 +62,7 @@ export function sanitizePersonalMomentScoresForAggregate(
   for (const k of Object.keys(keyEvidence)) {
     if (removeLc.has(k.toLowerCase())) delete keyEvidence[k];
   }
+  keepSpontaneousRepairIfAssessable(pillarScores, keyEvidence);
   return { ...scored, pillarScores, keyEvidence };
 }
 
@@ -102,5 +118,49 @@ export function sanitizeMoment5PersonalScoresForAggregate(
   for (const k of Object.keys(keyEvidence)) {
     if (removeLc.has(k.toLowerCase())) delete keyEvidence[k];
   }
+  return { ...scored, pillarScores, keyEvidence };
+}
+
+const SUPPORT_KEEP = new Set([
+  'responsiveness_support',
+  'need_recognition',
+  'attunement',
+  'support_response',
+  'adaptability',
+  'mentalizing',
+  'regulation',
+  'repair',
+]);
+
+export type PersonalMomentSupportSliceForSanitize = {
+  momentNumber?: 6;
+  pillarScores: Record<string, number | null>;
+  pillarConfidence?: Record<string, string>;
+  keyEvidence?: Record<string, string>;
+  summary?: string;
+  specificity?: string;
+  momentName?: string;
+  mentalizing_overcertainty?: boolean;
+  response_concreteness?: string | null;
+  emotional_vocab_count?: number | null;
+  emotional_vocab_words?: string[];
+  user_slice_word_count?: number | null;
+  scoringMetadata?: Record<string, unknown> | null;
+};
+
+/** Keep only support-moment pillars/slices; drop leaked constructs from the model. */
+export function sanitizeSupportMomentScoresForAggregate(
+  scored: PersonalMomentSupportSliceForSanitize | null,
+): PersonalMomentSupportSliceForSanitize | null {
+  if (!scored?.pillarScores) return scored;
+  const pillarScores: Record<string, number | null> = {};
+  const keyEvidence: Record<string, string> = {};
+  for (const [k, v] of Object.entries(scored.pillarScores)) {
+    if (SUPPORT_KEEP.has(k.toLowerCase())) pillarScores[k] = v;
+  }
+  for (const [k, v] of Object.entries(scored.keyEvidence ?? {})) {
+    if (SUPPORT_KEEP.has(k.toLowerCase())) keyEvidence[k] = v;
+  }
+  keepSpontaneousRepairIfAssessable(pillarScores, keyEvidence);
   return { ...scored, pillarScores, keyEvidence };
 }

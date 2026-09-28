@@ -224,31 +224,29 @@ describe('interviewDisengagementProbes', () => {
     ).toBe(false);
   });
 
-  it('resolveInterviewQuestionRepeatTtsText expands truncated Ryan repair lead', () => {
+  it('resolveInterviewQuestionRepeatTtsText remaps retired Ryan repair bleed to contempt on S1', () => {
     expect(resolveInterviewQuestionRepeatTtsText('And if you were Ryan?')).toBe(
-      'If you were Ryan, how would you repair this?',
+      SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
     );
     expect(
       resolveInterviewQuestionRepeatTtsText(
         'How would you repair this relationship if you were Ryan?',
       ),
-    ).toBe('If you were Ryan, how would you repair this?');
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('resolveInterviewQuestionRepeatTtsText expands truncated mid-clause Ryan repair for repeat', () => {
+  it('resolveInterviewQuestionRepeatTtsText remaps truncated mid-clause Ryan repair to contempt when retired', () => {
     const truncated =
       'Got it. If you were Ryan, how would you actually repair things with Emma in';
-    expect(resolveInterviewQuestionRepeatTtsText(truncated)).toBe(
-      'If you were Ryan, how would you repair this?',
-    );
+    expect(resolveInterviewQuestionRepeatTtsText(truncated)).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
-  it('resolveInterviewQuestionRepeatTtsText maps Scenario A repair bleed to James repair during Scenario 2', () => {
+  it('resolveInterviewQuestionRepeatTtsText maps Scenario A repair bleed to James-differently during Scenario 2', () => {
     const truncated =
       'Got it. If you were Ryan, how would you actually repair things with Emma in';
     expect(
       resolveInterviewQuestionRepeatTtsText(truncated, { activeScenario: 2 }),
-    ).toBe('And if you were James, how would you repair?');
+    ).toBe('What do you think James could have done differently to help Sarah feel appreciated?');
   });
 
   it('resolveInterviewQuestionRepeatTtsText maps Scenario A contempt bleed to S2 Q1 during Scenario 2', () => {
@@ -258,6 +256,18 @@ describe('interviewDisengagementProbes', () => {
         { activeScenario: 2 },
       ),
     ).toBe(SCENARIO_B_Q1_CANONICAL);
+  });
+
+  it('resolveInterviewQuestionRepeatTtsText remaps Scenario 2 James repair to James-differently', () => {
+    expect(
+      resolveInterviewQuestionRepeatTtsText(SCENARIO_B_JAMES_REPAIR_CANONICAL, { activeScenario: 2 }),
+    ).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
+    expect(
+      resolveInterviewQuestionRepeatTtsText(
+        'Got it. And if you were James, how would you repair?',
+        { activeScenario: 2 },
+      ),
+    ).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
   });
 
   it('resolveInterviewQuestionRepeatTtsText coerces Scenario 2 James repair bleed during Scenario 3', () => {
@@ -765,7 +775,7 @@ describe('interviewDisengagementProbes', () => {
     ).toBe(true);
   });
 
-  it('does not treat contempt-only analysis as satisfied repair for Scenario A handoff', () => {
+  it('allows Scenario A handoff after contempt answer when repair probe is retired', () => {
     const messages = [
       { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
       {
@@ -774,8 +784,11 @@ describe('interviewDisengagementProbes', () => {
           "Emma's frustrated I'm assuming she's referring to him always taking time taking share time that they're supposed to spend together to spend with their family with his family",
       },
     ];
-    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, '', 1)).toBe(false);
-    expect(scenarioAMinimumEngagementForHandoff(messages)).toBe(false);
+    // Repair retired: empty / brief-ack drafts after contempt should inject the S1→S2 bundle
+    // (avoids speaking lone "Got it." then pausing before the handoff).
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, '', 1)).toBe(true);
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it.', 1)).toBe(true);
+    expect(scenarioAMinimumEngagementForHandoff(messages)).toBe(true);
   });
 
   it('advances Scenario A when contempt answer already includes concrete repair substance', () => {
@@ -788,6 +801,46 @@ describe('interviewDisengagementProbes', () => {
       },
     ];
     expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it.', 1)).toBe(true);
+  });
+
+  it('advances Scenario A on Got it after contempt when S1 repair is retired', () => {
+    const messages = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      {
+        role: 'user',
+        content:
+          "Sounds very condescending, she's obviously very frustrated, but that's the one to admit.",
+      },
+    ];
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it.', 1)).toBe(true);
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it. things', 1)).toBe(true);
+  });
+
+  it('advances Scenario A when Q1 covers Emma clear-line contempt and repair is retired', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: "What's going on between these two?",
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      },
+      {
+        role: 'user',
+        content:
+          "Ryan should not have taken that call during their date. Emma is being condescending when she says you've made that very clear.",
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      },
+    ];
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it.', 1)).toBe(true);
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, '', 1)).toBe(true);
+    expect(
+      shouldAdvanceScenarioAAfterSatisfiedRepair(
+        messages,
+        'If you were Ryan, how would you repair this?',
+        1,
+      ),
+    ).toBe(true);
   });
 
   it('advances Scenario A when model asks unauthorized Ryan preventive follow-up after satisfied repair', () => {
@@ -1339,6 +1392,52 @@ describe('findLastRepeatableInterviewQuestionText', () => {
     expect(findLastRepeatableInterviewQuestionText(messages, sarahIntro)).toBe(
       SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     );
+  });
+
+  it('after James-differently is answered, resume skips Makes sense ack and opens Situation 3', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content:
+          'You could have not led with logistics and asked her instead how she felt, got excited with her, and told her how proud of her he was.',
+        scenarioNumber: 2,
+      },
+      { role: 'assistant', content: 'Makes sense.', scenarioNumber: 2 },
+    ];
+    const out = findLastRepeatableInterviewQuestionText(messages, 'Makes sense.', {
+      activeScenario: 2,
+    });
+    expect(out).toMatch(/Sophie and Daniel/i);
+    expect(out).not.toMatch(/^Makes sense/i);
+    expect(out).not.toMatch(/repair this with Sarah/i);
+  });
+
+  it('after James-differently is answered, resume remaps residual James repair to Situation 3', () => {
+    const repairParaphrase =
+      'If James wanted to repair this with Sarah the next day, what would that actually look like — what would he say?';
+    const messages = [
+      {
+        role: 'assistant',
+        content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+        scenarioNumber: 2,
+      },
+      {
+        role: 'user',
+        content: 'He could have celebrated with her and told her he was proud.',
+        scenarioNumber: 2,
+      },
+      { role: 'assistant', content: `Makes sense. ${repairParaphrase}`, scenarioNumber: 2 },
+    ];
+    const out = findLastRepeatableInterviewQuestionText(messages, repairParaphrase, {
+      activeScenario: 2,
+    });
+    expect(out).toMatch(/Sophie and Daniel/i);
+    expect(out).not.toMatch(/repair this with Sarah/i);
   });
 
   it('coerces truncated Scenario B James Q2 on resume replay', () => {

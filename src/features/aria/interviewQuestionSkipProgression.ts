@@ -5,7 +5,6 @@ import {
   transcriptContainsScenarioARepairQuestion,
   transcriptContainsScenarioBAppreciationProbe,
   transcriptContainsScenarioBJamesDifferentlyProbe,
-  transcriptContainsScenarioBRepairAsJamesQuestion,
   transcriptContainsScenarioCRepairQuestion,
 } from './scenarioFollowUpTranscriptGuard';
 import {
@@ -14,7 +13,6 @@ import {
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from './probeAndScoringUtils';
 import {
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
-  SCENARIO_B_JAMES_REPAIR_CANONICAL,
   SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 import {
@@ -98,9 +96,6 @@ function resolveScenarioBQuestionSkipProgression(
     !transcriptContainsScenarioBAppreciationProbe(messages)
   ) {
     return { nextPrompt: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL, scenarioMomentComplete: false };
-  }
-  if (!transcriptContainsScenarioBRepairAsJamesQuestion(messages)) {
-    return { nextPrompt: SCENARIO_B_JAMES_REPAIR_CANONICAL, scenarioMomentComplete: false };
   }
   return { nextPrompt: '', scenarioMomentComplete: true };
 }

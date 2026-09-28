@@ -35,14 +35,14 @@ describe('situation2ExactModalPrompt', () => {
     ).toBe(true);
   });
 
-  it('advances to repair-as-James after Q3 is delivered', () => {
+  it('stays on James-differently even if a retired repair-as-James line is in the transcript', () => {
     const transcript = [
       { role: 'assistant', content: s2Intro },
       { role: 'assistant', content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL },
       { role: 'user', content: 'He could have listened first.' },
       { role: 'assistant', content: SCENARIO_B_JAMES_REPAIR_CANONICAL },
     ];
-    expect(resolveSituation2ExactModalPrompt(transcript)).toBe(SCENARIO_B_JAMES_REPAIR_CANONICAL);
+    expect(resolveSituation2ExactModalPrompt(transcript)).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
   });
 
   it('does not revert to opening when Sarah+James reflection re-triggers scenario detection', () => {
@@ -63,22 +63,22 @@ describe('situation2ExactModalPrompt', () => {
     );
   });
 
-  it('uses currentSpoken for streaming James-differently and repair probes', () => {
+  it('maps retired repair spoken copy onto James-differently for the Situation 2 card', () => {
     expect(
       resolveSituation2ExactModalPrompt([], SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL),
     ).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
     expect(resolveSituation2ExactModalPrompt([], SCENARIO_B_JAMES_REPAIR_CANONICAL)).toBe(
-      SCENARIO_B_JAMES_REPAIR_CANONICAL,
+      SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     );
     expect(
       resolveSituation2ExactModalPrompt(
         [],
         'How do you think James could repair this with Sarah now?',
       ),
-    ).toBe(SCENARIO_B_JAMES_REPAIR_CANONICAL);
+    ).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
   });
 
-  it('stays on repair after cut-off retry even when delivery ref only has jamesDifferentlyAsked', () => {
+  it('stays on James-differently after cut-off retry even if a retired repair line is in the transcript', () => {
     const transcript = [
       { role: 'assistant', content: s2Intro },
       { role: 'assistant', content: SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL },
@@ -89,7 +89,7 @@ describe('situation2ExactModalPrompt', () => {
     ];
     const delivery = { jamesDifferentlyAsked: true, repairQuestionAsked: false };
     expect(resolveSituation2ExactModalPrompt(transcript, null, delivery)).toBe(
-      SCENARIO_B_JAMES_REPAIR_CANONICAL,
+      SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
     );
   });
 

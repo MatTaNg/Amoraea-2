@@ -106,8 +106,6 @@
 
 - **Pass weighted score:** `scoring/interviewGateThresholds.ts` → `GATE_PASS_WEIGHTED_MIN` (default **6.5**)
 
-- **Referral pass score:** same file → `REFERRAL_WEIGHTED_PASS_MIN` (default **6.0**)
-
 - **Pillar floors:** same file → `GATE_MARKER_FLOORS`
 
 - **Pillar weights:** same file → `GATE_MARKER_BASE_WEIGHTS`

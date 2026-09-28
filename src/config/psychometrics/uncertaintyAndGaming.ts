@@ -8,7 +8,11 @@ export const UNCERTAINTY_ROUTING_THRESHOLD = 0.6;
 /** Weighted score used for “near threshold” proximity in uncertainty (legacy; gate pass is 6.5). */
 export const UNCERTAINTY_GATE_PROXIMITY_SCORE = 6.0;
 
-/** Max penalty when gaming correction level ≥ 3 or uncertainty ≥ 0.8. */
+/**
+ * Retired extra-penalty constant. Live gaming correction never applies an additional
+ * numeric penalty beyond stripping positive contributions on active instruments.
+ * Kept for historical attribution / admin labels only.
+ */
 export const GAMING_CORRECTION_MAX_PENALTY = -0.3;
 
 /** Uncertainty tiers for gaming correction (inclusive lower bound). */

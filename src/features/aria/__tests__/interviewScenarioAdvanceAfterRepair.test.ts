@@ -460,6 +460,24 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     ).toBe(true);
   });
 
+  it('advances Scenario B when retired Q3 and James-differently is answered with short ack draft', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'What do you think James could have done differently to help Sarah feel appreciated?',
+      },
+      {
+        role: 'user',
+        content:
+          'You could have not led with logistics and asked her instead how she felt, got excited with her, and told her how proud of her he was.',
+      },
+    ];
+    expect(shouldAdvanceScenarioBAfterSatisfiedRepair(messages, 'Makes sense.', 2)).toBe(true);
+    const repairParaphrase =
+      'If James wanted to repair this with Sarah the next day, what would that actually look like — what would he say?';
+    expect(shouldAdvanceScenarioBAfterSatisfiedRepair(messages, repairParaphrase, 2)).toBe(true);
+  });
+
   it('advances Scenario B when James repair is satisfied but model redirects to Q1', () => {
     const messages = [
       { role: 'assistant', content: 'And if you were James, how would you repair?' },

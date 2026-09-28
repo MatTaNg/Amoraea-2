@@ -1,15 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
+import React, { useCallback, useEffect, useMemo } from "react";
+import { ONBOARDING_STEP_SCREEN_EDGES } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView, TouchableOpacity } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "@/shared/ui/Button";
+import { AppSelect } from "@/shared/ui/AppSelect";
 import { OnboardingHeader } from "./components/OnboardingHeader";
-import {
-  BottomSheet,
-  OptionPickerTrigger,
-  type OptionAnchor,
-} from "@/screens/profile/editProfile/BottomSheet";
-import { SingleChoiceOptionList } from "@/shared/components/profileFields/SingleChoiceOptionList";
 import { SexInterestCheckboxList } from "@/shared/components/profileFields/SexInterestCheckboxList";
 import { renderDealbreakerQuestionHighlight } from '@/shared/components/profileFields/dealbreakerQuestionHighlight';
 import {
@@ -23,6 +18,7 @@ import {
   sexualCompatStepComplete,
 } from "@/shared/constants/sexualCompatibilityOptions";
 import { styles } from "./SexualCompatibilityModal.styled";
+import { ONBOARDING_SEXUAL_COMPATIBILITY_LEAD } from "./onboardingStepCopy";
 
 export type SexualCompatibilityDraft = {
   prefPhysicalCompatImportance: string;
@@ -38,10 +34,16 @@ interface SexualCompatibilityModalProps {
   onBack: () => void;
 }
 
+const SELECT_PLACEHOLDER = "Select";
+
 function truncLabel(s: string, max = 72): string {
   const t = String(s ?? "").trim();
-  if (!t) return "Select";
+  if (!t) return SELECT_PLACEHOLDER;
   return t.length > max ? `${t.slice(0, max)}…` : t;
+}
+
+function toSelectOptions(options: readonly string[]) {
+  return options.map((option) => ({ label: option, value: option }));
 }
 
 function renderDealbreakerHighlight(text: string) {
@@ -54,14 +56,6 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
   onNext,
   onBack,
 }) => {
-  const [sheet, setSheet] = useState<{
-    title: string;
-    options: readonly string[];
-    selectedValue: string;
-    onPick: (v: string) => void;
-    anchor?: OptionAnchor;
-  } | null>(null);
-
   useEffect(() => {
     const cur = value.sexInterestCategories || [];
     if (cur.length > 1) {
@@ -85,22 +79,6 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
     [value.sexInterestCategories, onChange]
   );
 
-  const openSingle = useCallback(
-    (anchor: OptionAnchor, title: string, options: readonly string[], key: keyof SexualCompatibilityDraft) => {
-      setSheet({
-        title,
-        options,
-        anchor,
-        onPick: (v) => {
-          const patch: Partial<SexualCompatibilityDraft> = { [key]: v } as Partial<SexualCompatibilityDraft>;
-          onChange(patch);
-          setSheet(null);
-        },
-      });
-    },
-    [onChange]
-  );
-
   return (
     <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
       <OnboardingHeader title="Sexual compatibility" />
@@ -110,20 +88,24 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.lead}>
-          Answer honestly — this helps us understand what matters to you in matching.
+          {ONBOARDING_SEXUAL_COMPATIBILITY_LEAD}
         </Text>
 
         <Text style={styles.question}>
           How central is physical and sexual compatibility for you in a relationship?
         </Text>
-        <OptionPickerTrigger
-          style={styles.row}
-          onOpen={(anchor) =>
-            openSingle(anchor, "Physical & sexual compatibility", PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS, "prefPhysicalCompatImportance")
+        <AppSelect
+          bare
+          value={value.prefPhysicalCompatImportance}
+          options={toSelectOptions(PREF_PHYSICAL_COMPAT_CENTRALITY_OPTIONS)}
+          onValueChange={(next) => onChange({ prefPhysicalCompatImportance: next })}
+          allowUnset
+          placeholder={SELECT_PLACEHOLDER}
+          sheetTitle="Physical & sexual compatibility"
+          formatSelectedLabel={(label, selected) =>
+            selected.trim() ? truncLabel(label) : SELECT_PLACEHOLDER
           }
-        >
-          <Text style={styles.rowValue}>{truncLabel(value.prefPhysicalCompatImportance)}</Text>
-        </OptionPickerTrigger>
+        />
 
         <Text style={styles.dealbreakerQuestion}>
           {renderDealbreakerHighlight(PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION)}
@@ -143,14 +125,18 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
         <Text style={styles.question}>
           In a relationship, what feels like your natural rhythm for sex?
         </Text>
-        <OptionPickerTrigger
-          style={styles.row}
-          onOpen={(anchor) =>
-            openSingle(anchor, 'Natural rhythm for sex', SEX_DRIVE_OPTIONS, 'sexDrive')
+        <AppSelect
+          bare
+          value={value.sexDrive}
+          options={[...SEX_DRIVE_OPTIONS]}
+          onValueChange={(next) => onChange({ sexDrive: next })}
+          allowUnset
+          placeholder={SELECT_PLACEHOLDER}
+          sheetTitle="Natural rhythm for sex"
+          formatSelectedLabel={(label, selected) =>
+            selected.trim() ? truncLabel(label) : SELECT_PLACEHOLDER
           }
-        >
-          <Text style={styles.rowValue}>{truncLabel(value.sexDrive)}</Text>
-        </OptionPickerTrigger>
+        />
 
         <Text style={styles.question}>Sexual interests (select one)</Text>
         <View style={styles.chipWrap}>
@@ -175,19 +161,6 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
           <Button title="Next" onPress={onNext} disabled={!canContinue} style={styles.nextBtn} />
         </View>
       </SafeAreaView>
-
-      <BottomSheet visible={!!sheet} title={sheet?.title} anchor={sheet?.anchor} onClose={() => setSheet(null)}>
-        {sheet ? (
-          <SingleChoiceOptionList
-            options={(sheet.options ?? []).map((o) => ({ label: o, value: o }))}
-            value={sheet.selectedValue}
-            onSelect={(v) => {
-              sheet.onPick(v);
-              setSheet(null);
-            }}
-          />
-        ) : null}
-      </BottomSheet>
     </SafeAreaView>
   );
 };

@@ -3,6 +3,7 @@ import {
   computeCapacityDiscount,
   computeConflictStyleAdjustment,
   computeDealbreakerMultiplier,
+  computePartnerAlignmentRankingAdjustment,
   computeFinalCompatibilityScore,
   computeFinanceAlignment,
   computeInterviewProcessScore,
@@ -76,19 +77,17 @@ const flatValues: ValuesProfile = {
   universalism: 0.0,
 };
 
-// Capacity profiles — brs/anxiety_trait/dweck on 1–6 scale
+// Capacity profiles — interview pillars plus live GASP / SCS-SF / BRS / trait anxiety
 const highCapacityUser: RelationalCapacityInput = {
   repair: 8,
   regulation: 8,
   contempt: 2,
   accountability: 8,
   mentalizing: 8,
-  rfqScore: 6.0,
   gaspExternalizationScore: 1.5,
   scsSfScore: 4.5,
   brsScore: 5.5,
   anxietyTraitScore: 1.8,
-  dweckScore: 5.2,
 };
 const lowCapacityUser: RelationalCapacityInput = {
   repair: 3,
@@ -96,12 +95,10 @@ const lowCapacityUser: RelationalCapacityInput = {
   contempt: 8,
   accountability: 3,
   mentalizing: 3,
-  rfqScore: 1.5,
   gaspExternalizationScore: 6.0,
   scsSfScore: 1.5,
   brsScore: 2.2,
   anxietyTraitScore: 5.3,
-  dweckScore: 2.2,
 };
 const moderateCapacityUser: RelationalCapacityInput = {
   repair: 6,
@@ -109,12 +106,10 @@ const moderateCapacityUser: RelationalCapacityInput = {
   contempt: 5,
   accountability: 6,
   mentalizing: 6,
-  rfqScore: 4.0,
   gaspExternalizationScore: 3.5,
   scsSfScore: 3.5,
   brsScore: 4.2,
   anxietyTraitScore: 3.5,
-  dweckScore: 3.8,
 };
 
 // Finance profiles — life-domain picker values are title case per computeFinanceAlignment
@@ -337,9 +332,7 @@ describe('computeRelationalCapacity', () => {
   test('null psychometric inputs default gracefully without crashing', () => {
     const userWithNullPsychometrics: RelationalCapacityInput = {
       ...moderateCapacityUser,
-      rfqScore: null,
       gaspExternalizationScore: null,
-      dweckScore: null,
     };
     expect(() => computeRelationalCapacity(userWithNullPsychometrics)).not.toThrow();
     const score = computeRelationalCapacity(userWithNullPsychometrics);
@@ -354,12 +347,10 @@ describe('computeRelationalCapacity', () => {
       contempt: 2,
       accountability: 8,
       mentalizing: 8,
-      rfqScore: null,
       gaspExternalizationScore: null,
       scsSfScore: null,
       brsScore: null,
       anxietyTraitScore: null,
-      dweckScore: null,
     };
     expect(() => computeRelationalCapacity(interviewOnlyUser)).not.toThrow();
     const score = computeRelationalCapacity(interviewOnlyUser);
@@ -507,6 +498,62 @@ describe('computeDealbreakerMultiplier', () => {
   test('fully compatible pair returns 1', () => {
     expect(computeDealbreakerMultiplier(wantsKids, wantsKids)).toBe(1);
   });
+
+  test('legacy Yes still hard-blocks religion mismatch', () => {
+    const required: DealbreakerProfile = {
+      ...wantsKids,
+      requireSameReligion: false,
+      partnerSameReligionRequired: 'Yes',
+      religion: 'Christian',
+    };
+    expect(computeDealbreakerMultiplier(required, differentReligion)).toBe(0);
+  });
+
+  test('non-negotiable religion mismatch hard-blocks', () => {
+    const required: DealbreakerProfile = {
+      ...wantsKids,
+      requireSameReligion: false,
+      partnerSameReligionRequired: 'non_negotiable',
+      religion: 'Christian',
+    };
+    expect(computeDealbreakerMultiplier(required, differentReligion)).toBe(0);
+  });
+
+  test('very important religion mismatch does not hard-block', () => {
+    const preferred: DealbreakerProfile = {
+      ...wantsKids,
+      requireSameReligion: false,
+      partnerSameReligionRequired: 'very_important',
+      religion: 'Christian',
+    };
+    expect(computeDealbreakerMultiplier(preferred, differentReligion)).toBe(1);
+  });
+
+  test('does not matter has no ranking effect', () => {
+    const flexible: DealbreakerProfile = {
+      ...wantsKids,
+      partnerSameReligionRequired: 'doesnt_matter',
+      religion: 'Christian',
+    };
+    expect(computePartnerAlignmentRankingAdjustment(flexible, differentReligion)).toBe(0);
+  });
+
+  test('very important mismatch ranks below preference mismatch', () => {
+    const strong: DealbreakerProfile = {
+      ...wantsKids,
+      partnerSameReligionRequired: 'very_important',
+      religion: 'Christian',
+    };
+    const mild: DealbreakerProfile = {
+      ...wantsKids,
+      partnerSameReligionRequired: 'preference',
+      religion: 'Christian',
+    };
+    const strongPenalty = computePartnerAlignmentRankingAdjustment(strong, differentReligion);
+    const mildPenalty = computePartnerAlignmentRankingAdjustment(mild, differentReligion);
+    expect(strongPenalty).toBeLessThan(mildPenalty);
+    expect(mildPenalty).toBeLessThan(0);
+  });
 });
 
 describe('computeConflictStyleAdjustment', () => {
@@ -541,28 +588,31 @@ describe('computeConflictStyleAdjustment', () => {
 });
 
 describe('computePsychometricSoftAdjustments', () => {
-  test('both users high entitlement produces negative adjustment', () => {
-    const adj = computePsychometricSoftAdjustments(highEntitlement, highEntitlement);
-    expect(adj).toBeLessThan(0);
-  });
-
-  test('large entitlement score divergence produces negative adjustment', () => {
-    const adj = computePsychometricSoftAdjustments(
-      { ...lowEntitlement, npiEntitlementScore: 1 },
-      { ...highEntitlement, npiEntitlementScore: 6 },
-    );
-    expect(adj).toBeLessThan(0);
+  test('historical NPI entitlement does not change pair ranking adjustment', () => {
+    expect(computePsychometricSoftAdjustments(highEntitlement, highEntitlement)).toBe(0);
+    expect(
+      computePsychometricSoftAdjustments(
+        { ...lowEntitlement, npiEntitlementScore: 1, scsSfScore: 2.5 },
+        { ...highEntitlement, npiEntitlementScore: 6, scsSfScore: 2.5 },
+      ),
+    ).toBe(0);
   });
 
   test('both users low entitlement produces no entitlement penalty', () => {
-    const adj = computePsychometricSoftAdjustments(lowEntitlement, lowEntitlement);
-    expect(adj).toBeGreaterThanOrEqual(0);
+    const adj = computePsychometricSoftAdjustments(
+      { ...lowEntitlement, scsSfScore: 2.5 },
+      { ...lowEntitlement, scsSfScore: 2.5 },
+    );
+    expect(adj).toBe(0);
   });
 
-  test('both users high growth mindset produces positive adjustment', () => {
-    const highDweck: PsychometricProfile = { ...lowEntitlement, dweckScore: 5.5 };
-    const adj = computePsychometricSoftAdjustments(highDweck, highDweck);
-    expect(adj).toBeGreaterThan(0);
+  test('historical Dweck does not change pair ranking adjustment', () => {
+    const highDweck: PsychometricProfile = {
+      npiEntitlementScore: null,
+      dweckScore: 5.5,
+      scsSfScore: 2.5,
+    };
+    expect(computePsychometricSoftAdjustments(highDweck, highDweck)).toBe(0);
   });
 
   test('both users high self-compassion produces positive adjustment', () => {
@@ -753,12 +803,10 @@ describe('regression — confirmed passing pairs must remain stable', () => {
     contempt: 2,
     accountability: 8,
     mentalizing: 8,
-    rfqScore: 5.8,
     gaspExternalizationScore: 1.6,
     scsSfScore: 4.3,
     brsScore: 5.0,
     anxietyTraitScore: 1.9,
-    dweckScore: 5.0,
   });
   const henryCapacity = computeRelationalCapacity(lowCapacityUser);
   const morganCapacity = computeRelationalCapacity({
@@ -768,12 +816,10 @@ describe('regression — confirmed passing pairs must remain stable', () => {
     contempt: 6,
     accountability: 5,
     mentalizing: 5,
-    rfqScore: 2.5,
     gaspExternalizationScore: 5.0,
     scsSfScore: 2.0,
     brsScore: 2.5,
     anxietyTraitScore: 4.0,
-    dweckScore: 2.5,
   });
 
   test('Alice + Bob: score remains above 0.97', () => {

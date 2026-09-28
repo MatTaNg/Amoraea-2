@@ -46,7 +46,6 @@ import {
 } from '@features/aria/probeAndScoringUtils';
 import {
   coerceScenarioAContemptProbeForTts,
-  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
 } from '@features/aria/scenarioAContemptProbeTtsStrip';
 import { syncInterviewScenarioRefsFromTranscript } from '@features/aria/interviewScenarioRefSync';
 import {
@@ -56,7 +55,6 @@ import {
 import {
   coerceScenarioBQ1QuestionForTts,
   coerceScenarioBJamesDifferentlyQuestionForTts,
-  coerceScenarioBJamesRepairQuestionForTts,
   coerceScenarioBJamesSayToJamesQuestionForTts,
   collapseScenarioBJamesSayToJamesWithRepairDuplicate,
   isBeforeFightOnlyScenarioBJamesQ2Paraphrase,
@@ -66,9 +64,10 @@ import {
   isIncompleteScenarioBQ1LeadSentence,
   isIncompleteScenarioBJamesDifferentlyLeadSentence,
   isIncompleteScenarioBJamesRepairLeadSentence,
+  stripScenarioBRepairAsJamesQuestion,
 } from '@features/aria/scenarioBProbeLogic';
 import { textContainsScenarioCVignetteBody } from '@features/aria/scenarioCProbeLogic';
-import { isActiveScenarioBConstructProbeTurn } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import { isActiveScenarioBConstructProbeTurn, transcriptHasUserResponseAfterScenarioAContemptProbe } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { remoteLog } from '@utilities/remoteLog';
 
 export type PostClaudeAssistantDraftProbeFlags = {
@@ -116,6 +115,13 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
     assistantIssuedMoment4AnyQuestion = false;
   }
   if (
+    params.shouldForceMoment4OrientationProbe &&
+    assistantIssuedMoment4AnyQuestion
+  ) {
+    strippedText = '';
+    assistantIssuedMoment4AnyQuestion = false;
+  }
+  if (
     params.shouldForceMoment4ThresholdProbe &&
     (assistantIssuedMoment4ThresholdProbe || moment4ThresholdParaphraseInFlight)
   ) {
@@ -159,9 +165,6 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
   ) {
     const beforeCoveredProbeStrip = strippedText;
     strippedText = stripScenarioAContemptProbeQuestion(strippedText);
-    if (!strippedText) {
-      strippedText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
-    }
     assistantIssuedScenarioAContemptProbe = false;
     assistantIssuedScenarioARepairQuestion = looksLikeScenarioARepairQuestion(strippedText);
     void remoteLog('[S1_MODEL_CONTEMPT_PROBE_SUPPRESSED_AFTER_USER_COVERAGE]', {
@@ -207,6 +210,38 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
     void remoteLog('[S1_SEQUENCE_BLOCKED_REPAIR_BEFORE_CONTEMPT]', {
       shouldForceScenarioAContemptProbe: params.shouldForceScenarioAContemptProbe,
       specificEmmaLineAlreadyAddressed: params.specificEmmaLineAlreadyAddressed,
+    });
+  }
+
+  if (
+    deps.currentInterviewMomentRef.current === 1 &&
+    transcriptHasUserResponseAfterScenarioAContemptProbe(params.messagesToUse) &&
+    (assistantIssuedScenarioARepairQuestion || looksLikeScenarioARepairQuestion(strippedText))
+  ) {
+    const beforeRetiredRepairStrip = strippedText;
+    strippedText = stripScenarioARepairQuestion(strippedText);
+    if (looksLikeScenarioARepairStreamFragment(strippedText)) {
+      strippedText = '';
+    }
+    assistantIssuedScenarioARepairQuestion = false;
+    void remoteLog('[S1_REPAIR_PROBE_RETIRED_STRIPPED]', {
+      preview: beforeRetiredRepairStrip.slice(0, 260),
+      afterPreview: strippedText.slice(0, 260),
+    });
+  }
+
+  if (
+    deps.currentInterviewMomentRef.current === 2 &&
+    (assistantIssuedScenarioBRepairAsJames ||
+      looksLikeScenarioBRepairAsJamesQuestion(strippedText) ||
+      isIncompleteScenarioBJamesRepairLeadSentence(strippedText))
+  ) {
+    const beforeRetiredS2RepairStrip = strippedText;
+    strippedText = stripScenarioBRepairAsJamesQuestion(strippedText);
+    assistantIssuedScenarioBRepairAsJames = false;
+    void remoteLog('[S2_JAMES_REPAIR_PROBE_RETIRED_STRIPPED]', {
+      preview: beforeRetiredS2RepairStrip.slice(0, 260),
+      afterPreview: strippedText.slice(0, 260),
     });
   }
 
@@ -288,7 +323,7 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
     const beforeSayToJamesCoerce = strippedText;
     strippedText = collapseScenarioBJamesSayToJamesWithRepairDuplicate(
       strippedText,
-      params.shouldForceScenarioBJamesRepairProbe,
+      false,
     );
     assistantIssuedScenarioBJamesDifferently = looksLikeScenarioBJamesDifferentlyQuestion(strippedText);
     assistantIssuedScenarioBRepairAsJames = looksLikeScenarioBRepairAsJamesQuestion(strippedText);
@@ -307,8 +342,8 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
     isIncompleteScenarioBJamesRepairLeadSentence(strippedText)
   ) {
     const beforeRepairCoerce = strippedText;
-    strippedText = coerceScenarioBJamesRepairQuestionForTts(strippedText);
-    assistantIssuedScenarioBRepairAsJames = looksLikeScenarioBRepairAsJamesQuestion(strippedText);
+    strippedText = stripScenarioBRepairAsJamesQuestion(strippedText);
+    assistantIssuedScenarioBRepairAsJames = false;
     logPostClaudeAssistantDraftSanitizeChange(
       '[S2_JAMES_REPAIR_INCOMPLETE_COERCED]',
       beforeRepairCoerce,

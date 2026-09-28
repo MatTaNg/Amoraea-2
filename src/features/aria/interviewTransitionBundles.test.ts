@@ -3,15 +3,17 @@ import {
   buildClientScenarioBoundaryHandoffBundle,
   buildMoment4HandoffForInterview,
   buildMoment4ThresholdAnswerToMoment5Bundle,
+  buildMoment4ToSupportBundle,
   buildScenario1To2BundleForInterview,
   buildScenarioBoundaryLeadForInterview,
   buildScenario2To3TransitionBody,
   ensureScenario2BundleWhenOpeningWithoutVignette,
   MOMENT_4_HANDOFF_NO_NAME_LEAD,
+  MOMENT_SUPPORT_HANDOFF_PIVOT,
   SCENARIO_1_TO_2_TRANSITION_FALLBACK,
   SCENARIO_2_TO_3_TRANSITION_FALLBACK,
 } from './interviewTransitionBundles';
-import { MOMENT_4_GRUDGE_QUESTION_TEXT } from './moment4ProbeLogic';
+import { MOMENT_4_GRUDGE_QUESTION_TEXT, MOMENT_SUPPORT_QUESTION_TEXT } from './moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from './probeAndScoringUtils';
 
 const STUB_S2 = 'SARAH_VIGNETTE\n\nWhat do you think is going on here?';
@@ -41,7 +43,7 @@ describe('buildClientScenarioBoundaryHandoffBundle', () => {
       STUB_M4_CARD,
     );
     expect(out).toContain(STUB_M4_CARD);
-    expect(out).toMatch(/three described situations|two questions left/i);
+    expect(out).toMatch(/three (described )?situations|three scenarios|three personal questions/i);
   });
 });
 
@@ -151,6 +153,16 @@ describe('buildMoment4ThresholdAnswerToMoment5Bundle', () => {
     expect(out).not.toMatch(REFLECTION_ANCHOR);
     expect(out).not.toContain('Great work');
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+  });
+});
+
+describe('buildMoment4ToSupportBundle', () => {
+  it('includes the standard personal-block pivot then the support question', () => {
+    const out = buildMoment4ToSupportBundle();
+    expect(out).toContain(MOMENT_SUPPORT_HANDOFF_PIVOT);
+    expect(out).toContain(MOMENT_SUPPORT_QUESTION_TEXT);
+    expect(out).not.toMatch(/one more question about you/i);
+    expect(out).not.toMatch(/wrap up/i);
   });
 });
 

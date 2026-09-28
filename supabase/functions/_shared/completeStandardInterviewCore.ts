@@ -9,7 +9,6 @@ import {
   computeGateResultCore,
   computeInterviewWeightedCompositeFromPillars,
   GATE_PASS_WEIGHTED_MIN,
-  REFERRAL_WEIGHTED_PASS_MIN,
 } from './computeGateResultCore.ts';
 import { scenarioCompositesToStorageJson } from './scenarioCompositeFloor.ts';
 import { generateAIReasoning } from './generateAIReasoning.ts';
@@ -607,14 +606,7 @@ export async function runCompleteStandardInterview(
     return { ok: true, attemptId, skipped: 'completion_gate_incomplete' };
   }
 
-  // Two separate `users` reads must use distinct binding names (Deno rejects duplicate `userRow` in one scope).
-  const { data: userWeights } = await supabase
-    .from('users')
-    .select('referral_boost_active')
-    .eq('id', userId)
-    .maybeSingle();
-  const weightedMin =
-    userWeights?.referral_boost_active === true ? REFERRAL_WEIGHTED_PASS_MIN : GATE_PASS_WEIGHTED_MIN;
+  const weightedMin = GATE_PASS_WEIGHTED_MIN;
 
   const typology = (row as { interview_typology_context?: string | null }).interview_typology_context ?? '';
   const userPrompt = buildScoringPrompt(

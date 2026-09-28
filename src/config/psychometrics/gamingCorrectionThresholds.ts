@@ -20,6 +20,11 @@ export const GAMING_STRAIGHT_LINE_SEVERE_MIN_COUNT = 3;
 export const GAMING_DIVERGENCE_SEVERE_MIN_COUNT = 3;
 export const GAMING_CORRECTION_LEVEL_SEVERE = 3;
 
+export {
+  GAMING_SCORE_AFFECTING_INSTRUMENTS,
+  isActiveNewUserModifierInstrument,
+} from './activeNewUserScoring';
+
 /** Psych vs interview divergence checks (gaming correction). */
 export const GAMING_RFQ_STRONG_MIN = 5.0;
 export const GAMING_ACCOUNTABILITY_STRONG_MIN = 7.0;

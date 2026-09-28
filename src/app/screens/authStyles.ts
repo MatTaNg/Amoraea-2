@@ -73,6 +73,22 @@ export const authStyles = StyleSheet.create({
     borderColor: 'rgba(82,142,220,0.08)',
     color: TEXT_SECONDARY,
   },
+  inputError: {
+    borderColor: ERROR_RED,
+  },
+  inputWithFieldError: {
+    marginBottom: 6,
+  },
+  fieldErrorText: {
+    fontFamily: FONT_UI,
+    fontSize: 12,
+    fontWeight: '300',
+    color: ERROR_RED,
+    marginBottom: 12,
+    letterSpacing: 0.5,
+    alignSelf: 'flex-start',
+    width: '100%',
+  },
   primaryButton: {
     width: '100%',
     paddingVertical: 15,
@@ -85,6 +101,9 @@ export const authStyles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { boxShadow: '0 8px 30px rgba(30,111,217,0.25)' }
       : { shadowColor: '#1E6FD9', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.25, shadowRadius: 8, elevation: 4 }),
+  },
+  primaryButtonDisabled: {
+    opacity: 0.45,
   },
   primaryButtonText: {
     fontFamily: FONT_UI,

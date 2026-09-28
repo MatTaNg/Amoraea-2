@@ -1,4 +1,5 @@
 import { textContainsScenarioBVignetteBody } from './emotionScenarioTransitionInference';
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
 import { normalizeApostrophes } from './disengagementProbeNormalize';
 import { looksLikeUnassessableScenarioAnswer } from './interviewAnswerRelevance';
 import { scenarioARepairAnswerAlreadySatisfiedInTranscript } from './interviewRepairRefusalDetection';
@@ -6,7 +7,10 @@ import {
   stripSkipAcceptedNextQuestionBridge,
   withSkipAcceptedNextQuestionBridgePreserved,
 } from './skipAcceptedNextQuestionBridge';
-import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from './probeAndScoringUtils';
+import {
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+} from './scenarioAContemptProbeCopy';
 import {
   transcriptContainsScenarioAContemptProbe,
   transcriptHasUserResponseAfterScenarioAContemptProbe,
@@ -20,9 +24,11 @@ import { coerceIncompleteInterviewClosingForTts } from './elongatingProbe';
 import { looksLikeScenarioAContemptProbeQuestion } from './scenarioAContemptProbeTextMatch';
 import {
   coerceScenarioBJamesRepairQuestionForTts,
+  isIncompleteScenarioBJamesRepairLeadSentence,
   looksLikeScenarioBJamesDifferentlyQuestion,
+  looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
-  SCENARIO_B_JAMES_REPAIR_CANONICAL,
+  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
   SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 import { stripBriefInterviewAcknowledgmentPrefixForRepeat } from './interviewRepeatRequestTarget';
@@ -84,6 +90,22 @@ export function coerceScenarioARepairQuestionForTts(text: string): string {
   return withSkipAcceptedNextQuestionBridgePreserved(text, (raw) => {
   const t = (raw ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return raw;
+  // Retired probe: never reintroduce the Ryan repair ask — drop fragments entirely.
+  if (isInterviewCanonicalProbeRetired('s1_repair')) {
+    if (
+      looksLikeScenarioARepairQuestion(t) ||
+      looksLikeScenarioARepairStreamFragment(t) ||
+      looksLikeScenarioARepairReAskQuestion(t) ||
+      isIncompleteScenarioARepairLeadSentence(t) ||
+      isTruncatedScenarioRepairQuestion(t) ||
+      isOrphanScenarioARepairEmmaTailFragment(t) ||
+      /\bthis with emma\?/i.test(t) ||
+      /\brepair this with emma\b/i.test(t)
+    ) {
+      return '';
+    }
+    return raw;
+  }
   // Preserve the second repair re-ask — coercing to the canonical first ask triggers duplicate_consecutive TTS suppression.
   if (looksLikeScenarioARepairReAskQuestion(t)) {
     return raw;
@@ -92,7 +114,8 @@ export function coerceScenarioARepairQuestionForTts(text: string): string {
     looksLikeScenarioARepairQuestion(t) ||
     isIncompleteScenarioARepairLeadSentence(t) ||
     isTruncatedScenarioRepairQuestion(t) ||
-    looksLikeScenarioARepairStreamFragment(t)
+    looksLikeScenarioARepairStreamFragment(t) ||
+    isOrphanScenarioARepairEmmaTailFragment(t)
   ) {
     return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
   }
@@ -129,6 +152,40 @@ export function shouldSkipScenarioARepairDraftNormalization(draft: string): bool
 export function normalizeScenarioARepairQuestionInAssistantDraft(draft: string): string {
   const t = (draft ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return draft;
+  if (isInterviewCanonicalProbeRetired('s1_repair')) {
+    if (
+      looksLikeScenarioARepairStreamFragment(t) ||
+      looksLikeScenarioARepairQuestion(t) ||
+      looksLikeScenarioARepairReAskQuestion(t) ||
+      isIncompleteScenarioARepairLeadSentence(t) ||
+      isTruncatedScenarioRepairQuestion(t) ||
+      isOrphanScenarioARepairEmmaTailFragment(t) ||
+      /\bthis with emma\?/i.test(t) ||
+      /\bwith emma\?/i.test(t) ||
+      /\brepair this with emma\b/i.test(t) ||
+      isDanglingInterviewRepeatLeadFragment(t)
+    ) {
+      const stripped = cleanupScenarioWrapAfterRepairStrip(
+        stripEmbeddedScenarioARepairQuestionAsk(stripScenarioARepairQuestion(t)),
+      );
+      if (
+        !stripped ||
+        looksLikeScenarioARepairQuestion(stripped) ||
+        looksLikeScenarioARepairStreamFragment(stripped) ||
+        looksLikeScenarioARepairReAskQuestion(stripped) ||
+        isIncompleteScenarioARepairLeadSentence(stripped) ||
+        isTruncatedScenarioRepairQuestion(stripped) ||
+        isOrphanScenarioARepairEmmaTailFragment(stripped) ||
+        /\bthis with emma\?/i.test(stripped) ||
+        /\bwith emma\?/i.test(stripped) ||
+        isDanglingInterviewRepeatLeadFragment(stripped)
+      ) {
+        return '';
+      }
+      return stripped;
+    }
+    return draft;
+  }
   if (shouldSkipScenarioARepairDraftNormalization(t)) return draft;
   if (looksLikeScenarioARepairReAskQuestion(t)) return draft;
   if (
@@ -160,17 +217,37 @@ export function looksLikeScenarioARepairReAskQuestion(text: string): boolean {
   return false;
 }
 
+/** Orphan Emma-tail left when a repair stem is stripped mid-phrase (e.g. "Got it. with Emma?"). */
+export function isOrphanScenarioARepairEmmaTailFragment(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  const low = normalizeApostrophes(t).toLowerCase();
+  if (/^with emma\??$/i.test(low)) return true;
+  if (
+    /^(?:got it|okay|ok|makes sense|fair|right|understood|alright|i hear you)\.?\s+with emma\??$/i.test(
+      low,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Remove a glued Scenario A repair ask from a longer paragraph (model echo / stacked asks). */
 export function stripEmbeddedScenarioARepairQuestionAsk(draft: string): string {
   const t0 = (draft ?? '').trim();
   if (!t0) return draft;
   let t = t0;
   const patterns: RegExp[] = [
-    /\bIf you were Ryan, how would you repair this\??\s*/gi,
+    // Include optional "with Emma" / "things with Emma" — otherwise strip leaves "Got it. things".
+    /\bIf you were Ryan, how would you repair this(?:\s+with\s+Emma)?\??\s*/gi,
+    /\bIf you were Ryan, how would you (?:actually )?repair things with Emma(?:\s+after this)?\??\s*/gi,
     /\bHow would you repair this relationship if you were Ryan\??\s*/gi,
     /\bWhat if you were Ryan\??\s*How would you repair this (?:situation|relationship)\??\s*/gi,
-    /\bIf you were Ryan[^?.!\n]{0,120}?repair[^?.!\n]{0,120}?[?.!]?\s*/gi,
-    /\bHow would you repair this (?:situation|relationship)\??\s*/gi,
+    // Greedy to the ask terminator so "repair things with Emma?" is not left as "things".
+    /\bIf you were Ryan[^.!?\n]*\brepair(?:ing|ed)?[^.!?\n]*[?.!]?\s*/gi,
+    /\bHow would you repair this (?:situation|relationship)?(?:\s+with\s+Emma)?\??\s*/gi,
+    /\bHow would you (?:actually )?repair things with Emma(?:\s+after this)?\??\s*/gi,
   ];
   let prev = '';
   while (prev !== t) {
@@ -179,10 +256,16 @@ export function stripEmbeddedScenarioARepairQuestionAsk(draft: string): string {
       t = t.replace(re, '').replace(/\s{2,}/g, ' ').trim();
     }
   }
-  return t
+  t = t
     .replace(/^\s*[.,;—–\-–]\s*/g, '')
     .replace(/\s+[.,;—–\-–]\s*$/g, '')
     .trim();
+  // Drop orphan Emma tails left when a longer stem matched incompletely.
+  if (isOrphanScenarioARepairEmmaTailFragment(t)) {
+    return '';
+  }
+  t = t.replace(/\bwith emma\??\s*$/i, '').replace(/\s{2,}/g, ' ').trim();
+  return t.replace(/\s+[.,;—–\-–]\s*$/g, '').trim();
 }
 
 /** After stripping a glued repair ask from a scenario wrap, remove dangling "and" / dash tails. */
@@ -201,10 +284,16 @@ export function stripScenarioARepairQuestion(text: string): string {
       /(?:^|\n)\s*What if you were Ryan\?[^\n]*How would you repair this (?:situation|relationship)\??\s*/gi,
       '\n',
     )
-    .replace(/(?:^|\n)\s*If you were Ryan[^?.!\n]*repair[^?.!\n]*[?.!]?\s*/gi, '\n')
+    .replace(
+      /(?:^|\n)\s*If you were Ryan[^.!?\n]*\brepair(?:ing|ed)?[^.!?\n]*(?:\s+with\s+Emma)?[?.!]?\s*/gi,
+      '\n',
+    )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
   cleaned = stripEmbeddedScenarioARepairQuestionAsk(cleaned);
+  if (isOrphanScenarioARepairEmmaTailFragment(cleaned)) {
+    return '';
+  }
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
 }
 
@@ -287,6 +376,9 @@ export function looksLikeScenarioARepairStreamFragment(text: string): boolean {
   if (/\bthis with emma\b/.test(low) || /\brepair this with emma\b/.test(low)) {
     return true;
   }
+  if (isOrphanScenarioARepairEmmaTailFragment(t)) {
+    return true;
+  }
   if (/\bhow would you\b/.test(low) && /\bemma\b/.test(low) && /\?\s*$/.test(t)) {
     return true;
   }
@@ -346,8 +438,8 @@ export function clearParallelTtsBatchIfScenarioARepairLeakBeforeContempt(args: {
   return { discarded: true, remaining: '' };
 }
 
-/** True on the turn after the user answers the Scenario A contempt probe — repair should be spoken. */
-export function shouldAllowScenarioARepairAfterContemptAnswer(params: {
+/** S1 hypothetical repair-as-Ryan probe is retired — handoff after contempt only. */
+export function shouldAllowScenarioARepairAfterContemptAnswer(_params: {
   currentScenario: number | null | undefined;
   currentMoment: number;
   scenarioAContemptProbeAsked: boolean;
@@ -360,36 +452,7 @@ export function shouldAllowScenarioARepairAfterContemptAnswer(params: {
   /** Latest user turn — when unassessable/off-topic, do not advance to repair. */
   userAnswer?: string | null;
 }): boolean {
-  if (!isScenarioAConstructProbeContext(params.currentScenario, params.currentMoment)) {
-    return false;
-  }
-  if (
-    typeof params.userAnswer === 'string' &&
-    params.userAnswer.trim() &&
-    looksLikeUnassessableScenarioAnswer(params.userAnswer)
-  ) {
-    return false;
-  }
-  const contemptSatisfiedWithoutProbe =
-    params.specificEmmaLineAlreadyAddressed &&
-    params.scenarioAContemptProbeAsked &&
-    !transcriptContainsScenarioAContemptProbe(params.messagesToUse);
-  const contemptAnswered =
-    transcriptHasUserResponseAfterScenarioAContemptProbe(params.messagesToUse) ||
-    contemptSatisfiedWithoutProbe ||
-    userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe({
-      scenarioAContemptProbeAsked: params.scenarioAContemptProbeAsked,
-      scenarioARepairQuestionAsked: params.scenarioARepairQuestionAsked,
-      lastDeliveredQuestionText: params.lastDeliveredQuestionText,
-      messagesToUse: params.messagesToUse,
-    });
-  return (
-    params.scenarioAContemptProbeAsked &&
-    !scenarioARepairAnswerAlreadySatisfiedInTranscript(params.messagesToUse) &&
-    (!params.replyingToScenarioAQ1 || params.specificEmmaLineAlreadyAddressed) &&
-    !params.shouldForceScenarioAContemptProbe &&
-    contemptAnswered
-  );
+  return false;
 }
 
 /** Block Ryan repair TTS until contempt is satisfied or the user already covered Emma's line in Q1. */
@@ -442,11 +505,14 @@ function coerceRepeatQuestionForActiveScenario(
     resolvedText === SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY ||
     looksLikeScenarioARepairQuestion(resolvedText) ||
     (/\bryan\b/.test(low) && /\brepair\b/.test(low));
-  if (!isScenarioARepairResolved || looksLikeScenarioBRepairAsJamesQuestion(resolvedText)) {
+  if (looksLikeScenarioBRepairAsJamesQuestion(resolvedText)) {
+    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+  }
+  if (!isScenarioARepairResolved) {
     return resolvedText;
   }
   const ack = extractBriefAckBeforeTruncatedRepairProbe(storedText);
-  return ack ? `${ack}. ${SCENARIO_B_JAMES_REPAIR_CANONICAL}` : SCENARIO_B_JAMES_REPAIR_CANONICAL;
+  return ack ? `${ack}. ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}` : SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
 }
 
 /** Expand truncated Ryan repair lead-ins and S3→M4 boundary wraps for repeat TTS. */
@@ -460,6 +526,37 @@ export function resolveInterviewQuestionRepeatTtsText(
 ): string {
   const t = stripSkipAcceptedNextQuestionBridge((storedText ?? '').trim());
   if (!t) return t;
+  // Check the original stored text before coerce strips/remaps retired probes.
+  if (
+    looksLikeScenarioBRepairAsJamesQuestion(t) ||
+    isIncompleteScenarioBJamesRepairLeadSentence(t) ||
+    looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(t)
+  ) {
+    if (options?.activeScenario === 3) {
+      return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+    }
+    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+  }
+  // Retired S1 repair: never re-speak the Ryan ask — remap bleed to contempt (S1) or active-scenario probe.
+  if (
+    isInterviewCanonicalProbeRetired('s1_repair') &&
+    (looksLikeScenarioARepairQuestion(t) ||
+      looksLikeScenarioARepairStreamFragment(t) ||
+      looksLikeScenarioARepairReAskQuestion(t) ||
+      isIncompleteScenarioARepairLeadSentence(t) ||
+      isTruncatedScenarioRepairQuestion(t) ||
+      isOrphanScenarioARepairEmmaTailFragment(t))
+  ) {
+    if (options?.activeScenario === 2 || options?.activeScenario === 3) {
+      const remapped = coerceRepeatQuestionForActiveScenario(
+        SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+        t,
+        options?.activeScenario,
+      );
+      return stripBriefInterviewAcknowledgmentPrefixForRepeat(remapped);
+    }
+    return stripBriefInterviewAcknowledgmentPrefixForRepeat(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+  }
   let resolved: string;
   if (isIncompleteScenarioARepairLeadSentence(t)) {
     resolved = coerceRepeatQuestionForActiveScenario(

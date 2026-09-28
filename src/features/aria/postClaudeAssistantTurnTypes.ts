@@ -33,6 +33,7 @@ export type PostClaudeAssistantTurnParams = {
   shouldForceScenarioBJamesRepairProbe: boolean;
   shouldForceScenarioCRepairProbe: boolean;
   shouldForceScenarioCSophiePerspectiveProbe: boolean;
+  shouldForceMoment4OrientationProbe: boolean;
   shouldForceMoment4ThresholdProbe: boolean;
   specificEmmaLineAlreadyAddressed: boolean;
   suppressForcedConstructProbesForMetaFrustration: boolean;

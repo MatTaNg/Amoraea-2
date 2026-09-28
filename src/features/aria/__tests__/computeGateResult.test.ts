@@ -6,7 +6,6 @@ import {
   computeGateResult,
   GATE_MARKER_BASE_WEIGHTS,
   GATE_PASS_WEIGHTED_MIN,
-  REFERRAL_WEIGHTED_PASS_MIN,
 } from '../computeGateResult';
 import { INTERVIEW_MARKER_IDS } from '../interviewMarkers';
 
@@ -66,12 +65,12 @@ describe('computeGateResult — research weights & floors', () => {
   it('Attempt 111: fails on floor breach (repair 3.8, accountability 4.0)', () => {
     const scores: Record<string, number> = {
       repair: 3.8,
-      contempt: 6.5,
-      attunement: 6.3,
+      destructive_conflict: 6.5,
+      responsiveness_support: 6.3,
       mentalizing: 7.2,
       appreciation: 5,
       accountability: 4,
-      commitment_threshold: 7.4,
+      commitment_persistence: 7.4,
     };
     const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
@@ -91,11 +90,11 @@ describe('computeGateResult — research weights & floors', () => {
   });
 
   /** Typical “solid but not stellar” mid-band above all floors. */
-  it('Attempts ~73–105 style: repair/accountability ~5.5–6, contempt high → pass', () => {
+  it('Attempts ~73–105 style: repair/accountability ~5.5–6, destructive conflict high → pass', () => {
     const scores = allAssessed(7);
     scores.repair = 5.5;
     scores.accountability = 5.5;
-    scores.contempt = 8.5;
+    scores.destructive_conflict = 8.5;
     scores.regulation = 6;
     const r = computeGateResult(scores);
     expect(r.pass).toBe(true);
@@ -103,13 +102,30 @@ describe('computeGateResult — research weights & floors', () => {
     expect(r.weightedScore).toBeGreaterThanOrEqual(GATE_PASS_WEIGHTED_MIN);
   });
 
-  it('fails contempt floor at 4.9 when assessed', () => {
+  it('fails destructive_conflict floor at 4.9 when assessed', () => {
     const scores = allAssessed(7);
-    scores.contempt = 4.9;
+    scores.destructive_conflict = 4.9;
     const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('floor_breach');
-    expect(r.failReason).toContain('contempt');
+    expect(r.failReason).toContain('destructive_conflict');
+  });
+
+  it('aliases stored contempt onto the destructive_conflict floor', () => {
+    const scores: Record<string, number> = {
+      mentalizing: 7,
+      accountability: 7,
+      repair: 7,
+      regulation: 7,
+      responsiveness_support: 7,
+      appreciation: 7,
+      commitment_persistence: 7,
+      contempt: 4.9,
+    };
+    const r = computeGateResult(scores);
+    expect(r.pass).toBe(false);
+    expect(r.reason).toBe('floor_breach');
+    expect(r.failReason).toContain('destructive_conflict');
   });
 
   it('regulation floor 4.5: 4.4 fails', () => {
@@ -182,20 +198,23 @@ describe('computeGateResult — research weights & floors', () => {
     expect(r.pass).toBe(true);
   });
 
-  it('referral boost: weightedPassMin 6.0 passes uniform 6.0 (would fail at 6.5)', () => {
+  it('default pass threshold: uniform 6.0 fails at GATE_PASS_WEIGHTED_MIN 6.5', () => {
     const scores = allAssessed(6.0);
-    const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
-    expect(r.pass).toBe(true);
-    expect(r.reason).toBe('pass');
-  });
-
-  it('referral boost: weightedPassMin 6.0 still fails uniform 5.9', () => {
-    const scores = allAssessed(5.9);
-    const r = computeGateResult(scores, null, { weightedPassMin: REFERRAL_WEIGHTED_PASS_MIN });
+    const r = computeGateResult(scores);
     expect(r.pass).toBe(false);
     expect(r.reason).toBe('weighted_below_threshold');
     expect(r.failReasonCodes).toContain('weighted_score');
-    expect(r.failReason).toContain('6.0');
+    expect(r.failReason).toContain(String(GATE_PASS_WEIGHTED_MIN));
+  });
+
+  it('default pass threshold: uniform 6.5 passes', () => {
+    const scores = allAssessed(6.5);
+    const r = computeGateResult(scores, null, {
+      scenarioPillarScoresByScenario: { 1: scores, 2: scores, 3: scores },
+    });
+    expect(r.weightedScore).toBe(6.5);
+    expect(r.pass).toBe(true);
+    expect(r.reason).toBe('pass');
   });
 
   it('personal moment concreteness: both absent modifier lowers threshold score', () => {

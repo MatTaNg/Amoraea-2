@@ -4,8 +4,12 @@ import {
   filterAdminUserCohort,
   getCohortActivityTimestampMs,
   localDayRangeFromYmd,
+  toggleAdminStatusFilterSelection,
   trimLaunchNotificationPhone,
+  userGroupInNearMissWeightedBand,
+  userGroupMatchesNeedsReviewQuickFilter,
   userGroupMatchesSearchQuery,
+  userMatchesAdminStatusFilter,
   userMatchesTimeRange,
 } from '@features/admin/interviewDashboard/adminInterviewDashboardCohortUtils';
 import type { UserGroup } from '@features/admin/interviewDashboard/adminInterviewDashboardTypes';
@@ -154,11 +158,224 @@ describe('adminInterviewDashboardCohortUtils', () => {
       humanVerifiedCohortFilter: 'all',
       uncertaintyBandFilter: 'all',
       hideIncomplete: true,
-      statusFilter: 'all',
+      statusFilters: [],
+      needsReviewQuickFilter: false,
       userSearchQuery: '',
     });
     expect(filtered).toHaveLength(1);
     expect(filtered[0]!.user.id).toBe('u1');
+  });
+
+  it('filterAdminUserCohort supports multi-select status exclusion (all except fail)', () => {
+    const pass = makeGroup(
+      { id: 'pass', interview_completed: true },
+      {
+        id: 'a-pass',
+        user_id: 'pass',
+        attempt_number: 1,
+        created_at: '2026-01-01T00:00:00.000Z',
+        completed_at: '2026-01-01T01:00:00.000Z',
+        weighted_score: 7,
+        passed: true,
+        reasoning_pending: null,
+        pillar_scores: { empathy: 7 },
+        override_status: null,
+        override_set_at: null,
+        scenario_composites: null,
+        scenario_floor_grandfather_review: null,
+        gate_fail_reasons: null,
+        gate_fail_detail: null,
+        mentalizing_repair_floor_grandfather_review: null,
+        review_flags: null,
+        score_modifier: null,
+        depth_signal_modifier: null,
+        modified_weighted_score: null,
+        psychometric_modifier_applied: null,
+        modified_weighted_score_with_psychometrics: null,
+        final_gate_pass: null,
+        ego_development_level: null,
+        defense_patterns: null,
+        moment_4_concreteness: null,
+        moment_5_concreteness: null,
+        personal_moment_emotional_vocab_low: null,
+        disclosure_calibration: null,
+        mentalizing_overcertainty_count: null,
+        emotion_recognition_raw_score: null,
+        emotion_recognition_score: null,
+        emotion_recognition_responses: null,
+        uncertainty_score: null,
+        requires_clarification_battery: null,
+        post_clarification_uncertainty_score: null,
+        uncertainty_pending_admin_review: null,
+      },
+    );
+    const fail = makeGroup(
+      { id: 'fail', interview_completed: true },
+      {
+        id: 'a-fail',
+        user_id: 'fail',
+        attempt_number: 1,
+        created_at: '2026-01-01T00:00:00.000Z',
+        completed_at: '2026-01-01T01:00:00.000Z',
+        weighted_score: 5,
+        passed: false,
+        reasoning_pending: null,
+        pillar_scores: { empathy: 5 },
+        override_status: null,
+        override_set_at: null,
+        scenario_composites: null,
+        scenario_floor_grandfather_review: null,
+        gate_fail_reasons: ['weighted_score'],
+        gate_fail_detail: { weighted_score: { score: 5, requiredMin: 6.5 } },
+        mentalizing_repair_floor_grandfather_review: null,
+        review_flags: null,
+        score_modifier: null,
+        depth_signal_modifier: null,
+        modified_weighted_score: null,
+        psychometric_modifier_applied: null,
+        modified_weighted_score_with_psychometrics: null,
+        final_gate_pass: null,
+        ego_development_level: null,
+        defense_patterns: null,
+        moment_4_concreteness: null,
+        moment_5_concreteness: null,
+        personal_moment_emotional_vocab_low: null,
+        disclosure_calibration: null,
+        mentalizing_overcertainty_count: null,
+        emotion_recognition_raw_score: null,
+        emotion_recognition_score: null,
+        emotion_recognition_responses: null,
+        uncertainty_score: null,
+        requires_clarification_battery: null,
+        post_clarification_uncertainty_score: null,
+        uncertainty_pending_admin_review: null,
+      },
+    );
+    const filtered = filterAdminUserCohort([pass, fail], {
+      timeRangeFilter: 'all',
+      customTimeFrom: '',
+      customTimeTo: '',
+      bookmarkCohortFilter: 'all',
+      humanVerifiedCohortFilter: 'all',
+      uncertaintyBandFilter: 'all',
+      hideIncomplete: false,
+      statusFilters: ['pass', 'almost', 'in_progress', 'no_result', 'incomplete'],
+      needsReviewQuickFilter: false,
+      userSearchQuery: '',
+    });
+    expect(filtered.map((g) => g.user.id)).toEqual(['pass']);
+  });
+
+  it('needs review quick filter matches near-miss band, almost, and review flags', () => {
+    const nearMiss = makeGroup(
+      { id: 'near', interview_completed: true },
+      {
+        id: 'a-near',
+        user_id: 'near',
+        attempt_number: 1,
+        created_at: '2026-01-01T00:00:00.000Z',
+        completed_at: '2026-01-01T01:00:00.000Z',
+        weighted_score: 6.2,
+        passed: false,
+        reasoning_pending: null,
+        pillar_scores: null,
+        override_status: null,
+        override_set_at: null,
+        scenario_composites: null,
+        scenario_floor_grandfather_review: null,
+        gate_fail_reasons: null,
+        gate_fail_detail: null,
+        mentalizing_repair_floor_grandfather_review: null,
+        review_flags: null,
+        score_modifier: null,
+        depth_signal_modifier: null,
+        modified_weighted_score: null,
+        psychometric_modifier_applied: null,
+        modified_weighted_score_with_psychometrics: null,
+        final_gate_pass: null,
+        ego_development_level: null,
+        defense_patterns: null,
+        moment_4_concreteness: null,
+        moment_5_concreteness: null,
+        personal_moment_emotional_vocab_low: null,
+        disclosure_calibration: null,
+        mentalizing_overcertainty_count: null,
+        emotion_recognition_raw_score: null,
+        emotion_recognition_score: null,
+        emotion_recognition_responses: null,
+        uncertainty_score: null,
+        requires_clarification_battery: null,
+        post_clarification_uncertainty_score: null,
+        uncertainty_pending_admin_review: null,
+      },
+    );
+    expect(userGroupInNearMissWeightedBand(nearMiss)).toBe(true);
+    expect(userGroupMatchesNeedsReviewQuickFilter(nearMiss)).toBe(true);
+
+    const flagged = makeGroup(
+      { id: 'flagged', interview_completed: true },
+      {
+        ...nearMiss.latestAttempt!,
+        id: 'a-flagged',
+        user_id: 'flagged',
+        review_flags: ['defense_pattern_review'],
+        weighted_score: 7,
+      },
+    );
+    expect(userGroupMatchesNeedsReviewQuickFilter({ ...flagged, latestAttempt: flagged.latestAttempt })).toBe(true);
+  });
+
+  it('toggleAdminStatusFilterSelection supports multi-select toggling', () => {
+    expect(toggleAdminStatusFilterSelection([], 'pass')).toEqual(['pass']);
+    expect(toggleAdminStatusFilterSelection(['pass'], 'pass')).toEqual([]);
+    expect(toggleAdminStatusFilterSelection(['pass', 'almost'], 'all')).toEqual([]);
+  });
+
+  it('userMatchesAdminStatusFilter detects flagged users', () => {
+    const g = makeGroup(
+      { interview_completed: true },
+      {
+        id: 'a1',
+        user_id: 'u1',
+        attempt_number: 1,
+        created_at: '2026-01-01T00:00:00.000Z',
+        completed_at: '2026-01-01T01:00:00.000Z',
+        weighted_score: 7,
+        passed: true,
+        reasoning_pending: null,
+        pillar_scores: null,
+        override_status: null,
+        override_set_at: null,
+        scenario_composites: null,
+        scenario_floor_grandfather_review: null,
+        gate_fail_reasons: null,
+        gate_fail_detail: null,
+        mentalizing_repair_floor_grandfather_review: null,
+        review_flags: ['defense_pattern_review'],
+        score_modifier: null,
+        depth_signal_modifier: null,
+        modified_weighted_score: null,
+        psychometric_modifier_applied: null,
+        modified_weighted_score_with_psychometrics: null,
+        final_gate_pass: null,
+        ego_development_level: null,
+        defense_patterns: null,
+        moment_4_concreteness: null,
+        moment_5_concreteness: null,
+        personal_moment_emotional_vocab_low: null,
+        disclosure_calibration: null,
+        mentalizing_overcertainty_count: null,
+        emotion_recognition_raw_score: null,
+        emotion_recognition_score: null,
+        emotion_recognition_responses: null,
+        uncertainty_score: null,
+        requires_clarification_battery: null,
+        post_clarification_uncertainty_score: null,
+        uncertainty_pending_admin_review: null,
+      },
+    );
+    expect(userMatchesAdminStatusFilter(g, 'flagged')).toBe(true);
+    expect(userMatchesAdminStatusFilter(g, 'fail')).toBe(false);
   });
 
   it('computeCohortHeaderStats counts started users', () => {

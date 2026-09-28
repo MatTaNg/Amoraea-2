@@ -5,15 +5,34 @@ export function computePreDealbreakerFinalScore(result: PairCompatibilityResult)
   if (result.subscores.dealbreakerMultiplier === 1) {
     return result.finalScore;
   }
+  const contributions = result.contributionBreakdown;
+  if (contributions) {
+    const core =
+      contributions.core.concreteLifeFit.contribution +
+      contributions.core.lifeDomainImportanceAlignment.contribution +
+      contributions.core.finance.contribution +
+      contributions.core.attachmentSimilarity.contribution +
+      contributions.core.valuesSimilarity.contribution;
+    const adjustments =
+      contributions.adjustments.anxiousAvoidant +
+      contributions.adjustments.sexualDiscrepancy +
+      contributions.adjustments.conflictStyle +
+      contributions.adjustments.politics +
+      contributions.adjustments.psychometricSoft +
+      contributions.adjustments.preferenceMismatch;
+    return Math.max(0, Math.min(1, core + adjustments));
+  }
   const b = result.breakdown;
   return Math.max(
     0,
     Math.min(
       1,
-      b.attachment +
-        b.values +
+      b.lifeDomain +
+        b.concreteLifeFit +
         b.semantic +
         b.finance +
+        b.attachment +
+        b.values +
         b.interviewProcess +
         b.baseline -
         b.capacityDiscount +
@@ -33,7 +52,14 @@ export type MatchInsight = {
 
 export function buildMatchInsights(result: PairCompatibilityResult): MatchInsight[] {
   const insights: MatchInsight[] = [];
-  const { subscores, adjustments, breakdown } = result;
+  const { subscores, adjustments } = result;
+
+  if (subscores.dealbreakerMultiplier === 0) {
+    insights.push({
+      kind: 'concern',
+      text: 'Pair is ineligible due to a hard dealbreaker mismatch.',
+    });
+  }
 
   if (subscores.attachment >= 0.8) {
     insights.push({ kind: 'strength', text: 'Strong attachment fit (secure or complementary styles).' });
@@ -56,13 +82,6 @@ export function buildMatchInsights(result: PairCompatibilityResult): MatchInsigh
     insights.push({ kind: 'concern', text: 'Finance misalignment (pooling, risk, or income bracket).' });
   }
 
-  if (breakdown.capacityDiscount >= 0.05) {
-    insights.push({
-      kind: 'concern',
-      text: `Relational capacity discount (−${(breakdown.capacityDiscount * 100).toFixed(1)} pts).`,
-    });
-  }
-
   if (adjustments.conflictStyle < -0.015) {
     insights.push({ kind: 'concern', text: 'Conflict style friction (demand–withdraw pattern).' });
   } else if (adjustments.conflictStyle > 0.01) {
@@ -74,13 +93,7 @@ export function buildMatchInsights(result: PairCompatibilityResult): MatchInsigh
   }
 
   if (adjustments.psychometricSoft < -0.02) {
-    insights.push({ kind: 'concern', text: 'Psychometric soft flags (NPI / entitlement divergence).' });
-  }
-
-  if (subscores.interviewProcess >= 0.85) {
-    insights.push({ kind: 'strength', text: 'Interview process pillars align (repair/accountability).' });
-  } else if (subscores.interviewProcess < 0.6) {
-    insights.push({ kind: 'concern', text: 'Interview process mismatch or elevated contempt risk.' });
+    insights.push({ kind: 'concern', text: 'Psychometric soft flags on live instruments.' });
   }
 
   if (insights.length === 0) {

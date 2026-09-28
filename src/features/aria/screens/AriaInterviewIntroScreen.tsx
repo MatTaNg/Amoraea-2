@@ -10,7 +10,7 @@ import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { Button } from '@ui/components/Button';
 
 const WHAT_TO_EXPECT_ITEMS = [
-  'The interview takes approximately 20 minutes — three scenarios and two short personal questions.',
+  'The interview takes approximately 20 minutes — three scenarios and three personal questions.',
   'We recommend you find a private area for this interview so you are not distracted.',
   'You can stop at any time. Progress is saved from the last completed scenario if you exit early.',
 ];

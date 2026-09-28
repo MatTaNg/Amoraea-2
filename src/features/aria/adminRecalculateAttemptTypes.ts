@@ -54,6 +54,8 @@ export type AdminRecalculateSuccess = {
   moment_4_concreteness: string | null;
   moment_5_concreteness: string | null;
   ego_development_level: number | null;
+  repair_source_signals: import('./aggregateMarkerScoresFromSlices').RepairSourceSignals;
+  regulation_source_signals: import('./aggregateMarkerScoresFromSlices').RegulationSourceSignals;
 };
 
 export type AdminRecalculateIncomplete = {

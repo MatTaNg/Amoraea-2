@@ -7,7 +7,6 @@ import {
 } from '@features/aria/scenarioAContemptProbeTtsStrip';
 import {
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
-  SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 
@@ -120,7 +119,7 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
     expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
-  it('delivers canonical James repair after differently Q2 without Claude', async () => {
+  it('does not deliver retired James repair after differently Q2', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -147,16 +146,9 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
       baseFlags({ shouldForceScenarioBJamesRepairProbe: true }),
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.s2RepairProbeDeliveredRef.current).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      expect.stringContaining(SCENARIO_B_JAMES_REPAIR_CANONICAL),
-      expect.anything(),
-    );
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      expect.not.stringMatching(/before the fight/i),
-      expect.anything(),
-    );
+    expect(result.handled).toBe(false);
+    expect(deps.s2RepairProbeDeliveredRef.current).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 
   it('delivers canonical S1 contempt without Claude when forced', async () => {
@@ -294,8 +286,8 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
       }),
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalledWith(
       SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
       expect.anything(),
     );
@@ -345,7 +337,7 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
     );
   });
 
-  it('delivers canonical S1 repair without Claude after contempt answer', async () => {
+  it('does not deliver retired S1 repair after contempt answer', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -373,11 +365,8 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
       baseFlags({ allowScenarioARepairAfterContemptAnswer: true }),
     );
 
-    expect(result.handled).toBe(true);
-    expect(deps.scenarioARepairQuestionAskedRef.current).toBe(true);
-    expect(deps.speakTextSafe).toHaveBeenCalledWith(
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-      expect.anything(),
-    );
+    expect(result.handled).toBe(false);
+    expect(deps.scenarioARepairQuestionAskedRef.current).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
   });
 });

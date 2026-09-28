@@ -56,40 +56,42 @@ export const PREF_PARTNER_SHARES_SEXUAL_INTERESTS_OPTIONS = [
 import {
   PARTNER_SPECIFIC_SEX_INTERESTS_DEALBREAKER_QUESTION,
 } from '@/shared/constants/dealbreakerQuestionCopy';
+import {
+  PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS,
+  parsePartnerAlignmentImportance,
+  partnerAlignmentImportanceLabel,
+  partnerAlignmentImportancePickerValue,
+} from '@/shared/constants/partnerAlignmentImportance';
 
 /** Shown in onboarding + edit profile dealbreakers. */
 export const PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION =
   PARTNER_SPECIFIC_SEX_INTERESTS_DEALBREAKER_QUESTION;
 
-/** Bottom sheet title when picking Yes/No for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION}. */
+/** Bottom sheet title when picking importance for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION}. */
 export const PREF_PARTNER_SPECIFIC_SEX_INTERESTS_SHEET_TITLE =
-  'Specific sex interests — dealbreaker?';
+  'Specific sex interests — how much of a dealbreaker?';
 
-/** Yes/No rows for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION} (onboarding inline pickers). */
-export const PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS: { label: string; value: string }[] = [
-  { label: 'Yes', value: 'Yes' },
-  { label: 'No', value: 'No' },
-];
+/** 4-level importance rows for {@link PREF_PARTNER_SHARES_SPECIFIC_SEX_INTERESTS_QUESTION}. */
+export const PARTNER_SPECIFIC_SEX_MUST_HAVE_YES_NO_OPTIONS = PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS;
 
-/** Picker labels for onboarding / edit profile; persisted values stay `Dealbreaker` / `No preference`. */
-export const PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO = ['Yes', 'No'] as const;
+/** Picker options for onboarding / edit profile; persisted values are 4-level slugs. */
+export const PREF_PARTNER_SHARES_SEXUAL_INTERESTS_YES_NO = PARTNER_ALIGNMENT_IMPORTANCE_OPTIONS;
 
-/** Selected row in Yes/No sheet (`''` when unset). */
+/** Selected row in the importance sheet (`''` when unset). Legacy Dealbreaker/Yes/No still resolve. */
 export function prefPartnerSharesSexualInterestsYesNoSelected(stored: string): string {
-  const t = String(stored ?? '').trim();
-  if (!t) return '';
-  return t === 'Dealbreaker' ? 'Yes' : 'No';
+  return partnerAlignmentImportancePickerValue(stored);
 }
 
-/** Maps Yes/No pick to stored preference. */
+/** Persists the 4-level slug (legacy Yes/No still accepted). */
 export function prefPartnerSharesSexualInterestsFromYesNo(yesNo: string): string {
-  return String(yesNo ?? '').trim() === 'Yes' ? 'Dealbreaker' : 'No preference';
+  return parsePartnerAlignmentImportance(yesNo) ?? String(yesNo ?? '').trim();
 }
 
-/** Trigger label: Yes / No / Select. */
+/** Trigger label: full importance copy, or Select. */
 export function labelForPrefPartnerSharesSexualInterestsYesNoPicker(stored: string): string {
-  const y = prefPartnerSharesSexualInterestsYesNoSelected(stored);
-  return y === '' ? 'Select' : y;
+  const parsed = parsePartnerAlignmentImportance(stored);
+  if (!parsed) return String(stored ?? '').trim() ? String(stored).trim() : 'Select';
+  return partnerAlignmentImportanceLabel(parsed) || 'Select';
 }
 
 /** Stored in `sexInterestCategories` as each option's `value` (stable slug). */

@@ -1,14 +1,21 @@
 import React, { useState } from 'react';
-import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
+import { ONBOARDING_STEP_SCREEN_EDGES } from './onboardingStepScreenEdges';
 import { View, Text, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
-import { Picker } from '@react-native-picker/picker';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { Input } from '@/shared/ui/Input';
 import { AvailabilityModal } from '@/screens/profile/components/AvailabilityModal';
 import { UserProfile, AvailabilitySlot } from '@/src/types';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './AvailabilityContactModal.styled';
+
+const CONTACT_PREFERENCE_OPTIONS = [
+  { label: 'SMS', value: 'sms' },
+  { label: 'WhatsApp', value: 'whatsapp' },
+  { label: 'Telegram', value: 'telegram' },
+  { label: 'Signal', value: 'signal' },
+] as const;
 
 interface AvailabilityContactModalProps {
   availability: AvailabilitySlot[];
@@ -32,8 +39,7 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
   onBack,
 }) => {
   const [showAvailabilityModal, setShowAvailabilityModal] = useState(false);
-  
-  // Create a temporary profile for the AvailabilityModal
+
   const tempProfile: UserProfile = {
     id: '',
     email: '',
@@ -41,19 +47,17 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
     tier: 'FREE',
     createdAt: new Date().toISOString(),
     availability: availability,
-    contactPreference: contactPreference as any,
+    contactPreference: contactPreference as UserProfile['contactPreference'],
     phoneNumber: phoneNumber,
   } as UserProfile;
 
   const handleAvailabilityUpdate = (updatedProfile: UserProfile) => {
-    // Update state without closing modal
     onAvailabilityChange(updatedProfile.availability || []);
     onContactPreferenceChange(updatedProfile.contactPreference || 'sms');
     onPhoneNumberChange(updatedProfile.phoneNumber || '');
   };
 
   const handleAvailabilitySave = async (updatedProfile: UserProfile) => {
-    // Save and close modal
     onAvailabilityChange(updatedProfile.availability || []);
     onContactPreferenceChange(updatedProfile.contactPreference || 'sms');
     onPhoneNumberChange(updatedProfile.phoneNumber || '');
@@ -66,7 +70,7 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
     <>
       <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
         <OnboardingHeader title="Set my availability and contact info" onBack={onBack} />
-        <ScrollView 
+        <ScrollView
           style={styles.scrollView}
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
@@ -78,28 +82,25 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
             </Text>
 
             <Button
-              title={availability.length > 0 
-                ? `Availability: ${availability.length} slot${availability.length !== 1 ? 's' : ''} set`
-                : "Set Availability & Contact Info"}
-              variant={availability.length > 0 ? "primary" : "outline"}
+              title={
+                availability.length > 0
+                  ? `Availability: ${availability.length} slot${availability.length !== 1 ? 's' : ''} set`
+                  : 'Set Availability & Contact Info'
+              }
+              variant={availability.length > 0 ? 'primary' : 'outline'}
               onPress={() => setShowAvailabilityModal(true)}
               style={styles.availabilityButton}
             />
 
-            {availability.length > 0 && (
+            {availability.length > 0 ? (
               <View style={styles.contactSection}>
-                <Text style={styles.contactLabel}>Best way to contact me:</Text>
-                <View style={styles.pickerContainer}>
-                  <Picker
-                    selectedValue={contactPreference}
-                    onValueChange={onContactPreferenceChange}
-                  >
-                    <Picker.Item label="SMS" value="sms" />
-                    <Picker.Item label="WhatsApp" value="whatsapp" />
-                    <Picker.Item label="Telegram" value="telegram" />
-                    <Picker.Item label="Signal" value="signal" />
-                  </Picker>
-                </View>
+                <AppSelect
+                  label="Best way to contact me:"
+                  value={contactPreference}
+                  options={[...CONTACT_PREFERENCE_OPTIONS]}
+                  onValueChange={onContactPreferenceChange}
+                  sheetTitle="Best way to contact me"
+                />
 
                 <Input
                   label="Phone Number"
@@ -109,7 +110,7 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
                   keyboardType="phone-pad"
                 />
               </View>
-            )}
+            ) : null}
           </View>
         </ScrollView>
         <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
@@ -141,4 +142,3 @@ export const AvailabilityContactModal: React.FC<AvailabilityContactModalProps> =
     </>
   );
 };
-

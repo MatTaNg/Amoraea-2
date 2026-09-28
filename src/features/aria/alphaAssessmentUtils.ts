@@ -19,7 +19,7 @@ function effectiveConstructValueForConsistency(
   pillarScores: ScenarioPillarSnapshot,
   keyEvidence: Record<string, string> | null | undefined
 ): number | null {
-  if (name === 'contempt') {
+  if (name === 'contempt' || name === 'destructive_conflict') {
     return combinedContemptFromScenarioPillarScores(pillarScores ?? null, keyEvidence ?? null);
   }
   const ev = keyEvidence?.[name];

@@ -222,6 +222,9 @@ export function buildAlphaModeAttemptInsertPayload(params: {
     personal_moment_emotional_vocab_low: false,
     ...emotionPersistAlpha,
     disclosure_calibration: disclosureCalibrationForAttempt ?? alphaScoringBaseline.disclosure_calibration,
+    repair_source_signals: gateAggregate.repairSourceSignals ?? null,
+    regulation_source_signals: gateAggregate.regulationSourceSignals ?? null,
+    weighted_score_breakdown: finalGateResult.weightedScoreBreakdown ?? null,
   };
 
   return insertPayload;

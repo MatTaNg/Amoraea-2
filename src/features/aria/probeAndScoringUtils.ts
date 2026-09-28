@@ -131,16 +131,20 @@ export {
 
 
 export {
+  S1_REPAIR_QUESTION,
+  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_RESUME_REPEAT_TTS_COPY,
+  SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
+  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+} from './scenarioAContemptProbeCopy';
+
+export {
   scenarioAEmmaVeryClearClosingLineMentioned,
   scenarioAEmmaVeryClearContemptReask,
-  SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
-  SCENARIO_A_CONTEMPT_PROBE_TTS_SPOKEN_COPY,
-  SCENARIO_A_CONTEMPT_PROBE_RESUME_REPEAT_TTS_COPY,
   coerceScenarioAContemptProbeToDeliveredCopy,
   coerceScenarioAContemptProbeForTts,
   scenarioAContemptProbeTtsSpokenText,
   scenarioAContemptProbeResumeRepeatTtsText,
-  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
   looksLikeScenarioAContemptProbeQuestion,
   isIncompleteScenarioAContemptProbeLeadSentence,
   mergeDeferredScenarioAContemptProbeLeadWithNextSentence,

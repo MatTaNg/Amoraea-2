@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import {
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
 } from '@features/aria/moment4ProbeLogic';
@@ -19,7 +20,7 @@ const UNNAMED_CLOSE_FRIEND_GRUDGE =
   "Yeah, I had a close friend about three years ago who I felt completely betrayed by. She shared something I told her in confidence with a group of mutual friends. I was furious and I pulled back for about six months. What I eventually realized was I never actually told her explicitly that I needed that kept private. I assumed it was obvious she didn't handle it well, but I was crying, carrying some responsibility for the gap in expectations too. We talked it out, but it's not the same friendship it was, but there's no active bitterness.";
 
 describe('runPreClaudeMoment4SpecificityGate', () => {
-  it('pre-injects M4 commitment threshold when grudge answer is specific (skips Claude API)', async () => {
+  it('pre-injects M4 commitment orientation when grudge answer is specific (skips Claude API)', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
     const setReferenceCardScenario = jest.fn();
@@ -47,28 +48,28 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(true);
-    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
-    expect(deps.moment4ThresholdProbeAskedRef.current).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           role: 'assistant',
-          content: expect.stringMatching(/work through versus.*walk away/i),
+          content: expect.stringMatching(/keep working on it rather than walking away/i),
         }),
       ]),
     );
     expect(setReferenceCardScenario).toHaveBeenCalledWith({
       label: 'Personal reflection',
-      text: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+      text: MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
     });
     expect(setReferenceCardPrompt).toHaveBeenCalledWith(null);
   });
 
-  it('heals lagged moment refs and injects canonical threshold after grudge (not invented paraphrase)', async () => {
+  it('heals lagged moment refs and injects canonical orientation after grudge (not invented paraphrase)', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
     const deps = createMockPreClaudeDeps({
@@ -98,7 +99,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(deps.personalHandoffInjectedRef.current).toBe(true);
     expect(result.handled).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/At what point do you decide when a relationship/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
     expect(speakTextSafe).not.toHaveBeenCalledWith(
@@ -131,6 +132,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(false);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4ClientSpecificityProbeInjectedRef.current).toBe(true);
     expect(deps.moment4ExpectingPostSpecificityUserTurnRef.current).toBe(true);
@@ -153,7 +155,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
   });
 
-  it('does not inject M4 threshold when orchestrator owns threshold delivery', async () => {
+  it('does not inject M4 orientation when orchestrator owns commitment delivery', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
@@ -175,7 +177,8 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(false);
-    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
@@ -200,9 +203,10 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(true);
-    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
   });
@@ -233,9 +237,10 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
 
     expect(result.handled).toBe(true);
     expect(result.answeringAfterMoment4SpecificityProbe).toBe(true);
-    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
   });
@@ -270,10 +275,11 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
 
     expect(result.handled).toBe(true);
     expect(result.answeringAfterMoment4SpecificityProbe).toBe(true);
-    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
   });
@@ -300,10 +306,11 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(true);
-    expect(result.shouldForceMoment4ThresholdProbe).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(true);
+    expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
   });
@@ -332,7 +339,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.handled).toBe(true);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/work through versus.*walk away/i),
+      expect.stringMatching(/keep working on it rather than walking away/i),
       expect.any(Object),
     );
   });
@@ -360,6 +367,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(false);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(false);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(false);
     expect(speakTextSafe).not.toHaveBeenCalled();
@@ -392,6 +400,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(true);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(false);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
@@ -452,6 +461,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     );
 
     expect(result.handled).toBe(false);
+    expect(result.shouldForceMoment4OrientationProbe).toBe(false);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).not.toHaveBeenCalled();
   });

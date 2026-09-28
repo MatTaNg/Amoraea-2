@@ -26,6 +26,7 @@ import {
 import { remoteLog } from '@utilities/remoteLog';
 
 import { defaultScenarioDisplayName } from '@features/aria/scenarioDisplayNames';
+import { applyUnpromptedScenarioRepairAbsence } from '@features/aria/sanitizeUnpromptedScenarioRepairAbsence';
 
 function defaultScenarioPillarConfidence(
   score: number | null | undefined,
@@ -366,6 +367,12 @@ export function postProcessScenarioModelScore(params: {
       rawModelText: raw,
     });
   }
+
+  applyUnpromptedScenarioRepairAbsence({
+    parsedScenario,
+    scenarioNumber,
+    scoringMessages,
+  });
 
   return parsedScenario;
 }

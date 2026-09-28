@@ -635,6 +635,8 @@ describe('resolveMoment4ShowScenarioReferenceCard', () => {
     "Now we'll shift to something more personal. Have you ever held a grudge against someone, or had someone in your life you really didn't like?";
   const thresholdProbe =
     'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?';
+  const orientationProbe =
+    'Think of a relationship you cared about — when things got difficult, what made you keep working on it rather than walking away?';
   const situation3Repair = 'How would you repair this situation if you were Daniel?';
 
   it('replaces grudge card with walk-away question in card body (client inject path)', () => {
@@ -731,5 +733,45 @@ describe('resolveMoment4ShowScenarioReferenceCard', () => {
         { grudgeCardBody },
       ),
     ).toEqual({ active: false });
+  });
+
+  it('prefers keep-investing orientation over walk-away threshold when both are in transcript', () => {
+    const transcript = [
+      { role: 'assistant', content: grudgeHandoff },
+      { role: 'user', content: 'I had a grudge with my friend.' },
+      { role: 'assistant', content: thresholdProbe },
+      { role: 'user', content: 'When trust breaks I usually try to repair first.' },
+    ];
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(transcript, {
+        grudgeCardBody,
+        currentSpokenContent: orientationProbe,
+      }),
+    ).toEqual({
+      active: true,
+      cardBodyText: orientationProbe,
+    });
+  });
+
+  it('prefers partner-support question over commitment follow-ups when support is active', () => {
+    const supportProbe =
+      'Think of a time when a partner, or someone you care about, heard some bad news, needed support from you, or was really stressed. What happened, and what did you do?';
+    const transcript = [
+      { role: 'assistant', content: grudgeHandoff },
+      { role: 'user', content: 'I had a grudge with my friend.' },
+      { role: 'assistant', content: thresholdProbe },
+      { role: 'user', content: 'When trust breaks I leave.' },
+      { role: 'assistant', content: orientationProbe },
+      { role: 'user', content: 'I stayed because I believed we could grow together.' },
+    ];
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(transcript, {
+        grudgeCardBody,
+        currentSpokenContent: supportProbe,
+      }),
+    ).toEqual({
+      active: true,
+      cardBodyText: supportProbe,
+    });
   });
 });

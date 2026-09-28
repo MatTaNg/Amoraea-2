@@ -22,6 +22,15 @@ export type AdminCompatDirectoryUser = {
   email: string | null;
   phone: string | null;
   displayLabel: string;
+  /** Interview completed + passed + profile complete — default directory pool. */
+  matchEligible?: boolean;
+};
+
+export type AdminCompatibilityDirectory = {
+  /** Full user base (excluding test seeds), with `matchEligible` flags. */
+  all: AdminCompatDirectoryUser[];
+  /** Subset usable for real matching / event invites. */
+  eligible: AdminCompatDirectoryUser[];
 };
 
 export type ResolvedAdminCompatUser = AdminCompatDirectoryUser & {
@@ -43,7 +52,12 @@ export type AdminBatchMatchPair = AdminPairScoreResult & {
   rank: number;
 };
 
+export type AdminBatchMatchMode = 'all_pairs' | 'one_vs_list';
+
 export type AdminBatchMatchResult = {
+  mode: AdminBatchMatchMode;
+  /** Set for one-vs-list mode — the anchor user ranked against the pasted list. */
+  anchor?: AdminCompatDirectoryUser;
   pairs: AdminBatchMatchPair[];
   unmatched: AdminCompatDirectoryUser[];
   notFound: string[];
@@ -82,32 +96,70 @@ export function parseIdentifierList(raw: string): string[] {
 }
 
 async function fetchAdminCompatibilityUserRows(): Promise<AdminCompatDirectoryUser[]> {
+  return fetchAdminCompatibilityUserRowsAnnotated();
+}
+
+async function annotateMatchEligibility(
+  rows: AdminCompatDirectoryUser[],
+  rawRows: Array<{
+    id: string;
+    interview_completed?: boolean | null;
+    interview_passed?: boolean | null;
+  }>,
+): Promise<AdminCompatDirectoryUser[]> {
+  const interviewById = new Map(
+    rawRows.map((row) => [
+      row.id,
+      {
+        interviewCompleted: row.interview_completed === true,
+        interviewPassed: row.interview_passed === true,
+      },
+    ]),
+  );
+  const profileCompleteIds = await fetchMatchEligibleUserIds(
+    supabase,
+    rows.map((row) => row.id),
+  );
+  return rows.map((row) => {
+    const interview = interviewById.get(row.id);
+    const matchEligible =
+      profileCompleteIds.has(row.id) &&
+      interview?.interviewCompleted === true &&
+      interview?.interviewPassed === true;
+    return { ...row, matchEligible };
+  });
+}
+
+async function fetchAdminCompatibilityUserRowsAnnotated(): Promise<AdminCompatDirectoryUser[]> {
   const seedUserIds = await fetchCompatibilityTestSeedUserIds(supabase);
 
   const { data, error } = await supabase
     .from('users')
-    .select('id, email, launch_notification_phone, display_name, name, full_name')
+    .select(
+      'id, email, launch_notification_phone, display_name, name, full_name, interview_completed, interview_passed',
+    )
     .order('created_at', { ascending: false });
 
   if (error) throw new Error(error.message);
 
-  return (data ?? [])
-    .filter((row) => !isCompatibilityTestSeedUser({ id: row.id, email: row.email }, seedUserIds))
-    .map((row) => ({
-      id: row.id,
-      email: row.email ?? null,
-      phone: row.launch_notification_phone ?? null,
-      displayLabel: displayLabelFromRow(row),
-    }));
+  const filtered = (data ?? []).filter(
+    (row) => !isCompatibilityTestSeedUser({ id: row.id, email: row.email }, seedUserIds),
+  );
+  const base = filtered.map((row) => ({
+    id: row.id,
+    email: row.email ?? null,
+    phone: row.launch_notification_phone ?? null,
+    displayLabel: displayLabelFromRow(row),
+  }));
+  return annotateMatchEligibility(base, filtered);
 }
 
-export async function fetchAdminCompatibilityDirectory(): Promise<AdminCompatDirectoryUser[]> {
-  const rows = await fetchAdminCompatibilityUserRows();
-  const eligibleIds = await fetchMatchEligibleUserIds(
-    supabase,
-    rows.map((row) => row.id),
-  );
-  return rows.filter((row) => eligibleIds.has(row.id));
+export async function fetchAdminCompatibilityDirectory(): Promise<AdminCompatibilityDirectory> {
+  const all = await fetchAdminCompatibilityUserRowsAnnotated();
+  return {
+    all,
+    eligible: all.filter((user) => user.matchEligible === true),
+  };
 }
 
 export function filterDirectorySuggestions(
@@ -219,14 +271,50 @@ function greedyOneToOneMatching(candidates: ScoredPairCandidate[]): AdminBatchMa
   return pairs;
 }
 
-export async function runAdminBatchMatching(rawInput: string): Promise<AdminBatchMatchResult> {
-  const identifiers = parseIdentifierList(rawInput);
-  const allUsers = await fetchAdminCompatibilityUserRows();
-  const eligibleIds = await fetchMatchEligibleUserIds(
-    supabase,
-    allUsers.map((user) => user.id),
-  );
+function directoryUserSummary(user: ResolvedAdminCompatUser | AdminCompatDirectoryUser): AdminCompatDirectoryUser {
+  return {
+    id: user.id,
+    email: user.email,
+    phone: user.phone,
+    displayLabel: user.displayLabel,
+    matchEligible: user.matchEligible,
+  };
+}
 
+function scoreLoadedPair(userA: ResolvedAdminCompatUser, userB: ResolvedAdminCompatUser): ScoredPairCandidate {
+  const result = computePairCompatibilityScore(userA.mapped, userB.mapped);
+  const preDealbreakerScore = computePreDealbreakerFinalScore(result);
+  const dealbreakerFailed = result.subscores.dealbreakerMultiplier === 0;
+  const dealbreakerReasons = dealbreakerFailed
+    ? explainDealbreakerBlockers(userA.mapped.dealbreaker, userB.mapped.dealbreaker)
+    : [];
+
+  return {
+    userA: directoryUserSummary(userA),
+    userB: directoryUserSummary(userB),
+    result,
+    preDealbreakerScore,
+    effectiveScore: result.finalScore,
+    dealbreakerFailed,
+    dealbreakerReasons,
+    insights: buildMatchInsights(result),
+    sortScore: preDealbreakerScore,
+  };
+}
+
+type ResolvedBatchList = {
+  resolved: AdminCompatDirectoryUser[];
+  notFound: string[];
+  profileIncomplete: string[];
+  duplicateIdentifiers: string[];
+};
+
+function resolveBatchListMembers(
+  rawInput: string,
+  allUsers: AdminCompatDirectoryUser[],
+  options?: { excludeUserId?: string },
+): ResolvedBatchList {
+  const identifiers = parseIdentifierList(rawInput);
   const seen = new Set<string>();
   const duplicateIdentifiers: string[] = [];
   const uniqueIdentifiers: string[] = [];
@@ -249,7 +337,11 @@ export async function runAdminBatchMatching(rawInput: string): Promise<AdminBatc
       notFound.push(id);
       continue;
     }
-    if (!eligibleIds.has(user.id)) {
+    if (options?.excludeUserId && user.id === options.excludeUserId) {
+      duplicateIdentifiers.push(id);
+      continue;
+    }
+    if (user.matchEligible !== true) {
       profileIncomplete.push(id);
       continue;
     }
@@ -260,8 +352,25 @@ export async function runAdminBatchMatching(rawInput: string): Promise<AdminBatc
     resolved.push(user);
   }
 
+  return { resolved, notFound, profileIncomplete, duplicateIdentifiers };
+}
+
+export async function runAdminBatchMatching(rawInput: string): Promise<AdminBatchMatchResult> {
+  const allUsers = await fetchAdminCompatibilityUserRows();
+  const { resolved, notFound, profileIncomplete, duplicateIdentifiers } = resolveBatchListMembers(
+    rawInput,
+    allUsers,
+  );
+
   if (resolved.length < 2) {
-    return { pairs: [], unmatched: resolved, notFound, profileIncomplete, duplicateIdentifiers };
+    return {
+      mode: 'all_pairs',
+      pairs: [],
+      unmatched: resolved,
+      notFound,
+      profileIncomplete,
+      duplicateIdentifiers,
+    };
   }
 
   const loaded = await Promise.all(resolved.map((u) => loadMappedUser(u)));
@@ -269,26 +378,7 @@ export async function runAdminBatchMatching(rawInput: string): Promise<AdminBatc
   const candidates: ScoredPairCandidate[] = [];
   for (let i = 0; i < loaded.length; i++) {
     for (let j = i + 1; j < loaded.length; j++) {
-      const userA = loaded[i]!;
-      const userB = loaded[j]!;
-      const result = computePairCompatibilityScore(userA.mapped, userB.mapped);
-      const preDealbreakerScore = computePreDealbreakerFinalScore(result);
-      const dealbreakerFailed = result.subscores.dealbreakerMultiplier === 0;
-      const dealbreakerReasons = dealbreakerFailed
-        ? explainDealbreakerBlockers(userA.mapped.dealbreaker, userB.mapped.dealbreaker)
-        : [];
-
-      candidates.push({
-        userA: { id: userA.id, email: userA.email, phone: userA.phone, displayLabel: userA.displayLabel },
-        userB: { id: userB.id, email: userB.email, phone: userB.phone, displayLabel: userB.displayLabel },
-        result,
-        preDealbreakerScore,
-        effectiveScore: result.finalScore,
-        dealbreakerFailed,
-        dealbreakerReasons,
-        insights: buildMatchInsights(result),
-        sortScore: preDealbreakerScore,
-      });
+      candidates.push(scoreLoadedPair(loaded[i]!, loaded[j]!));
     }
   }
 
@@ -300,5 +390,61 @@ export async function runAdminBatchMatching(rawInput: string): Promise<AdminBatc
   }
   const unmatched = resolved.filter((u) => !matchedIds.has(u.id));
 
-  return { pairs, unmatched, notFound, profileIncomplete, duplicateIdentifiers };
+  return {
+    mode: 'all_pairs',
+    pairs,
+    unmatched,
+    notFound,
+    profileIncomplete,
+    duplicateIdentifiers,
+  };
+}
+
+export async function runAdminOneVsListMatching(
+  anchorIdentifier: string,
+  listInput: string,
+): Promise<AdminBatchMatchResult> {
+  const allUsers = await fetchAdminCompatibilityUserRows();
+  const anchor = resolveDirectoryUser(allUsers, anchorIdentifier.trim());
+  if (!anchor) {
+    throw new Error(
+      'Could not resolve anchor user — pick from the directory or enter exact email/phone.',
+    );
+  }
+
+  const { resolved, notFound, profileIncomplete, duplicateIdentifiers } = resolveBatchListMembers(
+    listInput,
+    allUsers,
+    { excludeUserId: anchor.id },
+  );
+
+  if (resolved.length === 0) {
+    return {
+      mode: 'one_vs_list',
+      anchor,
+      pairs: [],
+      unmatched: [],
+      notFound,
+      profileIncomplete,
+      duplicateIdentifiers,
+    };
+  }
+
+  const loadedAnchor = await loadMappedUser(anchor);
+  const loadedCandidates = await Promise.all(resolved.map((u) => loadMappedUser(u)));
+
+  const pairs: AdminBatchMatchPair[] = loadedCandidates
+    .map((candidate) => scoreLoadedPair(loadedAnchor, candidate))
+    .sort((a, b) => b.sortScore - a.sortScore)
+    .map((pair, index) => ({ ...pair, rank: index + 1 }));
+
+  return {
+    mode: 'one_vs_list',
+    anchor,
+    pairs,
+    unmatched: [],
+    notFound,
+    profileIncomplete,
+    duplicateIdentifiers,
+  };
 }

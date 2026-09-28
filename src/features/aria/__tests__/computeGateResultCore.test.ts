@@ -178,7 +178,7 @@ describe('computeGateResultCore', () => {
     expect(r.pass).toBe(false);
   });
 
-  it('referral-weighted pass applies post-penalty score vs weightedPassMin', () => {
+  it('custom weightedPassMin override applies to post-penalty score', () => {
     const pillars = allMarkers(6.4);
     const r = computeGateResultCore(pillars, null, {
       weightedPassMin: 6.0,

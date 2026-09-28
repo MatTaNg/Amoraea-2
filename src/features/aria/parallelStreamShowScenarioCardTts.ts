@@ -6,7 +6,7 @@ import { SCENARIO_3_OPENING } from '@features/aria/interviewScenarioOpeningStrea
 import {
   applySituation3ExactModalPrompt,
   isSituation3ModalAdvancedPastOpening,
-  readSituation3DeliveryState,
+  readSituation3DeliveryStateForModal,
 } from '@features/aria/situation3ExactModalPrompt';
 import { SCENARIO_1_OPENING, SCENARIO_2_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
 import {
@@ -42,7 +42,7 @@ import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic'
 import { triggerCompletedScenarioScoringIfNeeded } from '@features/aria/runScenarioBoundaryScoring';
 import { advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard } from '@features/aria/interviewScenarioRefSync';
 import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
-import { scenarioBJamesRepairProbeAlreadySatisfied } from '@features/aria/scenarioBProbeLogic';
+import { scenarioBMinimumEngagementForHandoff } from '@features/aria/scenarioBProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 import { scenarioCRepairConstructStillPending } from '@features/aria/scenarioCPromptDetection';
 import { setTtsPlaybackActive } from '@utilities/sessionLogging';
@@ -125,12 +125,12 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
 
     if (
       kind === 'situation_3' &&
-      !scenarioBJamesRepairProbeAlreadySatisfied(params.messagesToUse)
+      !scenarioBMinimumEngagementForHandoff(params.messagesToUse)
     ) {
       void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
         interviewSessionId: deps.interviewSessionIdRef.current,
         kind,
-        reason: 's2_james_repair_incomplete',
+        reason: 's2_james_differently_incomplete',
       });
       return;
     }
@@ -463,12 +463,13 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
       }
       deps.setReferenceCardScenario(s3Scenario);
       deps.setInterviewUiPhase('scenario_active');
-      const s3Delivery = readSituation3DeliveryState(
-        params.messagesToUse.map((m) => ({
-          role: m.role,
-          content: stripControlTokens(m.content ?? '').trim(),
-        })),
-      );
+      const assistantForModal = params.messagesToUse.map((m) => ({
+        role: m.role,
+        content: stripControlTokens(m.content ?? '').trim(),
+      }));
+      const s3Delivery = readSituation3DeliveryStateForModal(assistantForModal, {
+        danielRepairDelivered: deps.s3RepairProbeDeliveredRef.current,
+      });
       const s3AdvancedPastOpening = isSituation3ModalAdvancedPastOpening(
         s3Delivery,
         deps.lastQuestionTextRef?.current ?? null,
@@ -479,15 +480,7 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         }
         deps.setReferenceCardPrompt(SCENARIO_3_OPENING);
       } else {
-        applySituation3ExactModalPrompt(
-          deps,
-          params.messagesToUse.map((m) => ({
-            role: m.role,
-            content: stripControlTokens(m.content ?? '').trim(),
-          })),
-          null,
-          s3Delivery,
-        );
+        applySituation3ExactModalPrompt(deps, assistantForModal, null, s3Delivery);
       }
     } else {
       const modalQuestion = getLastSubstantiveScenarioModalQuestion([

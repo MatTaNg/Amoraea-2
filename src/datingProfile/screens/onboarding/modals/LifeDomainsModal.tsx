@@ -10,6 +10,7 @@ import {
   type OnboardingLifeDomainValues,
 } from '@/shared/components/LifeDomainDistribution';
 import { styles } from './LifeDomainsModal.styled';
+import { ONBOARDING_LIFE_DOMAINS_DESCRIPTION } from './onboardingStepCopy';
 
 interface LifeDomainsModalProps {
   lifeDomains?: {
@@ -64,7 +65,7 @@ export const LifeDomainsModal: React.FC<LifeDomainsModalProps> = ({
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            Distribute 100 points across the 5 life domains to indicate how important each is to you. All domains must add up to exactly 100.
+            {ONBOARDING_LIFE_DOMAINS_DESCRIPTION}
           </Text>
 
           <View style={styles.rankingWrapper}>

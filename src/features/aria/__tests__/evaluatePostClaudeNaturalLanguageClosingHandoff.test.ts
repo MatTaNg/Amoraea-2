@@ -456,4 +456,55 @@ describe('evaluatePostClaudeNaturalLanguageClosingHandoff', () => {
     expect(result.mustRunEmotionTransitionPath).toBe(true);
     expect(result.shouldFailsafeComplete).toBe(false);
   });
+
+  it('does not failsafe-complete after support/stressed answers when Moment 5 was never asked', () => {
+    const closingDisplay =
+      'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Matt.';
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: mockRef(4),
+      moment5QuestionDeliveredRef: mockRef(false),
+      moment5PrimaryAnchorDeliveredSessionRef: mockRef(false),
+      moment5PostPromptUserTurnCountRef: mockRef(0),
+      isInterviewCompleteRef: mockRef(false),
+      personalHandoffInjectedRef: mockRef(true),
+      parallelStreamingTtsRef: mockRef({
+        ...createInitialParallelStreamingTtsState(),
+        spokenCompleteText: closingDisplay,
+      }),
+    });
+    const params = createMockPostClaudeParams({
+      messagesToUse: [
+        {
+          role: 'assistant',
+          content:
+            'Think of a time when a partner, or someone you care about, heard some bad news, needed support from you, or was really stressed. What happened, and what did you do?',
+        },
+        { role: 'user', content: "I told her it'll be okay." },
+        {
+          role: 'assistant',
+          content: 'How did you know what kind of support they needed from you?',
+        },
+        { role: 'user', content: 'I asked her.' },
+      ],
+      textToParallelStream: { full: closingDisplay, spokenStarted: true, closingSpoken: true },
+    });
+
+    const result = evaluatePostClaudeNaturalLanguageClosingHandoff(
+      deps,
+      params,
+      {
+        strippedText: closingDisplay,
+        parallelStreamingPlaybackUsed: true,
+        rawApiHadInterviewComplete: false,
+      },
+      closingDisplay,
+      [...params.messagesToUse, { role: 'assistant', content: closingDisplay }],
+      baseEmotionDiag,
+    );
+
+    expect(result.closingLooksFinal).toBe(true);
+    expect(result.closeGateForFailsafe.hasMoment5PrimaryAnchorInTranscript).toBe(false);
+    expect(result.closeGateForFailsafe.moment5CloseAllowed).toBe(false);
+    expect(result.shouldFailsafeComplete).toBe(false);
+  });
 });

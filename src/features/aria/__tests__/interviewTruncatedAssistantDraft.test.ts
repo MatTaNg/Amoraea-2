@@ -31,6 +31,36 @@ describe('interviewTruncatedAssistantDraft', () => {
     expect(out).toMatch(/here'?s the next situation/i);
   });
 
+  it('promotes retired S1 repair ask to S1→S2 after Q1 Emma clear-line contempt coverage', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: "What's going on between these two?",
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      },
+      {
+        role: 'user',
+        content:
+          "Ryan should not have taken that call. Emma is being condescending when she says you've made that very clear.",
+        scenarioNumber: 1,
+        interviewMoment: 1,
+      },
+    ];
+    const out = coerceInterviewAssistantDraftForSpeak(
+      'If you were Ryan, how would you repair this?',
+      {
+        interviewMoment: 1,
+        currentScenario: 1,
+        firstName: 'Matt',
+        messages,
+      },
+    );
+    expect(out.trim().length).toBeGreaterThan(0);
+    expect(out).not.toMatch(/if you were ryan/i);
+    expect(out).toMatch(/Sarah has been job hunting/i);
+  });
+
   it('detects M4 threshold paraphrase truncated mid-clause from session logs', () => {
     const truncated = "Got it. When things go sideways with someone — whether it's that";
     expect(isGenericTruncatedAssistantDraft(truncated)).toBe(true);

@@ -4,7 +4,7 @@ import { computeGateResult } from '@features/aria/computeGateResult';
 import type { InterviewResults } from '@features/aria/interviewResultsTypes';
 import { FALLBACK_MARKER_SCORES_MID } from '@features/aria/scoreInterviewModuleConstants';
 import type { ScoreInterviewDeps } from '@features/aria/scoreInterviewTypes';
-import { resolveWeightedPassMinAfterReferralEffects } from '@features/referrals/referralInterview';
+import { GATE_PASS_WEIGHTED_MIN } from '@features/aria/computeGateResult';
 import { remoteLog } from '@utilities/remoteLog';
 
 export type RunScoreInterviewErrorCatchFallbackParams = {
@@ -25,7 +25,6 @@ export async function runScoreInterviewErrorCatchFallback(
     stack: err instanceof Error ? err.stack?.slice(0, 500) : undefined,
   });
   if (__DEV__) console.error('=== COMPLETION ERROR ===', err);
-  const weightedMinErr = await resolveWeightedPassMinAfterReferralEffects(deps.userId);
   const skipOptsErr = attachSkipPenaltyGateOptions(deps.scenarioSkipConfirmedCountRef?.current ?? 0);
   const fallbackResults: InterviewResults = {
     pillarScores: { ...FALLBACK_MARKER_SCORES_MID },
@@ -36,7 +35,7 @@ export async function runScoreInterviewErrorCatchFallback(
     interviewSummary: 'A grounded spoken deps.profile. See individual construct scores for detail.',
     skipBreakdown: skipOptsErr.skipBreakdown,
     gateResult: computeGateResult({ ...FALLBACK_MARKER_SCORES_MID }, null, {
-      weightedPassMin: weightedMinErr,
+      weightedPassMin: GATE_PASS_WEIGHTED_MIN,
       skipPenaltyTotal: skipOptsErr.skipPenaltyTotal,
       skipAutoFail: skipOptsErr.skipAutoFail,
       mentalizingOvercertaintyCount: 0,

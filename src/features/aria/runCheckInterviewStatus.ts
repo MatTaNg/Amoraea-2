@@ -37,23 +37,34 @@ export async function runCheckInterviewStatus(
       latest_attempt_id: latestAttemptIdForRouting,
     });
   }
-  /** Standard applicants: hand off to neutral post-interview review (no in-app scores). */
-  const shouldHandOffToPostInterview =
-    trigger.isInterviewAppRoute && interviewDoneForRouting && !isAdminEmail;
-
-  if (deps.takeInterviewJustCompletedInSession()) {
-    deps.setInterviewStatus('congratulations');
+  const justCompletedInSession = deps.takeInterviewJustCompletedInSession();
+  let sessionCommittedAttemptId: string | null = null;
+  if (justCompletedInSession) {
     const attemptFromSession = deps.takeInterviewLastCommittedAttemptId();
-    const resolvedId =
+    sessionCommittedAttemptId =
       (typeof attemptFromSession === 'string' && attemptFromSession.length > 0
         ? attemptFromSession
-        : null) ?? (data?.latest_attempt_id as string | undefined);
-    if (resolvedId) deps.setAnalysisAttemptId(resolvedId);
+        : null) ??
+      (typeof data?.latest_attempt_id === 'string' && data.latest_attempt_id.length > 0
+        ? data.latest_attempt_id
+        : null);
+    if (sessionCommittedAttemptId) deps.setAnalysisAttemptId(sessionCommittedAttemptId);
+  }
+
+  /** Standard applicants: hand off to neutral post-interview review (no in-app scores). */
+  const shouldHandOffToPostInterview =
+    trigger.isInterviewAppRoute &&
+    (interviewDoneForRouting || justCompletedInSession) &&
+    !isAdminEmail;
+
+  if (justCompletedInSession && !shouldHandOffToPostInterview) {
+    /** Avoid flashing the admin results dashboard before post-interview navigation. */
+    deps.setInterviewStatus('preparing_results');
     return;
   }
 
   if (shouldHandOffToPostInterview) {
-    const aidForHandoff = latestAttemptIdForRouting;
+    const aidForHandoff = latestAttemptIdForRouting ?? sessionCommittedAttemptId;
     if (typeof aidForHandoff === 'string' && aidForHandoff.length > 0) {
       deps.interviewStatusRef.current = 'preparing_results';
       deps.setInterviewStatus('preparing_results');

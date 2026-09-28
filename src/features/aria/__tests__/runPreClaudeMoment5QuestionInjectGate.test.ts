@@ -44,7 +44,7 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
     expect(mockTriggerLiveMoment4ScoringOnM5Entry).not.toHaveBeenCalled();
   });
 
-  it('injects Moment 5 anchor after first user answer to M4 threshold probe', async () => {
+  it('does not inject Moment 5 after M4 threshold — support personal block comes next', async () => {
     mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
@@ -65,30 +65,10 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
 
     const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
 
-    expect(result).toEqual({ handled: true });
-    expect(deps.moment5QuestionDeliveredRef.current).toBe(true);
-    expect(deps.currentInterviewMomentRef.current).toBe(5);
-    expect(deps.moment5PrimaryAnchorDeliveredSessionRef.current).toBe(true);
-    expect(deps.lastQuestionTextRef.current).toBe(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
-    expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/conflict with someone important/i),
-      expect.any(Object),
-    );
-    expect(setMessages).toHaveBeenCalledWith(
-      expect.arrayContaining([
-        expect.objectContaining({
-          role: 'assistant',
-          content: expect.stringMatching(/Alex|conflict/i),
-        }),
-      ]),
-    );
-    expect(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT.length).toBeGreaterThan(20);
-    expect(mockTriggerLiveMoment4ScoringOnM5Entry).toHaveBeenCalledWith(
-      expect.objectContaining({
-        trigger: 'm5_client_inject_after_m4_threshold',
-        attemptId: 'attempt-live-m4',
-      }),
-    );
+    expect(result).toEqual({ handled: false });
+    expect(deps.moment5QuestionDeliveredRef.current).toBe(false);
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(mockTriggerLiveMoment4ScoringOnM5Entry).not.toHaveBeenCalled();
   });
 
   it('does not inject Moment 5 while resume welcome flow owns playback', async () => {
@@ -110,6 +90,48 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
 
     expect(result).toEqual({ handled: false });
     expect(speakTextSafe).not.toHaveBeenCalled();
+  });
+
+  it('injects Moment 5 after a short need-recognition answer to the support probe', async () => {
+    mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 4 },
+      moment4ThresholdProbeAskedRef: { current: true },
+      moment5QuestionDeliveredRef: { current: false },
+      moment5QuestionDeliveryInFlightRef: { current: false },
+      speakTextSafe,
+      setMessages,
+    });
+    const messagesToUse = [
+      { role: 'assistant', content: M4_THRESHOLD_QUESTION },
+      { role: 'user', content: 'I would walk away when trust is broken and repair feels impossible.' },
+      {
+        role: 'assistant',
+        content:
+          'Think of a time when a partner, or someone you care about, heard some bad news, needed support from you, or was really stressed. What happened, and what did you do?',
+      },
+      {
+        role: 'user',
+        content: "I told her it'll be okay and stop feeling how she's feeling and feel a different way",
+      },
+      {
+        role: 'assistant',
+        content: 'How did you know what kind of support they needed from you?',
+      },
+      { role: 'user', content: 'I asked her.' },
+    ];
+
+    const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Alex');
+
+    expect(result).toEqual({ handled: true });
+    expect(deps.moment5QuestionDeliveredRef.current).toBe(true);
+    expect(deps.currentInterviewMomentRef.current).toBe(5);
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/conflict with someone important/i),
+      expect.any(Object),
+    );
   });
 
   it('does not inject Moment 5 when threshold answer is an incomplete cut-off', async () => {
@@ -178,7 +200,7 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
     expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
-  it('injects Moment 5 after unassessable threshold answer retry then first assessable answer', async () => {
+  it('does not inject Moment 5 after threshold retry — support personal block comes next', async () => {
     mockTriggerLiveMoment4ScoringOnM5Entry.mockClear();
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
@@ -210,14 +232,10 @@ describe('runPreClaudeMoment5QuestionInjectGate', () => {
 
     const result = await runPreClaudeMoment5QuestionInjectGate(deps, messagesToUse, 'Matt');
 
-    expect(result).toEqual({ handled: true });
-    expect(deps.moment5QuestionDeliveredRef.current).toBe(true);
-    expect(deps.currentInterviewMomentRef.current).toBe(5);
-    expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/conflict with someone important/i),
-      expect.any(Object),
-    );
-    expect(mockTriggerLiveMoment4ScoringOnM5Entry).toHaveBeenCalled();
+    expect(result).toEqual({ handled: false });
+    expect(deps.moment5QuestionDeliveredRef.current).toBe(false);
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(mockTriggerLiveMoment4ScoringOnM5Entry).not.toHaveBeenCalled();
   });
 
   it('injects Moment 5 after explicit pass on the grudge question (threshold skipped)', async () => {

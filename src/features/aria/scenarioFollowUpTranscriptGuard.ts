@@ -27,6 +27,10 @@ import {
   isScenarioABoundaryReflectionWithoutNextVignette,
   looksLikeScenarioAContemptProbeQuestion,
 } from './scenarioAContemptProbeTextMatch';
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
+import {
+  scenarioAContemptConstructReadyForRetiredRepairHandoff,
+} from './scenarioAContemptProbeCoverage';
 import {
   SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
   SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
@@ -309,10 +313,20 @@ export function scenarioOneFollowUpFlagsFromTranscript(msgs: readonly ScenarioFo
   };
 }
 
-/** Scenario A may close only after a substantive repair-as-Ryan answer (mirrors S2 minimum engagement). */
+/** Scenario A may close after the contempt probe is answered. Hypothetical Ryan repair is retired. */
 export function scenarioAMinimumEngagementForHandoff(
   messages: readonly ScenarioFollowUpTranscriptMessage[],
 ): boolean {
+  if (transcriptHasUserResponseAfterScenarioAContemptProbe(messages)) {
+    return true;
+  }
+  // Q1 already covered Emma's closing line with contempt quality — skip retired repair, hand off to S2.
+  if (
+    isInterviewCanonicalProbeRetired('s1_repair') &&
+    scenarioAContemptConstructReadyForRetiredRepairHandoff(messages)
+  ) {
+    return true;
+  }
   const repairCtx = findLastUserWithPriorScenarioARepairContext(messages);
   const direct = findLastUserWithPriorAssistantContent(messages);
   const lastUserContent = repairCtx.lastUserContent ?? direct.lastUserContent;
@@ -373,7 +387,7 @@ export function resolveScenarioANextRequiredFollowUpPrompt(
   if (!transcriptHasUserResponseAfterScenarioAContemptProbe(messages)) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
   }
-  return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+  return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
 }
 
 /** Drop premature S1 boundary / S2 vignette paragraphs while follow-ups are still pending. */

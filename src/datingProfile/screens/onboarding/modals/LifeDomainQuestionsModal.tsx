@@ -23,21 +23,11 @@ import {
   type LifeDomainAnswersMap,
   type OnboardingLifeDomainsSliders,
 } from '@/screens/profile/editProfile/lifeDomainProfileService';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import {
-  BottomSheet,
-  OptionPickerTrigger,
-  type OptionAnchor,
-} from '@/screens/profile/editProfile/BottomSheet';
-import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
-import { SelectTriggerRow } from '@/shared/ui/SelectTriggerRow';
-
-type PickerSheet = {
-  title: string;
-  options: { label: string; value: string }[];
-  selectedValue: string;
-  onPick: (value: string) => void;
-  anchor?: OptionAnchor;
-};
+  ONBOARDING_LIFE_DOMAIN_QUESTIONS_OPTIONAL_DESCRIPTION,
+  ONBOARDING_LIFE_DOMAIN_QUESTIONS_REQUIRED_DESCRIPTION,
+} from './onboardingStepCopy';
 
 function mergeLifeDomainAnswerMaps(
   fromDb: LifeDomainAnswersMap,
@@ -83,7 +73,6 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
     mergeLifeDomainAnswerMaps({}, initialAnswers),
   );
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [pickerSheet, setPickerSheet] = useState<PickerSheet | null>(null);
   const [questionSuggestion, setQuestionSuggestion] = useState('');
   const answersBaselineRef = useRef<LifeDomainAnswersMap>({});
   const draftSeedRef = useRef(initialAnswers);
@@ -194,13 +183,6 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
     const value = answers[domainId]?.[q.id] ?? '';
     const suffix = questionLabelSuffix(q);
     if (q.input === 'dropdown' && q.options?.length) {
-      const optionRows = [
-        { label: 'Select an option', value: '' },
-        ...q.options,
-      ];
-      const selectedLabel =
-        optionRows.find((o) => o.value === value)?.label ?? 'Select an option';
-
       return (
         <View key={q.id} style={styles.questionBlock}>
           <View style={styles.questionTextRow}>
@@ -215,25 +197,16 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
               </Text>
             ) : null}
           </View>
-          <OptionPickerTrigger
-            style={styles.dropdownTrigger}
-            onOpen={(anchor) =>
-              setPickerSheet({
-                title: q.text,
-                options: optionRows,
-                selectedValue: value,
-                anchor,
-                onPick: (picked) => setAnswer(q.id, picked),
-              })
-            }
-          >
-            <SelectTriggerRow
-              label={selectedLabel}
-              isPlaceholder={!value}
-              labelStyle={styles.dropdownTriggerText}
-              placeholderStyle={styles.dropdownPlaceholder}
-            />
-          </OptionPickerTrigger>
+          <AppSelect
+            bare
+            value={value}
+            options={q.options}
+            onValueChange={(picked) => setAnswer(q.id, picked)}
+            allowUnset
+            unsetLabel="Select an option"
+            placeholder="Select an option"
+            sheetTitle={q.text}
+          />
         </View>
       );
     }
@@ -289,8 +262,8 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
         <View style={styles.container}>
           <Text style={styles.description}>
             {optionalOpenEndedLeftover
-              ? 'Optional: share more about this life area if you like. You can skip any question and tap Next.'
-              : 'Answer each required question for this life area to continue. You can add more detail later from your profile.'}
+              ? ONBOARDING_LIFE_DOMAIN_QUESTIONS_OPTIONAL_DESCRIPTION
+              : ONBOARDING_LIFE_DOMAIN_QUESTIONS_REQUIRED_DESCRIPTION}
           </Text>
           {!optionalOpenEndedLeftover ? (
             <Text style={styles.domainMeta}>
@@ -319,24 +292,6 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
           />
         </View>
       </SafeAreaView>
-
-      <BottomSheet
-        visible={!!pickerSheet}
-        title={pickerSheet?.title}
-        anchor={pickerSheet?.anchor}
-        onClose={() => setPickerSheet(null)}
-      >
-        {pickerSheet ? (
-          <SingleChoiceOptionList
-            options={pickerSheet.options}
-            value={pickerSheet.selectedValue}
-            onSelect={(next) => {
-              pickerSheet.onPick(next);
-              setPickerSheet(null);
-            }}
-          />
-        ) : null}
-      </BottomSheet>
     </SafeAreaView>
   );
 };

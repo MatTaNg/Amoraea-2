@@ -8,6 +8,7 @@ import { getHobbiesByIds } from '@/shared/constants/hobbies';
 import { hobbiesStringToIds } from '@/shared/utils/hobbiesHelpers';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './HobbyDealbreakerOnboardingModal.styled';
+import { ONBOARDING_HOBBY_DEALBREAKER_DESCRIPTION } from './onboardingStepCopy';
 
 export const HOBBY_DEALBREAKER_NONE_VALUE = '__none__';
 
@@ -65,13 +66,13 @@ export const HobbyDealbreakerOnboardingModal: React.FC<HobbyDealbreakerOnboardin
       >
         <View style={styles.container}>
           <Text style={styles.description}>
-            If you met someone amazing who didn't share these hobbies with you, would it still be a
-            dealbreaker? Which hobby specifically would that be?
+            {ONBOARDING_HOBBY_DEALBREAKER_DESCRIPTION}
           </Text>
           <Text style={styles.selectionHint}>Select one option</Text>
           <SingleChoiceOptionList
             options={options}
             value={value}
+            deferSelectUntilPaint
             onSelect={handleSelect}
           />
         </View>

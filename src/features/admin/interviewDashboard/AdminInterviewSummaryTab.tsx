@@ -98,6 +98,7 @@ import type {
 } from '@features/admin/interviewDashboard/adminInterviewDashboardTypes';
 import { summaryTabStyles } from '@features/admin/interviewDashboard/adminInterviewSummaryTabStyles';
 import type { AdminUserProfileRecord } from '@app/screens/admin/AdminProfileAssessmentTabs';
+import { buildAdminPassFailPlainLanguageSummary } from '@features/admin/interviewDashboard/adminInterviewDepthModifierSummary';
 
 function formatAttemptDate(attempt: { completed_at: string | null; created_at: string }): string {
   const raw = attempt.completed_at ?? attempt.created_at;
@@ -596,6 +597,9 @@ export function AdminInterviewSummaryTab({
             modified_weighted_score: result.gate.modifiedWeightedScore ?? null,
             disclosure_calibration: result.disclosure_calibration,
             ego_development_level: result.ego_development_level ?? egoLevel ?? null,
+            repair_source_signals: result.repair_source_signals,
+            regulation_source_signals: result.regulation_source_signals,
+            weighted_score_breakdown: result.gate.weightedScoreBreakdown ?? null,
           })
           .eq('id', attempt.id)
           .eq('user_id', attempt.user_id);
@@ -751,6 +755,16 @@ export function AdminInterviewSummaryTab({
           </Text>
         </View>
       ) : null}
+      {(() => {
+        const summary = buildAdminPassFailPlainLanguageSummary(candidateUser ?? null, attempt);
+        if (!summary) return null;
+        return (
+          <View style={[summaryTabStyles.block, { marginBottom: 12, borderLeftWidth: 3, borderLeftColor: outcome.color }]}>
+            <Text style={[summaryTabStyles.blockTitle, { marginBottom: 6 }]}>Outcome summary</Text>
+            <Text style={summaryTabStyles.blockText}>{summary}</Text>
+          </View>
+        );
+      })()}
       <Text style={summaryTabStyles.sectionTitle}>Overall</Text>
       <ScoreReceiptCard attempt={attempt} user={profileUser} variant="dark" />
       {isAdminViewer ? (
@@ -1011,6 +1025,11 @@ export function AdminInterviewSummaryTab({
         <Text style={summaryTabStyles.metaLabel}>Weighted score</Text>
         <Text style={summaryTabStyles.metaValue}>{formatScoreCell(attempt.weighted_score)}</Text>
       </View>
+      {attempt.weighted_score_breakdown ? (
+        <Text style={summaryTabStyles.summaryModifierHint}>
+          {JSON.stringify(attempt.weighted_score_breakdown, null, 2)}
+        </Text>
+      ) : null}
       {(() => {
         const sm = attempt.score_modifier;
         if (typeof sm !== 'number' || !Number.isFinite(sm) || sm >= 0) return null;

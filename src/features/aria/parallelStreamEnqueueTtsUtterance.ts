@@ -39,7 +39,10 @@ import {
 } from '@features/aria/moment5TranscriptHelpers';
 import {
   looksLikeMoment4GrudgePrompt,
+  looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
+  looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportQuestion,
 } from '@features/aria/moment4ProbeLogic';
 import { isIncompleteScenarioAContemptProbeLeadSentence } from '@features/aria/scenarioAContemptProbeLogic';
 import { resolveAssessableQuestionTextForResponseTiming } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
@@ -342,6 +345,9 @@ export function createParallelStreamEnqueueTtsUtterance(
                   const personalMomentShowCardSpeech =
                     spokenTextStartsMoment5PrimaryConflictQuestion(cleanedSpoken) ||
                     transcriptAssistantContainsMoment5PrimaryConflictQuestion(cleanedSpoken) ||
+                    looksLikeMomentSupportConditionalProbe(cleanedSpoken) ||
+                    looksLikeMomentSupportQuestion(cleanedSpoken) ||
+                    looksLikeMoment4OrientationQuestion(cleanedSpoken) ||
                     looksLikeMoment4ThresholdQuestion(cleanedSpoken) ||
                     looksLikeMoment4GrudgePrompt(cleanedSpoken) ||
                     looksLikeMoment5ResolutionFollowUpPrompt(cleanedSpoken) ||
@@ -421,7 +427,10 @@ export function createParallelStreamEnqueueTtsUtterance(
                       deps,
                       transcriptForModal,
                       cleanedSpoken,
-                      readSituation3DeliveryState(transcriptForModal),
+                      {
+                        ...readSituation3DeliveryState(transcriptForModal),
+                        danielRepairDelivered: deps.s3RepairProbeDeliveredRef.current,
+                      },
                     );
                   } else {
                     const modalQ = getLastSubstantiveScenarioModalQuestion([

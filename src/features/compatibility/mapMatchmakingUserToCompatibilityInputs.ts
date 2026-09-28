@@ -12,6 +12,7 @@ import type {
   SubstanceUseProfile,
   ValuesProfile,
 } from './computeCompatibilityScore';
+import type { ConcreteLifeFitProfile } from './computeConcreteLifeFit';
 import type { MatchmakingUserSnapshot } from './matchmakingPairPayload';
 
 /** Optional DB fields not fully represented on {@link MatchmakingUserSnapshot}. */
@@ -39,6 +40,8 @@ export type MappedUserCompatibilityInputs = {
   politics: PoliticsProfile;
   psychometricSoft: PsychometricProfile;
   sexualCommunicationMean: number | null;
+  /** Desired-life fields already collected in profile/onboarding. Optional for test fixtures. */
+  concreteLife?: ConcreteLifeFitProfile;
 };
 
 function numOrNull(v: unknown): number | null {
@@ -141,6 +144,37 @@ function mapDealbreakerProfile(
     politics: strOrNull(snapshot.profile?.politics) ?? strOrNull(readProfileJsonField(snapshot, extras, 'politics')),
     location: extras?.locationCoords ?? null,
     substance: mapSubstanceProfile(compat),
+    hobbies:
+      strOrNull(snapshot.profile?.hobbies) ?? strOrNull(readProfileJsonField(snapshot, extras, 'hobbies')),
+    hobbyDealbreakerId:
+      strOrNull(readProfileJsonField(snapshot, extras, 'hobbyDealbreakerId')) ??
+      strOrNull(readMatchPreference(snapshot, 'hobbyDealbreakerId')),
+    partnerAlignmentTobacco: readMatchPreference(snapshot, 'partnerAlignmentTobacco'),
+    partnerAlignmentAlcohol: readMatchPreference(snapshot, 'partnerAlignmentAlcohol'),
+    partnerAlignmentRecreationalDrugs: readMatchPreference(
+      snapshot,
+      'partnerAlignmentRecreationalDrugs',
+    ),
+    partnerAlignmentPsychedelics: readMatchPreference(snapshot, 'partnerAlignmentPsychedelics'),
+    partnerAlignmentCannabis: readMatchPreference(snapshot, 'partnerAlignmentCannabis'),
+    smoking:
+      strOrNull(snapshot.profile?.smoking) ??
+      strOrNull(readProfileJsonField(snapshot, extras, 'smoking')),
+    drinking:
+      strOrNull(snapshot.profile?.drinking) ??
+      strOrNull(readProfileJsonField(snapshot, extras, 'drinking')),
+    recreationalDrugsSocial:
+      strOrNull(snapshot.profile?.recreationalDrugsSocial) ??
+      strOrNull(readProfileJsonField(snapshot, extras, 'recreationalDrugsSocial')),
+    relationshipWithPsychedelics:
+      strOrNull(snapshot.profile?.relationshipWithPsychedelics) ??
+      strOrNull(readProfileJsonField(snapshot, extras, 'relationshipWithPsychedelics')),
+    relationshipWithCannabis:
+      strOrNull(snapshot.profile?.relationshipWithCannabis) ??
+      strOrNull(readProfileJsonField(snapshot, extras, 'relationshipWithCannabis')),
+    prefPartnerSharesSexualInterests:
+      strOrNull(readProfileJsonField(snapshot, extras, 'prefPartnerSharesSexualInterests')),
+    sexInterestCategories: snapshot.profile?.sexInterestCategories ?? null,
   };
 }
 
@@ -157,13 +191,11 @@ function mapRelationalCapacity(
     contempt: numOrNull(pillars.contempt),
     accountability: numOrNull(pillars.accountability),
     mentalizing: numOrNull(pillars.mentalizing),
-    rfqScore: numOrNull(psych.rfqScore),
     gaspExternalizationScore:
       extras?.gaspExternalizationScore ?? numOrNull(psych.gaspScore),
     scsSfScore: numOrNull(psych.scsSfScore),
     brsScore: numOrNull(psych.brsScore),
     anxietyTraitScore: extras?.anxietyTraitScore ?? null,
-    dweckScore: numOrNull(psych.dweckScore),
   };
 }
 
@@ -189,6 +221,90 @@ function mapValues(snapshot: MatchmakingUserSnapshot): ValuesProfile | null {
     }
   }
   return hasAny ? out : null;
+}
+
+function lifeDomainAnswer(
+  snapshot: MatchmakingUserSnapshot,
+  domain: 'finance' | 'family' | 'intimacy' | 'spirituality' | 'health',
+  questionId: string,
+): string | null {
+  return strOrNull(snapshot.profile?.lifeDomains?.answers?.[domain]?.[questionId]);
+}
+
+function mapConcreteLifeFitProfile(
+  snapshot: MatchmakingUserSnapshot,
+  extras: MatchmakingUserMappingExtras | undefined,
+  compat: Partial<CompatibilityFormData> | null | undefined,
+  dealbreaker: DealbreakerProfile,
+): ConcreteLifeFitProfile {
+  const futureLiving =
+    (compat?.futureLivingLocation && compat.futureLivingLocation.length > 0
+      ? compat.futureLivingLocation
+      : snapshot.preferences?.futureLivingLocation) ?? null;
+  const livingPicker = lifeDomainAnswer(snapshot, 'intimacy', 'livingLocation');
+
+  return {
+    wantKids: dealbreaker.wantKids,
+    kidsWanted: strOrNull(compat?.kidsWanted) ?? strOrNull(snapshot.preferences?.kidsWanted),
+    kidsExisting: strOrNull(compat?.kidsExisting) ?? strOrNull(snapshot.preferences?.kidsExisting),
+    haveKids:
+      strOrNull(snapshot.profile?.haveKids) ?? strOrNull(readProfileJsonField(snapshot, extras, 'haveKids')),
+    openToAdopting: compat?.openToAdopting ?? snapshot.preferences?.openToAdopting ?? null,
+    familyKidsCount: lifeDomainAnswer(snapshot, 'family', 'kidsCount'),
+    familyKidsTiming: lifeDomainAnswer(snapshot, 'family', 'kidsTiming'),
+    familyAdoption: lifeDomainAnswer(snapshot, 'family', 'adoptionPreference'),
+    familyChildEducation: lifeDomainAnswer(snapshot, 'family', 'childEducation'),
+    relationshipStyle: dealbreaker.relationshipStyle,
+    marriagePartnershipPreference:
+      strOrNull(compat?.marriagePartnershipPreference) ??
+      strOrNull(snapshot.preferences?.marriagePartnershipPreference),
+    religion: dealbreaker.religion,
+    partnerSameReligionRequired: dealbreaker.partnerSameReligionRequired,
+    faithPracticeLevel:
+      strOrNull(compat?.faithPracticeLevel) ?? strOrNull(snapshot.preferences?.faithPracticeLevel),
+    raisingChildrenInFaith: lifeDomainAnswer(snapshot, 'spirituality', 'raisingChildrenInFaith'),
+    spiritualPracticeWeeklyHours: lifeDomainAnswer(snapshot, 'spirituality', 'spiritualPracticeWeeklyHours'),
+    politics: dealbreaker.politics,
+    prefPartnerPoliticalAlignmentImportance: dealbreaker.prefPartnerPoliticalAlignmentImportance,
+    location: dealbreaker.location,
+    willingToRelocate: dealbreaker.willingToRelocate,
+    relocationPreference: dealbreaker.relocationPreference,
+    futureLivingLocation: futureLiving && futureLiving.length > 0 ? futureLiving : null,
+    livingLocation: livingPicker,
+    workWeekHours: strOrNull(compat?.workWeekHours) ?? strOrNull(snapshot.preferences?.workWeekHours),
+    hoursPerWeekQualityTime:
+      strOrNull(compat?.hoursPerWeekQualityTime) ?? strOrNull(snapshot.preferences?.hoursPerWeekQualityTime),
+    smoking: dealbreaker.smoking,
+    drinking: dealbreaker.drinking,
+    recreationalDrugsSocial: dealbreaker.recreationalDrugsSocial,
+    relationshipWithPsychedelics: dealbreaker.relationshipWithPsychedelics,
+    relationshipWithCannabis: dealbreaker.relationshipWithCannabis,
+    substance: dealbreaker.substance,
+    partnerAlignmentTobacco: dealbreaker.partnerAlignmentTobacco,
+    partnerAlignmentAlcohol: dealbreaker.partnerAlignmentAlcohol,
+    partnerAlignmentRecreationalDrugs: dealbreaker.partnerAlignmentRecreationalDrugs,
+    partnerAlignmentPsychedelics: dealbreaker.partnerAlignmentPsychedelics,
+    partnerAlignmentCannabis: dealbreaker.partnerAlignmentCannabis,
+    diet: lifeDomainAnswer(snapshot, 'health', 'diet'),
+    sleepSchedule: lifeDomainAnswer(snapshot, 'health', 'sleepSchedule'),
+    petStatus: lifeDomainAnswer(snapshot, 'family', 'petStatus'),
+    hasPets: strOrNull(compat?.hasPets) ?? strOrNull(snapshot.preferences?.hasPets),
+    partnerHasPetsPreference:
+      strOrNull(compat?.partnerHasPetsPreference) ?? strOrNull(snapshot.preferences?.partnerHasPetsPreference),
+    cleanlinessPreference: compat?.cleanlinessPreference ?? snapshot.preferences?.cleanlinessPreference ?? null,
+    sexInterestCategories: dealbreaker.sexInterestCategories,
+    prefPartnerSharesSexualInterests: dealbreaker.prefPartnerSharesSexualInterests,
+    sexDrive:
+      strOrNull(snapshot.profile?.sexDrive) ?? strOrNull(readProfileJsonField(snapshot, extras, 'sexDrive')),
+    spaceForNewRelationship:
+      strOrNull(snapshot.profile?.spaceForNewRelationship) ??
+      strOrNull(readProfileJsonField(snapshot, extras, 'spaceForNewRelationship')),
+    sexFrequency:
+      strOrNull(compat?.sexFrequency) ??
+      strOrNull(snapshot.preferences?.sexFrequency) ??
+      lifeDomainAnswer(snapshot, 'intimacy', 'sexFrequency'),
+    sexFrequencyFlexible: compat?.sexFrequencyFlexible ?? null,
+  };
 }
 
 function mapFinanceProfile(
@@ -249,10 +365,11 @@ export function mapMatchmakingUserToCompatibilityInputs(
   extras?: MatchmakingUserMappingExtras,
 ): MappedUserCompatibilityInputs {
   const compat = extras?.compatibilityData ?? null;
+  const dealbreaker = mapDealbreakerProfile(snapshot, extras, compat);
 
   return {
     userId: snapshot.userId,
-    dealbreaker: mapDealbreakerProfile(snapshot, extras, compat),
+    dealbreaker,
     relationalCapacity: mapRelationalCapacity(snapshot, extras),
     attachment: mapAttachment(snapshot),
     values: mapValues(snapshot),
@@ -267,5 +384,6 @@ export function mapMatchmakingUserToCompatibilityInputs(
     politics: { politics: strOrNull(snapshot.profile?.politics) },
     psychometricSoft: mapPsychometricSoft(snapshot, extras),
     sexualCommunicationMean: numOrNull(snapshot.postInterviewTypology?.sexualCommunicationMean),
+    concreteLife: mapConcreteLifeFitProfile(snapshot, extras, compat, dealbreaker),
   };
 }

@@ -1,8 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { View, Text, StyleSheet, Platform } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
-import { theme } from '@/shared/theme/theme';
 import { formControlStyles } from '@/shared/ui/FormField';
+import { AppSelect } from '@/shared/ui/AppSelect';
 import { BirthTimeHourMinuteInput } from '@/shared/components/BirthTimeHourMinuteInput';
 import {
   maxBirthYearForMinimumAge,
@@ -189,6 +188,27 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     return maxSelectableDays(draft.y, draft.m);
   }, [draft.y, draft.m, minimumAge]);
 
+  const yearOptions = useMemo(
+    () => yearItems.map((y) => ({ label: String(y), value: String(y) })),
+    [yearItems],
+  );
+
+  const monthSelectOptions = useMemo(
+    () => monthOptions.map((mo) => ({ label: mo.label, value: String(mo.value) })),
+    [monthOptions],
+  );
+
+  const dayOptions = useMemo(
+    () =>
+      Array.from({ length: dayCount }, (_, index) => {
+        const day = index + 1;
+        return { label: String(day), value: String(day) };
+      }),
+    [dayCount],
+  );
+
+  const errorTriggerStyle = error ? formControlStyles.controlError : undefined;
+
   const patchDraft = (patch: Partial<Draft>): Draft => {
     const next = clampDraftToMinimumAge(applyPatch(draftRef.current, patch), minimumAge);
     draftRef.current = next;
@@ -206,155 +226,79 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     }
   };
 
-  const pickerCommon = {
-    style: [styles.picker, Platform.OS === 'web' ? styles.pickerWeb : null],
-    dropdownIconColor: theme.colors.textSecondary,
-    mode: (Platform.OS === 'android' ? 'dropdown' : undefined) as
-      | 'dropdown'
-      | undefined,
-    itemStyle:
-      Platform.OS === 'ios'
-        ? ({ color: theme.colors.text, fontSize: 17 } as const)
-        : undefined,
-  };
-
   return (
     <View style={styles.wrap}>
       {label ? <Text style={formControlStyles.label}>{label}</Text> : null}
       <View style={styles.row}>
         <View style={styles.pickerColYear}>
           <Text style={styles.subLabel}>Year</Text>
-          <View
-            style={[
-              formControlStyles.control,
-              formControlStyles.controlSelectLike,
-              styles.pickerWrap,
-              error ? formControlStyles.controlError : null,
-            ]}
-          >
-            <Picker
-              selectedValue={draft.y != null ? String(draft.y) : ''}
-              onValueChange={(v) => {
-                if (v === '') {
-                  const next = { y: null, m: null, d: null };
-                  draftRef.current = next;
-                  setDraft(next);
-                  emit(next);
-                  return;
-                }
-                emit(patchDraft({ y: Number(v) }));
-              }}
-              {...pickerCommon}
-            >
-              <Picker.Item
-                label="Year"
-                value=""
-                color={theme.colors.textSecondary}
-                style={styles.pickerItemPlaceholder}
-              />
-              {yearItems.map((y) => (
-                <Picker.Item
-                  key={y}
-                  label={String(y)}
-                  value={String(y)}
-                  color={theme.colors.text}
-                  style={styles.pickerItem}
-                />
-              ))}
-            </Picker>
-          </View>
+          <AppSelect
+            bare
+            allowUnset
+            placeholder="Year"
+            unsetLabel="Year"
+            sheetTitle="Year"
+            value={draft.y != null ? String(draft.y) : ''}
+            options={yearOptions}
+            triggerStyle={errorTriggerStyle}
+            onValueChange={(next) => {
+              if (next === '') {
+                const cleared = { y: null, m: null, d: null };
+                draftRef.current = cleared;
+                setDraft(cleared);
+                emit(cleared);
+                return;
+              }
+              emit(patchDraft({ y: Number(next) }));
+            }}
+          />
         </View>
         <View style={styles.pickerColMonth}>
           <Text style={styles.subLabel}>Month</Text>
-          <View
-            style={[
-              formControlStyles.control,
-              formControlStyles.controlSelectLike,
-              styles.pickerWrap,
-              error ? formControlStyles.controlError : null,
-            ]}
-          >
-            <Picker
-              selectedValue={draft.m != null ? String(draft.m) : ''}
-              onValueChange={(v) => {
-                if (v === '') {
-                  emit(patchDraft({ m: null, d: null }));
-                  return;
-                }
-                emit(patchDraft({ m: Number(v) }));
-              }}
-              {...pickerCommon}
-            >
-              <Picker.Item
-                label="Month"
-                value=""
-                color={theme.colors.textSecondary}
-                style={styles.pickerItemPlaceholder}
-              />
-              {monthOptions.map((mo) => (
-                <Picker.Item
-                  key={mo.value}
-                  label={mo.label}
-                  value={String(mo.value)}
-                  color={theme.colors.text}
-                  style={styles.pickerItem}
-                />
-              ))}
-            </Picker>
-          </View>
+          <AppSelect
+            bare
+            allowUnset
+            placeholder="Month"
+            unsetLabel="Month"
+            sheetTitle="Month"
+            value={draft.m != null ? String(draft.m) : ''}
+            options={monthSelectOptions}
+            triggerStyle={errorTriggerStyle}
+            onValueChange={(next) => {
+              if (next === '') {
+                emit(patchDraft({ m: null, d: null }));
+                return;
+              }
+              emit(patchDraft({ m: Number(next) }));
+            }}
+          />
         </View>
         <View style={styles.pickerColDay}>
           <Text style={styles.subLabel}>Day</Text>
-          <View
-            style={[
-              formControlStyles.control,
-              formControlStyles.controlSelectLike,
-              styles.pickerWrap,
-              error ? formControlStyles.controlError : null,
-            ]}
-            {...(Platform.OS === 'web' ? { nativeID: 'date-picker-day-wrap' } : {})}
-          >
-            <Picker
-              key={
-                Platform.OS === 'web'
-                  ? `day-${draft.y ?? ''}-${draft.m ?? ''}`
-                  : undefined
+          <AppSelect
+            bare
+            allowUnset
+            placeholder="Day"
+            unsetLabel="Day"
+            sheetTitle="Day"
+            value={
+              draft.d != null && draft.d <= dayCount ? String(draft.d) : ''
+            }
+            options={dayOptions}
+            triggerStyle={errorTriggerStyle}
+            onValueChange={(next) => {
+              if (next === '') {
+                emit(patchDraft({ d: null }));
+                return;
               }
-              selectedValue={
-                draft.d != null && draft.d <= dayCount ? String(draft.d) : ''
+              const num = Number(next);
+              if (!Number.isFinite(num) || num < 1 || num > dayCount) {
+                emit(patchDraft({ d: null }));
+                return;
               }
-              onValueChange={(v) => {
-                const dc = dayCount;
-                if (v === '') {
-                  emit(patchDraft({ d: null }));
-                  return;
-                }
-                const num = Number(v);
-                if (!Number.isFinite(num) || num < 1 || num > dc) {
-                  emit(patchDraft({ d: null }));
-                  return;
-                }
-                emit(patchDraft({ d: num }));
-              }}
-              {...pickerCommon}
-            >
-              <Picker.Item
-                label="Day"
-                value=""
-                color={theme.colors.textSecondary}
-                style={styles.pickerItemPlaceholder}
-              />
-              {Array.from({ length: dayCount }, (_, i) => i + 1).map((day) => (
-                <Picker.Item
-                  key={day}
-                  label={String(day)}
-                  value={String(day)}
-                  color={theme.colors.text}
-                  style={styles.pickerItem}
-                />
-              ))}
-            </Picker>
-          </View>
+              emit(patchDraft({ d: num }));
+            }}
+          />
         </View>
       </View>
       {error ? <Text style={formControlStyles.errorText}>{error}</Text> : null}
@@ -448,44 +392,4 @@ const styles = StyleSheet.create({
       flexShrink: 0,
     },
   }),
-  /** Inner surface: inherits border/background from `formControlStyles.control`; strip padding so Picker fills. */
-  pickerWrap: {
-    paddingHorizontal: 0,
-    paddingVertical: 0,
-    overflow: 'hidden',
-    ...(Platform.OS === 'ios' ? {} : { minHeight: 56 }),
-  },
-  picker: {
-    width: '100%',
-    color: '#E8F0F8',
-    backgroundColor: 'transparent',
-    ...(Platform.OS === 'ios'
-      ? { height: 152 }
-      : Platform.OS === 'android'
-        ? { height: 56, paddingHorizontal: 12 }
-        : {}),
-  },
-  /** Web <select>: dark surface + readable text; avoids default white native styling. */
-  pickerWeb: {
-    cursor: 'pointer' as const,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    minHeight: 56,
-    minWidth: 112,
-    borderWidth: 0,
-    outlineStyle: 'none',
-    outlineWidth: 0,
-    color: '#E8F0F8',
-    backgroundColor: 'transparent',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  pickerItem: {
-    color: '#E8F0F8',
-    backgroundColor: '#0f1419',
-  },
-  pickerItemPlaceholder: {
-    color: 'rgba(200,217,238,0.72)',
-    backgroundColor: '#0f1419',
-  },
 });
