@@ -1,4 +1,5 @@
 import { spacing } from '@ui/theme/spacing';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 export const ariaPreInterviewStyles = {
   introContent: { padding: spacing.lg, paddingTop: spacing.xxl },
@@ -6,11 +7,17 @@ export const ariaPreInterviewStyles = {
     padding: spacing.lg,
     paddingTop: spacing.lg,
     paddingBottom: spacing.xxl * 2,
-    maxWidth: 560,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     width: '100%',
     alignSelf: 'center',
   },
-  preInterviewLogoWrap: { alignItems: 'center', marginBottom: spacing.lg },
+  preInterviewLogoWrap: {
+    width: '100%',
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.lg,
+  },
   preInterviewMainTitle: {
     fontSize: 24,
     fontWeight: '700',

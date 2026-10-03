@@ -2,6 +2,7 @@ import {
   classifyPriorAnswerMetaKind,
   looksLikeAlreadyAnsweredClaim,
   looksLikeCheckingInSufficiencyAsk,
+  looksLikeInterviewStillOpenCheck,
   looksLikePriorAnswerMetaComment,
   looksLikeVerifyPriorAnswerShape,
 } from '@features/aria/interviewPriorAnswerMetaDetection';
@@ -43,6 +44,16 @@ describe('interviewPriorAnswerMetaDetection', () => {
     expect(looksLikeVerifyPriorAnswerShape(phrase)).toBe(true);
     expect(classifyPriorAnswerMetaKind(phrase)).toBe('sufficiency_check_in');
   });
+
+  it.each(['Is that it?', 'Is that all?', "That's it.", 'Are we done?'])(
+    'treats a finished-check as a sufficiency check-in, not an answer: %s',
+    (phrase) => {
+      expect(looksLikeInterviewStillOpenCheck(phrase)).toBe(true);
+      expect(classifyPriorAnswerMetaKind(phrase)).toBe('sufficiency_check_in');
+      expect(looksLikeCheckingInSufficiencyAsk(phrase)).toBe(true);
+      expect(classifyUserMetaComment(phrase)?.type).toBe('checking_in');
+    },
+  );
 
   it('does not classify substantive scenario answers as prior-answer meta', () => {
     expect(

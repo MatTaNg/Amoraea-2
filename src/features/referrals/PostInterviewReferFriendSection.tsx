@@ -1,10 +1,12 @@
 import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
+import { REFERRAL_STEP_DISCOUNT } from '@features/referrals/referralInterview';
+
 export const POST_INTERVIEW_REFER_FRIEND_TITLE = 'Know someone who can pass?';
 
 export const POST_INTERVIEW_REFER_FRIEND_BODY =
-  'Share your personal code with someone you think is ready. If they complete the AI interview and psychometric assessments, you will both receive an additional 20% discount on all future subscriptions for life!';
+  `Share your personal code with someone you think is ready. If they complete the AI interview and psychometric assessments, you will both receive an additional ${REFERRAL_STEP_DISCOUNT}% discount on all future subscriptions for life!`;
 
 const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;

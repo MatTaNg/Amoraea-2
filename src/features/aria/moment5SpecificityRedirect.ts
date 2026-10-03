@@ -177,7 +177,7 @@ export function transcriptHasMoment5ResolutionFollowUpAsked(
 
 /** Named person-like token (not sentence-initial function words); conservative — mirrors M4 grudge anchor. */
 export const MOMENT5_LIKELY_PROPER_NAME_RE =
-  /\b(?!I\b|A\b|The\b|We\b|It\b|So\b|If\b|My\b|In\b|At\b|On\b|He\b|She\b|They\b|That\b|This\b|And\b|But\b)[A-Z][a-z]{2,}\b/;
+  /\b(?!I\b|A\b|The\b|We\b|It\b|So\b|If\b|My\b|In\b|At\b|On\b|He\b|She\b|They\b|That\b|This\b|And\b|But\b|When\b|For\b|After\b|Before\b|During\b|Because\b|Then\b|From\b|With\b|What\b|How\b|Where\b|Who\b|Why\b|There\b|Here\b|Also\b|Maybe\b|Sometimes\b|Usually\b|Generally\b|Well\b|Yeah\b|Not\b|Our\b|Your\b|His\b|Her\b|Their\b|Once\b|While\b|Since\b|Until\b|About\b|Over\b|Into\b|Through\b|Between\b|Honestly\b|Look\b|Okay\b|Having\b|Hopefully\b|People\b|Just\b|Really\b|Can\b|Could\b|Would\b|Should\b)[A-Z][a-z]{2,}\b/;
 
 /** True when assistant turn is the scripted Moment 5 specificity redirect (before accountability probe). */
 export function looksLikeMoment5SpecificityRedirectPrompt(text: string | null | undefined): boolean {

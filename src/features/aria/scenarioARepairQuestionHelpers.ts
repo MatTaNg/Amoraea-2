@@ -17,9 +17,10 @@ import {
   userIsAnsweringAfterStreamDeliveredScenarioAContemptProbe,
   type ScenarioFollowUpTranscriptMessage,
 } from './scenarioFollowUpTranscriptGuard';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from './interviewDisengagementProbeCopy';
 import { coerceScenarioCBoundaryHandoffForTts, SCENARIO_C_REPAIR_QUESTION_CANONICAL } from './scenarioCPromptDetection';
 import { coerceMoment4ThresholdQuestionForTts } from './moment4ProbeLogic';
-import { coerceScenarioCRepairQuestionForTts } from './scenarioCPromptDetection';
+import { coerceScenarioCRepairQuestionForTts, isScenarioCRepairAssistantPrompt } from './scenarioCPromptDetection';
 import { coerceIncompleteInterviewClosingForTts } from './elongatingProbe';
 import { looksLikeScenarioAContemptProbeQuestion } from './scenarioAContemptProbeTextMatch';
 import {
@@ -75,14 +76,51 @@ export function looksLikeScenarioARepairQuestion(text: string): boolean {
     hasRyanPerspective &&
     hasRepairVerb &&
     (/\b(situation|relationship|this|off)\b/.test(t) || t.length < 120);
+  /** Retired repair-as-Ryan paraphrases that omit the word "repair" (e.g. "As Ryan, how would you respond…"). */
+  const ryanRoleplayRespond =
+    hasRyanPerspective &&
+    /\bhow would you\b/.test(t) &&
+    /\b(respond|reply|answer|react|handle|say)\b/.test(t);
   return (
     t.includes('how would you repair this relationship if you were ryan') ||
     t.includes('how would you repair this as ryan') ||
+    t.includes('how would you repair things as ryan') ||
+    t.includes('repair things as ryan') ||
     t.includes('if you were ryan, how would you repair') ||
     (t.includes('if you were ryan') && t.includes('repair this relationship')) ||
     (hasRyanPerspective && /\bhow would you go about repair(?:ing|ed)?\b/.test(t)) ||
-    ryanRepair
+    ryanRepair ||
+    ryanRoleplayRespond
   );
+}
+
+/**
+ * Retired Ryan repair asks must not play during Scenario B.
+ * A normal Situation 2 answer is not a jump ahead — continue to James-differently.
+ * Returns '' to drop the leak when Q2 is already asked, or null when this is not that leak.
+ */
+export function coerceRetiredScenarioARepairLeakDuringScenarioB(args: {
+  spoken: string;
+  scenario: number | null | undefined;
+  moment: number;
+  messages: readonly { role: string; content?: string | null }[];
+}): string | null {
+  if ((args.scenario ?? 0) < 2 || args.moment !== 2) return null;
+  const spoken = (args.spoken ?? '').replace(/\s+/g, ' ').trim();
+  if (
+    !looksLikeScenarioARepairQuestion(spoken) &&
+    !looksLikeScenarioARepairStreamFragment(spoken)
+  ) {
+    return null;
+  }
+  const corpus = args.messages.map((m) => m.content ?? '').join('\n');
+  // Refs can jump to scenario 2 while the participant is still answering the contempt probe.
+  if (!textContainsScenarioBVignetteBody(corpus)) return null;
+  const jamesDifferentlyAsked = args.messages.some(
+    (m) => m.role === 'assistant' && looksLikeScenarioBJamesDifferentlyQuestion(m.content ?? ''),
+  );
+  if (jamesDifferentlyAsked) return '';
+  return `Got it. ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}`;
 }
 
 /** TTS + Show scenario modal copy for the Ryan repair ask (matches {@link SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY}). */
@@ -248,6 +286,8 @@ export function stripEmbeddedScenarioARepairQuestionAsk(draft: string): string {
     /\bIf you were Ryan[^.!?\n]*\brepair(?:ing|ed)?[^.!?\n]*[?.!]?\s*/gi,
     /\bHow would you repair this (?:situation|relationship)?(?:\s+with\s+Emma)?\??\s*/gi,
     /\bHow would you (?:actually )?repair things with Emma(?:\s+after this)?\??\s*/gi,
+    /\bHow would you repair things as Ryan\??\s*/gi,
+    /\b(?:As|If you were) Ryan,?\s+how would you (?:respond|reply|answer|react|handle|say)\b[^.!?\n]*\??\s*/gi,
   ];
   let prev = '';
   while (prev !== t) {
@@ -295,6 +335,31 @@ export function stripScenarioARepairQuestion(text: string): string {
     return '';
   }
   return cleaned.replace(/\n{3,}/g, '\n\n').trim();
+}
+
+const RETIRED_REPAIR_BRIEF_ACK_ONLY =
+  /^(?:got it|okay|ok|makes sense|fair|right|understood|alright|i hear you)\.?$/i;
+
+/**
+ * Retired s1_repair must not be spoken or stored.
+ * "Got it. How would you repair things as Ryan?" becomes empty (ack-only remainder dropped).
+ */
+export function omitRetiredScenarioARepairAsk(text: string): string {
+  const original = text ?? '';
+  const t = original.replace(/\s+/g, ' ').trim();
+  if (!t || !isInterviewCanonicalProbeRetired('s1_repair')) return original;
+  if (
+    !looksLikeScenarioARepairQuestion(t) &&
+    !looksLikeScenarioARepairStreamFragment(t) &&
+    !looksLikeScenarioARepairReAskQuestion(t)
+  ) {
+    return original;
+  }
+  const stripped = stripEmbeddedScenarioARepairQuestionAsk(stripScenarioARepairQuestion(t))
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!stripped || RETIRED_REPAIR_BRIEF_ACK_ONLY.test(stripped)) return '';
+  return stripped;
 }
 
 /**
@@ -438,8 +503,8 @@ export function clearParallelTtsBatchIfScenarioARepairLeakBeforeContempt(args: {
   return { discarded: true, remaining: '' };
 }
 
-/** S1 hypothetical repair-as-Ryan probe is retired — handoff after contempt only. */
-export function shouldAllowScenarioARepairAfterContemptAnswer(_params: {
+/** Speak the Ryan repair probe after contempt is covered, and not before. */
+export function shouldAllowScenarioARepairAfterContemptAnswer(params: {
   currentScenario: number | null | undefined;
   currentMoment: number;
   scenarioAContemptProbeAsked: boolean;
@@ -452,7 +517,18 @@ export function shouldAllowScenarioARepairAfterContemptAnswer(_params: {
   /** Latest user turn — when unassessable/off-topic, do not advance to repair. */
   userAnswer?: string | null;
 }): boolean {
-  return false;
+  if (isInterviewCanonicalProbeRetired('s1_repair')) return false;
+  if (!isScenarioAConstructProbeContext(params.currentScenario, params.currentMoment)) return false;
+  if (params.scenarioARepairQuestionAsked) return false;
+  if (params.shouldForceScenarioAContemptProbe) return false;
+  if (params.userAnswer && looksLikeUnassessableScenarioAnswer(params.userAnswer)) return false;
+  const repairAlreadySpoken = params.messagesToUse.some(
+    (m) => m.role === 'assistant' && looksLikeScenarioARepairQuestion(m.content ?? ''),
+  );
+  if (repairAlreadySpoken) return false;
+  if (scenarioARepairAnswerAlreadySatisfiedInTranscript(params.messagesToUse)) return false;
+  if (params.specificEmmaLineAlreadyAddressed) return true;
+  return params.scenarioAContemptProbeAsked && !params.replyingToScenarioAQ1;
 }
 
 /** Block Ryan repair TTS until contempt is satisfied or the user already covered Emma's line in Q1. */
@@ -487,6 +563,9 @@ function coerceRepeatQuestionForActiveScenario(
   activeScenario?: number,
 ): string {
   if (activeScenario === 3) {
+    if (isInterviewCanonicalProbeRetired('s3_repair')) {
+      return resolvedText;
+    }
     if (
       looksLikeScenarioARepairQuestion(resolvedText) ||
       looksLikeScenarioBRepairAsJamesQuestion(resolvedText) ||
@@ -533,6 +612,9 @@ export function resolveInterviewQuestionRepeatTtsText(
     looksLikeScenarioBLegacyThirdPersonJamesRepairQuestion(t)
   ) {
     if (options?.activeScenario === 3) {
+      if (isInterviewCanonicalProbeRetired('s3_repair')) {
+        return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
+      }
       return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
     }
     return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
@@ -575,6 +657,14 @@ export function resolveInterviewQuestionRepeatTtsText(
     resolved = coerceScenarioBJamesRepairQuestionForTts(resolved);
     resolved = coerceScenarioCRepairQuestionForTts(resolved);
     resolved = coerceRepeatQuestionForActiveScenario(resolved, t, options?.activeScenario);
+  }
+  if (
+    !resolved.trim() &&
+    isInterviewCanonicalProbeRetired('s3_repair') &&
+    (options?.activeScenario === 3 ||
+      (options?.activeScenario == null && isScenarioCRepairAssistantPrompt(t)))
+  ) {
+    return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
   }
   // Repeat should re-ask the question only — not re-speak the prior answer acknowledgment.
   return stripBriefInterviewAcknowledgmentPrefixForRepeat(resolved);

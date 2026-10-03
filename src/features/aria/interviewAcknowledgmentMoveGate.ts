@@ -3,6 +3,7 @@ import {
   looksLikeInterviewerIdentityOrOffTopicAsk,
   looksLikeUnassessableScenarioAnswer,
 } from './interviewAnswerRelevance';
+import { userLacksLivedSupportSituation } from './moment4ProbeLogic';
 import { looksLikeInterviewScoreStatusRequest } from './interviewScoreStatusRequest';
 import { stripBriefInterviewAcknowledgmentPrefixForRepeat } from './interviewRepeatRequestTarget';
 import { chooseBriefScenarioAck } from './interviewReflectionAckVariation';
@@ -235,6 +236,7 @@ export function shouldSkipBriefAckBeforeMoveForUserTurn(userTurn: string): boole
   if (!t) return true;
   if (looksLikeInterviewerIdentityOrOffTopicAsk(t)) return true;
   if (looksLikeInterviewScoreStatusRequest(t)) return true;
+  if (userLacksLivedSupportSituation(t)) return true;
   return looksLikeUnassessableScenarioAnswer(t);
 }
 

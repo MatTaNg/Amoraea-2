@@ -93,7 +93,7 @@ export function DownloadPersonalReportButton({ userId, style, variant = 'dark' }
       ) : (
         <>
           <Text style={[styles.sectionHint, isDark ? styles.sectionHintDark : styles.sectionHintLight]}>
-            Your detailed PDF is ready — written from your assessments and interview.
+            Your full personalized report is ready! Customized to you based on your answers to the interview and assessments.
           </Text>
           <TouchableOpacity
             style={[

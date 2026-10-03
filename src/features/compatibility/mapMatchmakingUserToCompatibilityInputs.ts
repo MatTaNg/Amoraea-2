@@ -39,6 +39,7 @@ export type MappedUserCompatibilityInputs = {
   conflictStyle: ConflictStyleScores | null;
   politics: PoliticsProfile;
   psychometricSoft: PsychometricProfile;
+  /** Deprecated ranking field. Always null. Historical typology means are not pair inputs. */
   sexualCommunicationMean: number | null;
   /** Desired-life fields already collected in profile/onboarding. Optional for test fixtures. */
   concreteLife?: ConcreteLifeFitProfile;
@@ -383,7 +384,7 @@ export function mapMatchmakingUserToCompatibilityInputs(
     conflictStyle: mapConflictStyle(snapshot),
     politics: { politics: strOrNull(snapshot.profile?.politics) },
     psychometricSoft: mapPsychometricSoft(snapshot, extras),
-    sexualCommunicationMean: numOrNull(snapshot.postInterviewTypology?.sexualCommunicationMean),
+    sexualCommunicationMean: null,
     concreteLife: mapConcreteLifeFitProfile(snapshot, extras, compat, dealbreaker),
   };
 }

@@ -24,6 +24,7 @@ import {
   shouldFireWhisperRatioReask,
   shouldRecordInterviewResponseTiming,
 } from '../interviewLanguageGate';
+import { MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT } from '../moment4ProbeLogic';
 
 describe('isNamePromptInterviewMoment', () => {
   it('matches the standard opening line', () => {
@@ -521,7 +522,7 @@ describe('getLastSubstantiveScenarioModalQuestion', () => {
       },
     ];
     expect(getLastSubstantiveScenarioModalQuestion(transcript)).toBe(
-      'If you were Ryan, how would you repair this?',
+      "What about when Emma says 'you've made that very clear' — what do you make of that?",
     );
   });
 });
@@ -582,6 +583,21 @@ describe('resolveScenarioModalDisplayParts', () => {
     const questionOnly = 'Have you ever held a grudge against someone?';
     expect(resolveScenarioModalDisplayParts(questionOnly, null)).toEqual({
       transcript: questionOnly,
+      footerQuestion: null,
+    });
+  });
+
+  it('keeps the partner-stress prompt as one block matching the spoken question', () => {
+    const support =
+      'Think of a time when a partner, or someone you care about, heard some bad news, needed support from you, or was really stressed. What happened, and what did you do?';
+    expect(resolveScenarioModalDisplayParts(support, null)).toEqual({
+      transcript: support,
+      footerQuestion: null,
+    });
+    const hypothetical =
+      'If someone close to you was stressed and needed your support, what would you do?';
+    expect(resolveScenarioModalDisplayParts(hypothetical, null)).toEqual({
+      transcript: hypothetical,
       footerQuestion: null,
     });
   });
@@ -749,7 +765,7 @@ describe('resolveMoment4ShowScenarioReferenceCard', () => {
       }),
     ).toEqual({
       active: true,
-      cardBodyText: orientationProbe,
+      cardBodyText: MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT,
     });
   });
 

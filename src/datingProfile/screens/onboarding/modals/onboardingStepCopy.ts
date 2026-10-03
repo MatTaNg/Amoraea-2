@@ -43,7 +43,7 @@ export const ONBOARDING_SEXUAL_COMPATIBILITY_LEAD =
   'Answer honestly — this helps us understand what matters to you in matching.';
 
 export const ONBOARDING_HOBBY_DEALBREAKER_DESCRIPTION =
-  "If you met someone amazing who didn't share these hobbies with you, how much of a dealbreaker would that be? Which hobby specifically would that be?";
+  'How important is it that your match shares these hobbies? Which hobby specifically would that be?';
 
 export const ONBOARDING_DEALBREAKERS_LEAD =
   'Please note that although honoring yourself is important, dealbreakers will also significantly reduce potential matches.';

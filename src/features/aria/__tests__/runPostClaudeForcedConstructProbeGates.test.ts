@@ -160,7 +160,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
 
     expect(result.handled).toBe(true);
     expect(speak).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
     );
   });
@@ -213,7 +213,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
 
     expect(result.handled).toBe(true);
     expect(speak).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
     );
     expect(deps.setVoiceState).toHaveBeenCalledWith('idle');
@@ -290,7 +290,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
 
     expect(result?.handled).toBe(true);
     expect(speak).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
     );
     expect(speak).not.toHaveBeenCalledWith(
@@ -333,7 +333,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(speak).not.toHaveBeenCalled();
   });
 
-  it('forces S3 repair Q2 even when sanitize already injected repair copy and parallel stream spoke M4', async () => {
+  it('does not force retired S3 repair Q2 even when sanitize injected repair copy', async () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 3 },
       currentScenarioRef: { current: 3 },
@@ -372,12 +372,8 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
       speak,
     );
 
-    expect(result?.handled).toBe(true);
-    expect(speak).toHaveBeenCalledWith(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-      expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
-    );
-    expect(deps.setMessages).toHaveBeenCalled();
+    expect(result?.handled).toBe(false);
+    expect(speak).not.toHaveBeenCalled();
   });
 
   it('skips S3 Sophie forced probe when parallel stream already spoke the Sophie probe', async () => {
@@ -522,7 +518,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
     expect(speak).not.toHaveBeenCalled();
   });
 
-  it('speaks S3 repair when delivered ref is false positive after Sophie answer', async () => {
+  it('does not speak retired S3 repair when the delivered ref is a false positive', async () => {
     const sophieProbe =
       "That makes a lot of sense. What do you think this pattern of leaving has been like for Sophie over time?";
     const deps = createMockPostClaudeDeps({
@@ -566,11 +562,8 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
       speak,
     );
 
-    expect(result?.handled).toBe(true);
-    expect(speak).toHaveBeenCalledWith(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-      expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
-    );
+    expect(result?.handled).toBe(false);
+    expect(speak).not.toHaveBeenCalled();
   });
 
   it('skips re-speaking S3 repair when stream already spoke it but transcript still lags', async () => {
@@ -617,8 +610,7 @@ describe('runPostClaudeForcedConstructProbeGates', () => {
       speak,
     );
 
-    expect(result?.handled).toBe(true);
+    expect(result?.handled).toBe(false);
     expect(speak).not.toHaveBeenCalled();
-    expect(deps.setMessages).toHaveBeenCalled();
   });
 });

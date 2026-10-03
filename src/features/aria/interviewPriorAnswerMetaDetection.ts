@@ -84,6 +84,19 @@ const PRIOR_ANSWER_EXPLICIT_SUFFICIENCY: RegExp[] = [
   /\bdid you hear me\b/i,
 ];
 
+/**
+ * Short process check that the interview or the current prompt is finished.
+ * Not an answer to the question that was just asked.
+ */
+const INTERVIEW_STILL_OPEN_CHECK_RE =
+  /^(?:so\s+)?(?:is\s+(?:that|this)\s+(?:it|all|everything|the\s+end)|that'?s\s+(?:it|all)|(?:that|this)\s+it|are\s+we\s+(?:done|finished)|we\s+done)$/i;
+
+export function looksLikeInterviewStillOpenCheck(text: string): boolean {
+  const t = normalizeMetaUtterance(text).replace(/[.?!]+$/g, '').trim();
+  if (!t || wordCount(t) > 8) return false;
+  return INTERVIEW_STILL_OPEN_CHECK_RE.test(t);
+}
+
 export function looksLikeAlreadyAnsweredClaim(text: string): boolean {
   const t = (text ?? '').trim();
   if (!t) return false;
@@ -94,6 +107,7 @@ export function looksLikeAlreadyAnsweredClaim(text: string): boolean {
 export function looksLikeCheckingInSufficiencyAsk(text: string): boolean {
   const t = (text ?? '').trim();
   if (!t) return false;
+  if (looksLikeInterviewStillOpenCheck(t)) return true;
   if (PRIOR_ANSWER_EXPLICIT_SUFFICIENCY.some((re) => re.test(t))) return true;
   return looksLikeSufficiencyCheckInShape(t);
 }

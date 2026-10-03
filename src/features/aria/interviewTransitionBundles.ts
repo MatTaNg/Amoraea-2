@@ -97,7 +97,7 @@ export const SCENARIO_2_TO_3_TRANSITION_FALLBACK = SCENARIO_2_TO_3_TRANSITION;
 
 /** S3 → M4 lead when no boundary reflection is available — do not reuse for S1/S2. */
 export const MOMENT_4_HANDOFF_NO_NAME_LEAD =
-  "Good work — you just finished the three scenarios. Next are three personal questions. Let's start with something a bit more personal.";
+  'Good work — you just finished the three scenarios. Next are three personal questions.';
 
 /**
  * Assistant copy that opens Moment 4 (handoff and/or grudge question). Used by {@link inferPersonalMomentSlices}
@@ -107,8 +107,8 @@ export function assistantTextLooksLikeMoment4HandoffLead(text: string): boolean 
   const t = (text ?? '').toLowerCase();
   if (/held a grudge|really didn't like/.test(t)) return true;
   if (/really hard time with|got under your skin/.test(t)) return true;
-  if (/finished the three (situations|scenarios)/.test(t)) return true;
-  if (/end of (the )?three (situations|scenarios|described situations|vignettes)/.test(t)) return true;
+  if (/finished the three (?:described )?(?:situations|scenarios)/.test(t)) return true;
+  if (/end of (?:the )?three (?:described )?(?:situations|scenarios|vignettes)/.test(t)) return true;
   if (/done with those three scenarios?/.test(t)) return true;
   if (
     (t.includes('three situations') || t.includes('three scenarios')) &&
@@ -243,8 +243,7 @@ export function buildScenario3ToMoment4BundleForInterview(
   opts?: { reflectionOverride?: string },
 ): string {
   const segmentClose = "That's the end of the three described situations.";
-  const transition =
-    'Next are three personal questions. Now I want to ask you about something a bit more personal.';
+  const transition = 'Next are three personal questions.';
   const reflection = resolveScenarioBoundaryReflection(firstName, lastUserAnswer, {
     scenario: 3,
     reflectionOverride: opts?.reflectionOverride,
@@ -325,13 +324,11 @@ export function buildMoment4ThresholdAnswerToMoment5Bundle(
   return `${pivot}\n\n${moment5Question}`.trim();
 }
 
-/** Spoken pivot into the partner-support personal question (second of three personal blocks). */
-export const MOMENT_SUPPORT_HANDOFF_PIVOT =
-  "Here's another question about you — still personal." as const;
+/** Spoken pivot into the partner-support question. Personal framing is only on the first personal block. */
+export const MOMENT_SUPPORT_HANDOFF_PIVOT = 'Good work.' as const;
 
-/** Spoken pivot into Moment 5 (final personal question before wrap-up). */
-export const MOMENT_5_HANDOFF_PIVOT =
-  "Here's one more question about you — still personal, and then we'll wrap up." as const;
+/** Spoken pivot into Moment 5. Signals the last question without repeating that it is personal. */
+export const MOMENT_5_HANDOFF_PIVOT = "Last one, and then we'll wrap up." as const;
 
 /**
  * After Moment 4 threshold (or orientation) is complete: standard personal-block transition + support question.

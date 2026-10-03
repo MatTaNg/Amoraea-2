@@ -956,8 +956,11 @@ export function aggregateMarketResearch(
   const referralDisplay = respondents.map((u) => {
     const src = u.market_research_referral_source;
     if (!src) return null;
-    if (src === 'Other' && u.market_research_referral_other?.trim()) {
-      return `Other: ${u.market_research_referral_other.trim()}`;
+    if (
+      (src === 'Other' || src === 'Event') &&
+      u.market_research_referral_other?.trim()
+    ) {
+      return `${src}: ${u.market_research_referral_other.trim()}`;
     }
     return src;
   });

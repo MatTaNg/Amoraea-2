@@ -6,7 +6,6 @@ import {
   validateProfilePromptsForSetup,
   wouldRemovalBreakRequiredCategoryFloor,
   assertValidProfilePromptsForServerSave,
-  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
 } from '@/features/profile/profilePromptValidation';
 import type { ProfilePromptAnswer } from '@domain/models/Profile';
 
@@ -85,19 +84,9 @@ describe('profilePromptValidation', () => {
     if (!result.ok) expect(result.code).toBe('duplicate_prompt');
   });
 
-  it('rejects required-category answers under the minimum', () => {
-    const short = 'a'.repeat(PROFILE_PROMPT_ANSWER_MIN_LENGTH - 1);
+  it('allows short required-category answers', () => {
     const result = validateProfilePromptsForSetup([
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', short),
-    ]);
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.code).toBe('answer_too_short');
-  });
-
-  it('allows required-category answers that meet the minimum', () => {
-    const justEnough = 'a'.repeat(PROFILE_PROMPT_ANSWER_MIN_LENGTH);
-    const result = validateProfilePromptsForSetup([
-      requiredPrompt('wmtm_partnership', 'what_matters_to_me', justEnough),
+      requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'Hi'),
     ]);
     expect(result.ok).toBe(true);
   });
@@ -110,12 +99,12 @@ describe('profilePromptValidation', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('server save assertion rejects short required answers independently of UI', () => {
+  it('server save assertion allows short required answers', () => {
     expect(() =>
       assertValidProfilePromptsForServerSave([
-        requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'x'.repeat(10)),
+        requiredPrompt('wmtm_partnership', 'what_matters_to_me', 'Hi'),
       ]),
-    ).toThrow(/30/);
+    ).not.toThrow();
   });
 
   it('server save assertion allows long required and optional answers', () => {

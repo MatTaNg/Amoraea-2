@@ -36,6 +36,8 @@ import {
   looksLikeScenarioCDanielComeBackMisparaphraseQuestion,
 } from '@features/aria/scenarioCPromptDetection';
 import { shouldAdvanceScenarioAAfterSatisfiedRepair } from '@features/aria/interviewRepairRefusalDetection';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
+import { omitRetiredScenarioARepairAsk } from '@features/aria/scenarioARepairQuestionHelpers';
 import {
   debugScenarioAQ1ContemptProbeCoverageDetail,
   isIncompleteScenarioAContemptProbeLeadSentence,
@@ -67,7 +69,7 @@ import {
   stripScenarioBRepairAsJamesQuestion,
 } from '@features/aria/scenarioBProbeLogic';
 import { textContainsScenarioCVignetteBody } from '@features/aria/scenarioCProbeLogic';
-import { isActiveScenarioBConstructProbeTurn, transcriptHasUserResponseAfterScenarioAContemptProbe } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import { isActiveScenarioBConstructProbeTurn } from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { remoteLog } from '@utilities/remoteLog';
 
 export type PostClaudeAssistantDraftProbeFlags = {
@@ -214,15 +216,13 @@ export function finalizePostClaudeAssistantDraftProbeSequence(
   }
 
   if (
-    deps.currentInterviewMomentRef.current === 1 &&
-    transcriptHasUserResponseAfterScenarioAContemptProbe(params.messagesToUse) &&
-    (assistantIssuedScenarioARepairQuestion || looksLikeScenarioARepairQuestion(strippedText))
+    isInterviewCanonicalProbeRetired('s1_repair') &&
+    (assistantIssuedScenarioARepairQuestion ||
+      looksLikeScenarioARepairQuestion(strippedText) ||
+      looksLikeScenarioARepairStreamFragment(strippedText))
   ) {
     const beforeRetiredRepairStrip = strippedText;
-    strippedText = stripScenarioARepairQuestion(strippedText);
-    if (looksLikeScenarioARepairStreamFragment(strippedText)) {
-      strippedText = '';
-    }
+    strippedText = omitRetiredScenarioARepairAsk(strippedText);
     assistantIssuedScenarioARepairQuestion = false;
     void remoteLog('[S1_REPAIR_PROBE_RETIRED_STRIPPED]', {
       preview: beforeRetiredRepairStrip.slice(0, 260),

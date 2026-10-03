@@ -8,6 +8,7 @@ import {
   looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
   looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportNoSituationHypothetical,
   looksLikeMomentSupportQuestion,
   looksLikeNeedRecognitionInSupportAnswer,
   looksLikeUnassessableMoment4ThresholdAnswer,
@@ -18,6 +19,7 @@ import {
 import {
   evaluateMoment4SpecificityProbe,
   looksLikeMoment4SpecificityFollowUpEcho,
+  shouldAskCommitmentHypotheticalFallback,
 } from '@features/aria/moment4SpecificityFollowUp';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import type { InterviewTurnStateSnapshot } from '@features/aria/interviewTurnOrchestratorTypes';
@@ -25,7 +27,7 @@ import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from '@feat
 
 /**
  * Pending M4/support/M5 canonical probes — mirrors pre-Claude inject gate eligibility using transcript signals.
- * Flow: grudge → keep-investing orientation → walk-away threshold → support (+ conditional) → M5 conflict.
+ * Flow: grudge → keep-investing orientation → walk-away fallback only when they have no relationship → support (+ conditional) → M5 conflict.
  */
 export function resolvePendingPersonalMomentProbe(args: {
   snapshot: InterviewTurnStateSnapshot;
@@ -86,23 +88,28 @@ export function resolvePendingPersonalMomentProbe(args: {
     return null;
   }
 
-  if (
-    orientationInTranscript &&
-    !thresholdInTranscript &&
-    (looksLikeMoment4OrientationQuestion(lastAssistantContent) ||
-      isAnsweringFirstUserTurnAfterMoment4Orientation(priorTranscript)) &&
-    looksLikeAssessableOrientationAnswer(userText)
-  ) {
-    return 'm4_commitment_threshold';
+  const answeringOrientation =
+    looksLikeMoment4OrientationQuestion(lastAssistantContent) ||
+    isAnsweringFirstUserTurnAfterMoment4Orientation(priorTranscript);
+  if (orientationInTranscript && !thresholdInTranscript && answeringOrientation) {
+    if (shouldAskCommitmentHypotheticalFallback(userText)) {
+      return 'm4_commitment_threshold';
+    }
   }
 
-  if (
+  const orientationAnswerLetsSupportProceed =
+    orientationInTranscript &&
+    !thresholdInTranscript &&
+    answeringOrientation &&
+    !shouldAskCommitmentHypotheticalFallback(userText) &&
+    looksLikeAssessableOrientationAnswer(userText);
+  const thresholdAnswerLetsSupportProceed =
     thresholdInTranscript &&
-    !supportInTranscript &&
     (looksLikeMoment4ThresholdQuestion(lastAssistantContent) ||
       isAnsweringFirstUserTurnAfterMoment4Threshold(priorTranscript)) &&
-    !looksLikeUnassessableMoment4ThresholdAnswer(userText)
-  ) {
+    !looksLikeUnassessableMoment4ThresholdAnswer(userText);
+
+  if (!supportInTranscript && (orientationAnswerLetsSupportProceed || thresholdAnswerLetsSupportProceed)) {
     return 'm_support';
   }
 
@@ -111,7 +118,8 @@ export function resolvePendingPersonalMomentProbe(args: {
     if (
       !supportConditionalInTranscript &&
       !supportNeedAlreadyPresent &&
-      looksLikeMomentSupportQuestion(lastAssistantContent) &&
+      (looksLikeMomentSupportQuestion(lastAssistantContent) ||
+        looksLikeMomentSupportNoSituationHypothetical(lastAssistantContent)) &&
       looksLikeAssessableSupportAnswer(userText)
     ) {
       return 'm_support_need_recognition';

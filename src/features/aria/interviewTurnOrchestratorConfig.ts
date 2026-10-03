@@ -78,10 +78,11 @@ export const INTERVIEW_SCENARIO_BOUNDARY_LLM_TIMEOUT_MS = 2_500;
 export const INTERVIEW_SCENARIO_BOUNDARY_LLM_PREFETCH_ENABLED = true;
 
 /**
- * Phase 3: brief within-scenario acknowledgement via Claude before verbatim canonical probes
- * (orchestrator speak_canonical withBriefAck) and when client backfills a missing receipt.
+ * Content reflections before the next scripted question are removed.
+ * Between-question receipts stay on the static brief list ("Got it.", "Makes sense.").
+ * The Claude within-scenario ack restated the answer ("She was expecting celebration, not questions.").
  */
-export const INTERVIEW_WITHIN_SCENARIO_ACK_LLM_ENABLED = true;
+export const INTERVIEW_WITHIN_SCENARIO_ACK_LLM_ENABLED = false;
 
 /** Max wait for within-scenario brief ack — shorter than boundary handoff. */
 export const INTERVIEW_WITHIN_SCENARIO_ACK_LLM_TIMEOUT_MS = 1_500;

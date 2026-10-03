@@ -89,38 +89,30 @@ describe('Scenario C Q1 misplaced answer detection', () => {
     ).toBeNull();
   });
 
-  it('coerces Daniel shoes role-play paraphrase to canonical repair Q2', () => {
+  it('drops Daniel shoes role-play paraphrase while Scenario C repair is retired', () => {
     const bad =
       "Yet if you were in Daniel's shoes how would you repair things with Sophie";
     expect(looksLikeScenarioCRepairAsDanielQuestion(bad)).toBe(true);
-    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe('');
   });
 
-  it('coerces Sophie-receive misparaphrase to canonical repair Q2', () => {
+  it('does not rewrite Sophie-receive misparaphrase into retired repair Q2', () => {
     const bad =
       "Makes sense. And when he comes back — how should Sophie receive";
     expect(looksLikeScenarioCSophieReceiveMisparaphraseQuestion(bad)).toBe(true);
-    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(bad);
   });
 
-  it('detects and replaces Sophie-respond-when-Daniel-returns misparaphrase', () => {
+  it('detects and leaves Sophie-respond-when-Daniel-returns misparaphrase while repair is retired', () => {
     const bad = 'Got it. How would you want Sophie to respond when Daniel comes back?';
     expect(looksLikeScenarioCSophieReceiveMisparaphraseQuestion(bad)).toBe(true);
-    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(bad);
   });
 
   it('detects Sophie-to-do-with-Daniel misparaphrase from session logs', () => {
     const bad = 'Got it. And what would you want Sophie to do with what Daniel just';
     expect(looksLikeScenarioCSophieReceiveMisparaphraseQuestion(bad)).toBe(true);
-    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(bad);
   });
 
   it('detects "what do you think Sophie should do when Daniel comes back" misparaphrase', () => {
@@ -128,16 +120,12 @@ describe('Scenario C Q1 misplaced answer detection', () => {
       "And what do you think Sophie should do when Daniel comes back?";
     expect(looksLikeScenarioCSophieReceiveMisparaphraseQuestion(bad)).toBe(true);
     expect(looksLikeScenarioCDanielComeBackMisparaphraseQuestion(bad)).toBe(true);
-    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(coerceScenarioCRepairQuestionForTts(bad)).toBe(bad);
   });
 
-  it('expands truncated tab-restore repair tail to canonical Q2', () => {
+  it('does not expand a truncated repair tail into retired repair Q2', () => {
     expect(isIncompleteScenarioCRepairQuestionTail('situation could be repaired')).toBe(true);
-    expect(coerceInterviewReplayTtsText('situation could be repaired', [])).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(coerceInterviewReplayTtsText('situation could be repaired', [])).toBe('');
   });
 
   it('flags repair logistics without Daniel-internal read', () => {
@@ -150,6 +138,18 @@ describe('Scenario C Q1 misplaced answer detection', () => {
     const a =
       "That line sounds like he's ashamed he kept bailing — he didn't know how to come back without flooding, not that he didn't care.";
     expect(isMisplacedScenarioCQ1Answer(a)).toBe(false);
+  });
+
+  it('accepts a read of Daniel leaving and coming back because he does not know what to say', () => {
+    const a =
+      "It sounds like Daniel has difficulty knowing what to say and how to handle the situation specifically with Sophie and so instead of facing it he tries to run away and when he does walk away and come back he realizes that the situation is that he actually just doesn't know what to say and I think that's a pretty fair and honest response.";
+    expect(isMisplacedScenarioCQ1Answer(a)).toBe(false);
+  });
+
+  it('still flags a relationship walk-away verdict that never reads the line', () => {
+    const a =
+      'I would walk away. This relationship is not working and Sophie should seriously consider ending it without real change.';
+    expect(isMisplacedScenarioCQ1Answer(a)).toBe(true);
   });
 
   it('flags prescription + threshold verdict when user never engages the quoted line', () => {

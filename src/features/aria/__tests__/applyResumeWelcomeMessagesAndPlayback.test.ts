@@ -7,6 +7,7 @@ import {
   MOMENT_4_GRUDGE_QUESTION_TEXT,
 } from '@features/aria/moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '@features/aria/scenarioCPromptDetection';
 
 describe('resolveResumeWelcomeQuestionText', () => {
@@ -26,7 +27,8 @@ describe('resolveResumeWelcomeQuestionText', () => {
       SCENARIO_C_REPAIR_QUESTION_CANONICAL,
       { activeScenario: 3, firstName: 'Matt' },
     );
-    expect(withoutPersonalPart.toLowerCase()).toContain('repaired');
+    expect(withoutPersonalPart).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
+    expect(withoutPersonalPart.toLowerCase()).not.toContain('repaired');
 
     const withPersonalPart = resolveResumeWelcomeQuestionText(
       messages,

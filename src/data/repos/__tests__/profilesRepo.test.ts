@@ -88,6 +88,26 @@ describe('profilesRepo.getProfile', () => {
     expect(result.success).toBe(true);
     expect(result.data?.photos).toEqual(['https://cdn.example.com/1.jpg']);
   });
+
+  it('keeps an edited gallery at 6 and does not resurrect join-table photos', async () => {
+    const gallery = [1, 2, 3, 4, 5, 6, 7].map((n) => `https://cdn.example.com/${n}.jpg`);
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'profiles') {
+        return mockProfilesSelect({
+          id: 'user-1',
+          profile_json: { photos: gallery },
+        });
+      }
+      if (table === 'profile_photos') {
+        return mockProfilePhotosSelect(['https://cdn.example.com/extra.jpg']);
+      }
+      return mockProfilesSelect(null);
+    });
+
+    const result = await profilesRepo.getProfile('user-1');
+    expect(result.success).toBe(true);
+    expect(result.data?.photos).toEqual(gallery.slice(0, 6));
+  });
 });
 
 describe('profilesRepo.updateProfile', () => {
@@ -130,6 +150,32 @@ describe('profilesRepo.updateProfile', () => {
       primaryPhotoUrl: 'https://new.jpg',
     });
     expect(upsertPayload.avatar_url).toBe('https://old.jpg');
+  });
+
+  it('stores at most 6 photos when a save includes more', async () => {
+    const upsert = jest.fn(() => Promise.resolve({ error: null }));
+    const photos = [1, 2, 3, 4, 5, 6, 7].map((n) => `https://cdn.example.com/${n}.jpg`);
+    (supabase.from as jest.Mock).mockImplementation((table: string) => {
+      if (table === 'profiles') {
+        return {
+          ...mockProfilesSelect({
+            id: 'user-1',
+            email: 'user@test.com',
+            profile_json: { photos: [] },
+          }),
+          upsert,
+        };
+      }
+      return mockProfilePhotosSelect([]);
+    });
+    (supabase.auth.getUser as jest.Mock).mockResolvedValue({
+      data: { user: { id: 'user-1', email: 'user@test.com', user_metadata: {} } },
+    });
+
+    const result = await profilesRepo.updateProfile('user-1', { photos });
+    expect(result.success).toBe(true);
+    const upsertPayload = upsert.mock.calls[0]![0] as { profile_json: { photos: string[] } };
+    expect(upsertPayload.profile_json.photos).toEqual(photos.slice(0, 6));
   });
 
   it('returns error when no email is available', async () => {

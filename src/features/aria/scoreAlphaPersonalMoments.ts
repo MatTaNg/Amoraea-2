@@ -14,6 +14,7 @@ import { resolveMoment5ClientScoringMeta } from '@features/aria/moment5ClientSco
 import { moment5ScoringAllowed } from '@features/aria/moment5ScoringGuard';
 import { finalizePersonalMomentDepthSignals } from '@features/aria/personalMomentDepthSignals';
 import { applyMoment4UnassessableNullRules } from '@features/aria/moment4UnassessableNullRules';
+import { resolveCommitmentResponseSource } from '@features/aria/moment4ProbeLogic';
 import { userTextFromTranscriptTurns } from '@features/aria/moment4AccountabilitySituationalExempt';
 import { buildPersonalMomentScoringPrompt } from '@features/aria/personalMomentScoringPrompt';
 import { inferPersonalMomentSlices, resolveMoment5ScoringSlice } from '@features/aria/personalMomentSlices';
@@ -266,6 +267,7 @@ export async function scoreAlphaPersonalMoments(
       moment4ForAggregate,
       scoringBaseline,
       moment4SpecificityScoringRef.current,
+      resolveCommitmentResponseSource(finalMessages),
     );
   }
 

@@ -271,9 +271,9 @@ function ecr36Insight(scores: Record<string, number>): InsightContent {
     headline,
     body,
     growthEdge,
-    nextTitle: "Sexual Communication",
-    nextMeta: "10 questions · ~3 minutes",
-    isFinal: false,
+    nextTitle: null,
+    nextMeta: null,
+    isFinal: true,
     details: attachmentDetails(scores),
   };
 }

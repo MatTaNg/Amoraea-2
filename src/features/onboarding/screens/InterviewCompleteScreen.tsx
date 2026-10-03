@@ -60,7 +60,7 @@ const ASSESSMENT_TIPS = [
   {
     icon: 'refresh-outline' as const,
     title: 'Be yourself, not your best self',
-    body: 'The assessments work best when you describe how you actually are — not how you wish you were.',
+    body: 'The assessments work best when you describe how you actually are, not how you wish you were.',
   },
 ] as const;
 
@@ -163,7 +163,7 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
         </View>
 
         <Text style={styles.eyebrow}>Interview complete</Text>
-        <Text style={styles.title}>Congratulations — you're almost there.</Text>
+        <Text style={styles.title}>Congratulations, You're almost there!</Text>
 
         <View style={styles.progressTracker}>
           <View style={styles.progressStep}>
@@ -203,7 +203,7 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
         <View style={styles.nextStepSection}>
           <Text style={styles.sectionLabel}>What's next</Text>
           <Text style={styles.nextStepLead}>
-            Self-assessments — about {PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} minutes of
+            Self-assessments: About {PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} minutes of
             research-backed questionnaires on personality, attachment, and how you relate to others.
           </Text>
         </View>
@@ -224,7 +224,7 @@ export function InterviewCompleteScreen({ navigation, route }: Props) {
         <View style={styles.totalRow}>
           <Ionicons name="time-outline" size={18} color={PSYCHOMETRICS_ACCENT} />
           <Text style={styles.totalTime}>
-            Interview done · ~{PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min of assessments remaining
+            Interview done ~{PRE_INTERVIEW_PSYCHOMETRICS_ESTIMATED_MINUTES} min of assessments remaining
           </Text>
         </View>
 
@@ -281,7 +281,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingBottom: spacing.xl,
   } as ViewStyle,
-  logoWrap: { alignItems: 'center', marginBottom: spacing.md },
+  logoWrap: {
+    width: '100%',
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing.md,
+  },
   eyebrow: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,
     fontSize: 13,
@@ -300,14 +306,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 32,
     marginBottom: spacing.lg,
-    maxWidth: 420,
+    maxWidth: '100%',
   },
   progressTracker: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     marginBottom: spacing.lg,
     paddingHorizontal: 8,
   },
@@ -367,19 +373,19 @@ const styles = StyleSheet.create({
   },
   reportSection: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     marginTop: spacing.sm,
     marginBottom: spacing.md,
   },
   compatibilitySection: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     marginBottom: spacing.md,
     paddingHorizontal: 4,
   },
   nextStepSection: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     marginBottom: spacing.lg,
     gap: 10,
     paddingHorizontal: 4,
@@ -399,7 +405,7 @@ const styles = StyleSheet.create({
   },
   benefitsSection: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     marginBottom: spacing.lg,
     gap: 10,
     paddingHorizontal: 4,
@@ -430,7 +436,7 @@ const styles = StyleSheet.create({
   },
   tipsSection: {
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     marginBottom: spacing.md,
     gap: 8,
   },
@@ -469,7 +475,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
     marginBottom: spacing.md,
-    maxWidth: 420,
+    maxWidth: '100%',
     paddingHorizontal: 8,
   },
   totalTime: {
@@ -487,7 +493,7 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     textAlign: 'center',
     marginBottom: spacing.lg,
-    maxWidth: 420,
+    maxWidth: '100%',
     paddingHorizontal: 4,
   },
   cta: {
@@ -498,7 +504,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 22,
     width: '100%',
-    maxWidth: 420,
+    maxWidth: '100%',
     alignItems: 'center',
     marginBottom: spacing.lg,
     ...Platform.select({

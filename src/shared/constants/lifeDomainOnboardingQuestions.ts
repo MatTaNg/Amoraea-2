@@ -35,6 +35,42 @@ export const LIFE_DOMAIN_ONBOARDING_DOMAINS: {
 /** Legacy free-text sleep schedule answers (preserved in `life_domain_answers`). */
 export const LEGACY_SLEEP_SCHEDULE_DESCRIPTION_QUESTION_ID = 'sleepScheduleDescription';
 
+/**
+ * Asked as their own onboarding steps, then shown on edit-profile Essentials.
+ * Kept out of the optional life-domain deep-dive lists so they are not asked twice.
+ */
+export const ESSENTIALS_PROFILE_QUESTION_PLACEMENT: ReadonlyArray<{
+  domainId: LifeDomainId;
+  questionId: string;
+}> = [
+  { domainId: 'intimacy', questionId: 'livingLocation' },
+  { domainId: 'intimacy', questionId: 'sexFrequency' },
+  { domainId: 'finance', questionId: 'yearlyIncome' },
+  { domainId: 'finance', questionId: 'financesPooled' },
+  { domainId: 'finance', questionId: 'debtAmount' },
+  { domainId: 'finance', questionId: 'debtPayoffPlan' },
+  { domainId: 'spirituality', questionId: 'raisingChildrenInFaith' },
+  { domainId: 'spirituality', questionId: 'spiritualPracticeWeeklyHours' },
+  { domainId: 'family', questionId: 'petStatus' },
+  { domainId: 'health', questionId: 'sleepSchedule' },
+];
+
+const ESSENTIALS_QUESTION_IDS_BY_DOMAIN: Record<LifeDomainId, ReadonlySet<string>> = {
+  intimacy: new Set(['livingLocation', 'sexFrequency']),
+  finance: new Set(['yearlyIncome', 'financesPooled', 'debtAmount', 'debtPayoffPlan']),
+  spirituality: new Set(['raisingChildrenInFaith', 'spiritualPracticeWeeklyHours']),
+  family: new Set(['petStatus']),
+  health: new Set(['sleepSchedule']),
+};
+
+const LIFE_DOMAIN_QUESTION_BANKS: Record<LifeDomainId, LifeDomainQuestionBankItem[]> = {
+  finance: FINANCE_QUESTIONS,
+  family: PHYSICAL_HEALTH_QUESTIONS,
+  intimacy: INTIMACY_QUESTIONS,
+  spirituality: SPIRITUALITY_QUESTIONS,
+  health: PERSONAL_GROWTH_QUESTIONS,
+};
+
 function mapBankQuestions(questions: LifeDomainQuestionBankItem[]): LifeDomainQuestionDef[] {
   return questions.map((q) => {
     const base = {
@@ -59,13 +95,40 @@ function mapBankQuestions(questions: LifeDomainQuestionBankItem[]): LifeDomainQu
   });
 }
 
+function mapAllDomainQuestions(domainId: LifeDomainId): LifeDomainQuestionDef[] {
+  return mapBankQuestions(LIFE_DOMAIN_QUESTION_BANKS[domainId]);
+}
+
+function mapDomainQuestions(domainId: LifeDomainId): LifeDomainQuestionDef[] {
+  const excluded = ESSENTIALS_QUESTION_IDS_BY_DOMAIN[domainId];
+  return mapAllDomainQuestions(domainId).filter((q) => !excluded.has(q.id));
+}
+
 export const LIFE_DOMAIN_ONBOARDING_QUESTIONS: Record<LifeDomainId, LifeDomainQuestionDef[]> = {
-  finance: mapBankQuestions(FINANCE_QUESTIONS),
-  family: mapBankQuestions(PHYSICAL_HEALTH_QUESTIONS),
-  intimacy: mapBankQuestions(INTIMACY_QUESTIONS),
-  spirituality: mapBankQuestions(SPIRITUALITY_QUESTIONS),
-  health: mapBankQuestions(PERSONAL_GROWTH_QUESTIONS),
+  finance: mapDomainQuestions('finance'),
+  family: mapDomainQuestions('family'),
+  intimacy: mapDomainQuestions('intimacy'),
+  spirituality: mapDomainQuestions('spirituality'),
+  health: mapDomainQuestions('health'),
 };
+
+export function isEssentialsProfileLifeDomainQuestion(
+  domainId: LifeDomainId,
+  questionId: string,
+): boolean {
+  return ESSENTIALS_QUESTION_IDS_BY_DOMAIN[domainId]?.has(questionId) ?? false;
+}
+
+/** Same question copy and options, placed on edit-profile Essentials. Answers stay on the life-domain keys. */
+export function getEssentialsProfileQuestions(): Array<{
+  domainId: LifeDomainId;
+  question: LifeDomainQuestionDef;
+}> {
+  return ESSENTIALS_PROFILE_QUESTION_PLACEMENT.flatMap(({ domainId, questionId }) => {
+    const question = mapAllDomainQuestions(domainId).find((q) => q.id === questionId);
+    return question ? [{ domainId, question }] : [];
+  });
+}
 
 export function isLifeDomainAnswerFilled(value: string | undefined | null): boolean {
   return value != null && String(value).trim() !== '';
@@ -247,6 +310,13 @@ export function lifeDomainQuestionStepId(domainId: LifeDomainId, questionId: str
   return `lifeDomainQ__${domainId}__${questionId}`;
 }
 
+/** Essentials questions are onboarding steps again, so a saved step is not skipped. */
+export function relocatedEssentialsQuestionResumeStep(
+  _step: string,
+): 'spaceForNewRelationship' | null {
+  return null;
+}
+
 export function parseLifeDomainQuestionStepId(
   step: string,
 ): { domainId: LifeDomainId; questionId: string } | null {
@@ -267,7 +337,7 @@ function buildRequiredQuestionSteps(): Array<{
 }> {
   const rows: Array<{ step: string; domainId: LifeDomainId; questionId: string }> = [];
   for (const domainId of LIFE_DOMAIN_ONBOARDING_DOMAIN_ORDER) {
-    for (const q of LIFE_DOMAIN_ONBOARDING_QUESTIONS[domainId]) {
+    for (const q of mapAllDomainQuestions(domainId)) {
       if (!q.required && !q.requiredWhenWantKids) continue;
       rows.push({
         step: lifeDomainQuestionStepId(domainId, q.id),
@@ -382,5 +452,5 @@ export function findLifeDomainQuestionDef(
   domainId: LifeDomainId,
   questionId: string,
 ): LifeDomainQuestionDef | undefined {
-  return (LIFE_DOMAIN_ONBOARDING_QUESTIONS[domainId] ?? []).find((q) => q.id === questionId);
+  return mapAllDomainQuestions(domainId).find((q) => q.id === questionId);
 }

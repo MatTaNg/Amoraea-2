@@ -3,14 +3,11 @@ import {
   getPromptById,
   getPromptCategoryId,
   MAX_PROFILE_PROMPTS,
-  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
   REQUIRED_PROFILE_PROMPT_CATEGORY_IDS,
-  promptAnswerHasMinimumLength,
 } from '@/features/profile/profilePromptsLibrary';
 
 export {
   MAX_PROFILE_PROMPTS,
-  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
   REQUIRED_PROFILE_PROMPT_CATEGORY_IDS,
 };
 
@@ -19,7 +16,6 @@ export type ProfilePromptValidationCode =
   | 'duplicate_prompt'
   | 'unknown_prompt'
   | 'empty_answer'
-  | 'answer_too_short'
   | 'missing_required_category'
   | 'no_prompts';
 
@@ -70,7 +66,7 @@ export function hasRequiredCategoryPrompt(prompts: ProfilePromptAnswer[]): boole
   );
 }
 
-/** Profile setup gate: ≥1 prompt, ≤3, no dupes, ≥1 from required categories; required-category answers ≥30 chars. */
+/** Profile setup gate: ≥1 prompt, ≤3, no dupes, ≥1 from required categories. */
 export function validateProfilePromptsForSetup(
   raw: unknown,
 ): ProfilePromptValidationResult {
@@ -134,16 +130,6 @@ function validateProfilePrompts(
         ok: false,
         code: 'empty_answer',
         message: 'Every selected prompt needs an answer.',
-      };
-    }
-    if (
-      promptAnswerHasMinimumLength(normalized.categoryId) &&
-      normalized.answer.length < PROFILE_PROMPT_ANSWER_MIN_LENGTH
-    ) {
-      return {
-        ok: false,
-        code: 'answer_too_short',
-        message: `Your required prompt answer needs at least ${PROFILE_PROMPT_ANSWER_MIN_LENGTH} characters.`,
       };
     }
 

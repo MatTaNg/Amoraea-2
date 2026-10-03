@@ -19,17 +19,17 @@ describe('onboardingStepOrder', () => {
     expect(attractionIdx).toBe(nameIdx + 1);
   });
 
-  it('places life-domain required questions before space and lifestyle dealbreakers', () => {
-    const yearlyIncomeIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomainQ__finance__yearlyIncome');
-    const sleepScheduleIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomainQ__health__sleepSchedule');
+  it('places more-about-you questions after recent dating and before space for a new relationship', () => {
     const recentDatingIdx = ONBOARDING_STEPS_ORDER.indexOf('recentDatingEarlyWeeks');
+    const incomeIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomainQ__finance__yearlyIncome');
+    const sleepIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomainQ__health__sleepSchedule');
     const spaceIdx = ONBOARDING_STEPS_ORDER.indexOf('spaceForNewRelationship');
     const matchPrefsIdx = ONBOARDING_STEPS_ORDER.indexOf('matchPreferences');
     const lifeDomainsIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomains');
 
-    expect(yearlyIncomeIdx).toBeGreaterThan(recentDatingIdx);
-    expect(sleepScheduleIdx).toBeGreaterThan(yearlyIncomeIdx);
-    expect(spaceIdx).toBeGreaterThan(sleepScheduleIdx);
+    expect(incomeIdx).toBe(recentDatingIdx + 1);
+    expect(sleepIdx).toBeGreaterThan(incomeIdx);
+    expect(spaceIdx).toBe(sleepIdx + 1);
     expect(matchPrefsIdx).toBeGreaterThan(spaceIdx);
     expect(lifeDomainsIdx).toBeGreaterThan(matchPrefsIdx);
   });
@@ -45,7 +45,11 @@ describe('onboardingStepOrder', () => {
     expect(getNextOnboardingStep('sexualFocus')).toBe('recentDatingEarlyWeeks');
   });
 
-  it('advances from recent dating to first finance question', () => {
+  it('advances from recent dating into the more-about-you questions', () => {
     expect(getNextOnboardingStep('recentDatingEarlyWeeks')).toBe('lifeDomainQ__finance__yearlyIncome');
+  });
+
+  it('advances from sleep schedule to space for a new relationship', () => {
+    expect(getNextOnboardingStep('lifeDomainQ__health__sleepSchedule')).toBe('spaceForNewRelationship');
   });
 });

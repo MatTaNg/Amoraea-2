@@ -8,6 +8,9 @@ import { looksLikeNeedRecognitionInSupportAnswer } from '@features/aria/moment4P
 import { looksLikeGoBackToPreviousScenarioRequest } from '@features/aria/interviewGoBackRequest';
 import { looksLikeInterviewScoreStatusRequest } from '@features/aria/interviewScoreStatusRequest';
 import type { InterviewCanonicalProbeId } from '@features/aria/interviewCanonicalProbeRegistry';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
+import { looksLikeScenarioARepairQuestion } from '@features/aria/scenarioARepairQuestionHelpers';
+import { userAnswerIncludesExplicitScenarioARepairAsRyan } from '@features/aria/interviewRepairRefusalDetection';
 import { evaluateInterviewProbeConstructSatisfaction } from '@features/aria/evaluateInterviewProbeConstructSatisfaction';
 import type { ConstructSatisfactionResolvedByProbe } from '@features/aria/interviewConstructSatisfactionLlmTypes';
 import type { MetaCommentClassification } from '@features/aria/metaCommentClassification';
@@ -26,6 +29,7 @@ import {
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
   SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
+import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '@features/aria/scenarioCPromptDetection';
 import {
   shouldDeliverScenarioFollowUpQuestion,
 } from '@features/aria/scenarioFollowUpTranscriptGuard';
@@ -96,9 +100,10 @@ const SCENARIO_PROBE_ADVANCE_ORDER: InterviewCanonicalProbeId[] = [
   's1_contempt',
   's2_james_differently',
   's3_sophie_perspective',
+  's3_repair',
   'm4_grudge',
-  'm4_commitment_threshold',
   'm4_commitment_orientation',
+  'm4_commitment_threshold',
   'm_support',
   'm_support_need_recognition',
   'm5_conflict',
@@ -110,7 +115,12 @@ function nextProbeAfterSkip(
 ): InterviewCanonicalProbeId | undefined {
   const idx = SCENARIO_PROBE_ADVANCE_ORDER.indexOf(skipped);
   if (idx < 0) return undefined;
-  for (let i = idx + 1; i < SCENARIO_PROBE_ADVANCE_ORDER.length; i++) {
+  // Walk-away is a conditional fallback, not the next mandatory probe after keep-investing.
+  const start =
+    skipped === 'm4_commitment_orientation'
+      ? SCENARIO_PROBE_ADVANCE_ORDER.indexOf('m_support')
+      : idx + 1;
+  for (let i = start; i < SCENARIO_PROBE_ADVANCE_ORDER.length; i++) {
     const candidate = SCENARIO_PROBE_ADVANCE_ORDER[i];
     if (!satisfiedProbeIds.includes(candidate)) {
       return candidate;
@@ -180,7 +190,7 @@ function resolvePendingProbe(
     constructFlags.allowScenarioARepairAfterContemptAnswer &&
     shouldDeliverScenarioFollowUpQuestion(messages, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY)
   ) {
-    // S1 hypothetical repair probe retired — spontaneous repair still scores.
+    return 's1_repair';
   }
 
   const answeringScenarioBQ1 =
@@ -209,6 +219,13 @@ function resolvePendingProbe(
     shouldDeliverScenarioFollowUpQuestion(messages, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE)
   ) {
     return 's3_sophie_perspective';
+  }
+  if (
+    !isInterviewCanonicalProbeRetired('s3_repair') &&
+    constructFlags.shouldForceScenarioCRepairProbe &&
+    shouldDeliverScenarioFollowUpQuestion(messages, SCENARIO_C_REPAIR_QUESTION_CANONICAL)
+  ) {
+    return 's3_repair';
   }
 
   const personalMomentProbe = resolvePendingPersonalMomentProbe({
@@ -256,7 +273,28 @@ function resolveAction(args: {
     return { kind: 'speak_fixed_line', lineId: 'score_decline' };
   }
 
+  if (pendingProbeId && isInterviewCanonicalProbeRetired(pendingProbeId)) {
+    return {
+      kind: 'skip_probe_already_satisfied',
+      probeId: pendingProbeId,
+      advanceToProbeId: nextProbeAfterSkip(pendingProbeId, satisfiedProbeIds),
+    };
+  }
+
   if (pendingProbeId && satisfiedProbeIds.includes(pendingProbeId)) {
+    const repairQuestionNeverAsked =
+      pendingProbeId === 's1_repair' &&
+      !args.messages.some(
+        (m) => m.role === 'assistant' && looksLikeScenarioARepairQuestion(m.content ?? ''),
+      ) &&
+      !userAnswerIncludesExplicitScenarioARepairAsRyan(args.userText);
+    if (repairQuestionNeverAsked) {
+      return {
+        kind: 'speak_canonical',
+        probeId: 's1_repair',
+        withBriefAck: true,
+      };
+    }
     const eligibleIntent =
       userIntent === 'substantive_answer' ||
       userIntent === 'unclear' ||
@@ -310,6 +348,34 @@ function resolveAction(args: {
     return {
       kind: 'speak_canonical',
       probeId: pendingProbeId,
+    };
+  }
+
+  if (
+    pendingProbeId === 's1_repair' &&
+    !isInterviewCanonicalProbeRetired('s1_repair') &&
+    !satisfiedProbeIds.includes('s1_repair') &&
+    userIntent !== 'go_back_request' &&
+    userIntent !== 'score_request' &&
+    userIntent !== 'off_topic'
+  ) {
+    return {
+      kind: 'speak_canonical',
+      probeId: 's1_repair',
+      withBriefAck: true,
+    };
+  }
+
+  if (
+    pendingProbeId === 's3_repair' &&
+    !isInterviewCanonicalProbeRetired('s3_repair') &&
+    (userIntent === 'substantive_answer' || userIntent === 'unclear') &&
+    !satisfiedProbeIds.includes('s3_repair')
+  ) {
+    return {
+      kind: 'speak_canonical',
+      probeId: 's3_repair',
+      withBriefAck: true,
     };
   }
 

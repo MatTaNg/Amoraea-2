@@ -8,12 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createClient } from '@supabase/supabase-js';
 
-const ASSESSMENT_IDS = [
-  'SEXUAL_COMMUNICATION',
-  'PVQ-21',
-  'CONFLICT-30',
-  'ECR-36',
-] as const;
+const ASSESSMENT_IDS = ['PVQ-21', 'CONFLICT-30', 'ECR-36'] as const;
 
 function mergeEnv(): void {
   const path = join(process.cwd(), '.env');

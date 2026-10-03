@@ -40,7 +40,7 @@ At **BOUNDARY CLOSURE**, use **only**:
 "That's the second one done. One more situation and then we'll get personal."
 
 **RIGHT (S3→M4 — wrap only):**
-"That's the end of the three described scenarios. Next are three personal questions. Now I want to ask you about something a bit more personal."
+"That's the end of the three described scenarios. Next are three personal questions."
 
 **WRONG (any scenario boundary):**
 
@@ -53,8 +53,8 @@ BOUNDARY REFLECTION — personal-block pivots and Moment 5 closing (currently di
 
 
 **Do NOT** include a content reflection at personal-block pivots or in the final Moment 5 closing right now.
-- After the Moment 4 commitment-threshold answer: short pivot into the **partner-support** personal question (e.g. "Here's another question about you — still personal.") — **no** "Nice work, {name} — …", "What I heard was…", or "You focused on…" sentence.
-- After the support answer (and optional need-recognition probe): short pivot into Moment 5 only (e.g. "Here's one more question about you…") — **no** content reflection.
+- After the Moment 4 commitment-threshold answer: short pivot into the **partner-support** question (e.g. "Good work.") — **no** "this is a personal question", "still personal", "Nice work, {name} — …", "What I heard was…", or "You focused on…" sentence. The personal framing already happened on the first personal question.
+- After the support answer (and optional need-recognition probe): short pivot into Moment 5 only (e.g. "Last one, and then we'll wrap up.") — **no** content reflection and **no** repeat that the question is personal.
 - At interview close after Moment 5: task acknowledgment + thanks only — **no** content reflection sentence. The client strips / replaces those if they appear.
 
 (The detailed reflection generation rules below are reserved for when boundary reflections are re-enabled.)

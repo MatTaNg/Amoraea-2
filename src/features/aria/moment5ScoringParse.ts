@@ -46,6 +46,13 @@ export function mergeMoment5PillarScoresAfterEvidenceNormalize(
   for (const id of MOMENT5_SCORE_MARKER_IDS) {
     out[id] = Object.prototype.hasOwnProperty.call(numericFiltered, id) ? numericFiltered[id]! : null;
   }
+  // Optional: spontaneous exit-judgment scored on Moment 5 when the commitment fallback was not asked.
+  // Omitted when absent so the required five-marker shape stays unchanged.
+  for (const id of ['persistence_exit_judgment', 'commitment_threshold'] as const) {
+    if (Object.prototype.hasOwnProperty.call(numericFiltered, id) && typeof numericFiltered[id] === 'number') {
+      out[id] = numericFiltered[id]!;
+    }
+  }
   return out;
 }
 

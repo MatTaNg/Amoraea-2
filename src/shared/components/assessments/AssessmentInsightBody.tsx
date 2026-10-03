@@ -73,7 +73,9 @@ export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
           <Text style={styles.headline}>{snap.headline}</Text>
         ) : null}
         {snap.body ? <Text style={styles.body}>{snap.body}</Text> : null}
-        {snap.growthEdge ? (
+        {snap.growthEdge &&
+        label !== "Schwartz Values" &&
+        label !== "Attachment Style" ? (
           <View style={styles.growthCard}>
             <Text style={styles.growthLabel}>Growth edge</Text>
             <Text style={styles.growth}>{snap.growthEdge}</Text>
@@ -83,7 +85,9 @@ export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
 
       {snap.details && snap.details.length > 0 ? (
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>Your breakdown</Text>
+          {label !== "Sexual Communication" && label !== "Schwartz Values" ? (
+            <Text style={styles.sectionTitle}>Your breakdown</Text>
+          ) : null}
           <View style={styles.details}>
             {snap.details.map((d, i) => {
               const isAttachmentStyle =

@@ -9,27 +9,22 @@ import {
 } from '@/data/services/assessmentService';
 
 describe('dating profile ASSESSMENT_IDS', () => {
-  it('runs sexual communication first, then longest attachment last', () => {
-    expect(ASSESSMENT_IDS).toEqual([
-      'SEXUAL_COMMUNICATION',
-      'PVQ-21',
-      'CONFLICT-30',
-      'ECR-36',
-    ]);
-    expect(FIRST_DATING_PROFILE_ASSESSMENT_ID).toBe('SEXUAL_COMMUNICATION');
-    expect(getNextInstrument('SEXUAL_COMMUNICATION')).toBe('PVQ-21');
+  it('starts with Schwartz values and does not include sexual communication', () => {
+    expect(ASSESSMENT_IDS).toEqual(['PVQ-21', 'CONFLICT-30', 'ECR-36']);
+    expect(ASSESSMENT_IDS).not.toContain('SEXUAL_COMMUNICATION');
+    expect(FIRST_DATING_PROFILE_ASSESSMENT_ID).toBe('PVQ-21');
+    expect(getNextInstrument('PVQ-21')).toBe('CONFLICT-30');
     expect(getNextInstrument('ECR-36')).toBeNull();
-    expect(getPreviousInstrument('SEXUAL_COMMUNICATION')).toBeNull();
-    expect(getPreviousInstrument('PVQ-21')).toBe('SEXUAL_COMMUNICATION');
+    expect(getPreviousInstrument('PVQ-21')).toBeNull();
     expect(getPreviousInstrument('ECR-36')).toBe('CONFLICT-30');
     expect(lastTypologyBatteryInstrument()).toBe('ECR-36');
   });
 
   it('derives insight step metadata from battery order', () => {
-    expect(getNextAssessmentStepMeta('SEXUAL_COMMUNICATION')).toEqual({
+    expect(getNextAssessmentStepMeta('PVQ-21')).toEqual({
       isFinal: false,
-      nextTitle: 'Schwartz Values',
-      nextMeta: '21 questions · ~3 min',
+      nextTitle: 'Conflict Style',
+      nextMeta: '21 situations · ~9 min',
     });
     expect(getNextAssessmentStepMeta('ECR-36')).toEqual({
       isFinal: true,
@@ -38,7 +33,7 @@ describe('dating profile ASSESSMENT_IDS', () => {
     });
   });
 
-  it('detects when all four relationship questionnaires are already saved', () => {
+  it('detects when all three relationship questionnaires are already saved', () => {
     expect(isDatingProfileTypologyBatteryComplete([])).toBe(false);
     expect(
       isDatingProfileTypologyBatteryComplete(['SEXUAL_COMMUNICATION', 'PVQ-21', 'CONFLICT-30']),

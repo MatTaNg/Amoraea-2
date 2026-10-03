@@ -21,6 +21,7 @@ import {
   moment5UserOrTranscriptHasConcreteAnchor,
   transcriptHasMoment5ResolutionFollowUpAsked,
 } from '@features/aria/probeAndScoringUtils';
+import { looksLikeInterviewStillOpenCheck } from '@features/aria/interviewPriorAnswerMetaDetection';
 import { isPreClaudeMoment5AccountabilityProbeCandidate } from '@features/aria/preClaudeMoment5AccountabilityInjectShared';
 
 /** After the resolution follow-up, evaluate accountability on the full M5 narrative (not only the short reply). */
@@ -29,6 +30,7 @@ export function resolveMoment5AccountabilityProbeEvalText(
   moment5CombinedIncludingCurrent: string,
   lastInterviewerContent: string,
 ): string {
+  if (looksLikeInterviewStillOpenCheck(trimmed)) return trimmed;
   if (looksLikeMoment5ResolutionFollowUpPrompt(lastInterviewerContent)) {
     return moment5CombinedIncludingCurrent;
   }

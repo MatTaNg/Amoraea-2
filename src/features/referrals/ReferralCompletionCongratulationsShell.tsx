@@ -1,16 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AppState,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { AppState, Platform, StyleSheet, Text } from 'react-native';
 
 import {
   fetchReferralDiscountStatus,
@@ -23,6 +14,7 @@ import {
   referralCompletionCongratsSeenKey,
 } from '@features/referrals/referralCompletionCongratsStorage';
 import { PostInterviewLaunchReferralCard } from '@features/referrals/PostInterviewLaunchReferralCard';
+import { ReferralDiscountModal } from '@features/referrals/ReferralDiscountModal';
 
 const FONT_DISPLAY = Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined;
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
@@ -116,70 +108,27 @@ export function ReferralCompletionCongratulationsShell({
   }
 
   return (
-    <Modal
+    <ReferralDiscountModal
       visible={popupVisible}
-      transparent
-      animationType="fade"
-      onRequestClose={() => void dismissPopup()}
+      onDismiss={() => void dismissPopup()}
+      closeAccessibilityLabel="Close referral completion popup"
     >
-      <Pressable style={styles.modalBackdrop} onPress={() => void dismissPopup()}>
-        <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Close referral completion popup"
-            onPress={() => void dismissPopup()}
-            style={styles.modalClose}
-          >
-            <Ionicons name="close" size={20} color="rgba(255,255,255,0.72)" />
-          </Pressable>
+      <Text style={styles.congratsTitle}>{REFERRAL_COMPLETION_CONGRATS_TITLE}</Text>
+      <Text style={styles.congratsLead}>{REFERRAL_COMPLETION_CONGRATS_LEAD}</Text>
 
-          <Text style={styles.congratsTitle}>{REFERRAL_COMPLETION_CONGRATS_TITLE}</Text>
-          <Text style={styles.congratsLead}>{REFERRAL_COMPLETION_CONGRATS_LEAD}</Text>
-
-          <PostInterviewLaunchReferralCard
-            referralStatus={referralStatus}
-            displayDiscount={referralStatus.totalDiscount}
-            copyFeedback={copyFeedback}
-            onCopyPress={() => void copyReferralCode()}
-            style={styles.modalLaunchReferralCard}
-            variant="earned"
-          />
-
-          <Pressable onPress={() => void dismissPopup()} style={styles.modalSecondaryButton}>
-            <Text style={styles.modalSecondaryText}>Got it</Text>
-          </Pressable>
-        </Pressable>
-      </Pressable>
-    </Modal>
+      <PostInterviewLaunchReferralCard
+        referralStatus={referralStatus}
+        displayDiscount={referralStatus.totalDiscount}
+        copyFeedback={copyFeedback}
+        onCopyPress={() => void copyReferralCode()}
+        style={styles.modalLaunchReferralCard}
+        variant="earned"
+      />
+    </ReferralDiscountModal>
   );
 }
 
 const styles = StyleSheet.create({
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(3,7,18,0.72)',
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#0B1324',
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.26)',
-    borderRadius: 18,
-    paddingTop: 24,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  modalClose: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    padding: 6,
-    zIndex: 2,
-  },
   congratsTitle: {
     fontFamily: FONT_DISPLAY,
     fontSize: 26,
@@ -206,15 +155,5 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     paddingHorizontal: 0,
     paddingVertical: 0,
-  },
-  modalSecondaryButton: {
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  modalSecondaryText: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#9CCBFF',
   },
 });

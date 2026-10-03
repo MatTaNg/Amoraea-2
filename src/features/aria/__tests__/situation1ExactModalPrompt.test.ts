@@ -93,6 +93,21 @@ describe('situation1ExactModalPrompt', () => {
     ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
   });
 
+  it('maps Ryan roleplay respond asks to the contempt footer when repair is retired', () => {
+    expect(
+      resolveSituation1ExactModalPrompt(
+        [],
+        'As Ryan, how would you respond to Emma in that moment?',
+      ),
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+    expect(
+      coerceExactScenarioModalQuestionDisplay(
+        'Got it. As Ryan, how would you respond to Emma in that moment?',
+        'Situation 1',
+      ),
+    ).toBe(SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY);
+  });
+
   it('maps truncated Emma repair stream fragments to contempt when repair is retired', () => {
     expect(resolveSituation1ExactModalPrompt([], 'Now, things with Emma?')).toBe(
       SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,

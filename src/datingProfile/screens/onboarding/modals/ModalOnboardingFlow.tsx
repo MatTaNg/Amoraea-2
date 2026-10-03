@@ -17,6 +17,7 @@ import { EthnicityAttractionOnboardingModal } from './EthnicityAttractionOnboard
 import { TypologyModal } from './TypologyModal';
 import { ArchetypesOnboardingModal } from './ArchetypesOnboardingModal';
 import { normalizeArchetypesFromProfile, isCompleteArchetypeSelection, type ArchetypeId } from '@/shared/constants/archetypes';
+import { capProfilePhotoList } from '@/shared/profilePhotoLimit';
 import { PhotosVideoModal } from './PhotosVideoModal';
 import { LifeDomainsModal } from './LifeDomainsModal';
 import { LifeDomainQuestionsModal } from './LifeDomainQuestionsModal';
@@ -27,6 +28,7 @@ import {
   getActiveLifeDomainRequiredQuestionSteps,
   isLifeDomainRequiredQuestionStep,
   normalizeLifeDomainQuestionOnboardingStep,
+  relocatedEssentialsQuestionResumeStep,
 } from '@/shared/constants/lifeDomainOnboardingQuestions';
 import {
   getEffectiveOnboardingStepsOrder,
@@ -178,6 +180,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   const queryClient = useQueryClient();
   const { profile, loading: profileLoading } = useProfile();
   const [currentStep, setCurrentStep] = useState<OnboardingStep>('name');
+  const [openLifestyleAtLastQuestion, setOpenLifestyleAtLastQuestion] = useState(false);
   const [onboardingData, setOnboardingData] = useState<OnboardingData>({});
   const [loading, setLoading] = useState(true);
   const [completingOnboarding, setCompletingOnboarding] = useState(false);
@@ -214,10 +217,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             const normalizedStep =
               rawStep === 'complete'
                 ? 'profileComplete'
-                : normalizeLifeDomainQuestionOnboardingStep(
+                : relocatedEssentialsQuestionResumeStep(rawStep) ??
+                  normalizeLifeDomainQuestionOnboardingStep(
                     rawStep,
                     progress.data.onboardingData?.wantKids,
-                  ) ?? rawStep;
+                  ) ??
+                  rawStep;
 
             // Check if the normalized step is valid in the current step order
             const validSteps = ONBOARDING_STEPS_ORDER;
@@ -795,6 +800,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       getOnboardingNavigationContext(onboardingDataRef.current),
     );
     if (!prevStep) return;
+    if (prevStep === 'matchPreferences') {
+      setOpenLifestyleAtLastQuestion(true);
+    }
     const latestData = onboardingDataRef.current;
 
     stepTransitionLockRef.current = true;
@@ -870,6 +878,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
     stepTransitionLockRef.current = true;
     try {
+      if (nextStep === 'matchPreferences') {
+        setOpenLifestyleAtLastQuestion(false);
+      }
       setOnboardingData(latestData);
       setCurrentStep(nextStep);
       persistedStepRef.current = nextStep;
@@ -1047,7 +1058,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             profileUpdates.phoneNumber = latestData.phoneNumber;
           }
           if (latestData.photos && Array.isArray(latestData.photos) && latestData.photos.length > 0) {
-            profileUpdates.photos = latestData.photos;
+            profileUpdates.photos = capProfilePhotoList(latestData.photos);
           }
           if (latestData.bio !== undefined && latestData.bio !== null) {
             // Bio can be empty string, so check for undefined/null only
@@ -1092,6 +1103,11 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           const archetypesStep = normalizeArchetypesFromProfile(latestData.archetypes);
           if (isCompleteArchetypeSelection(archetypesStep.length)) {
             profileUpdates.archetypes = archetypesStep;
+          }
+
+          const livePhotos = onboardingDataRef.current.photos;
+          if (Array.isArray(livePhotos) && livePhotos.length > 0) {
+            profileUpdates.photos = capProfilePhotoList(livePhotos);
           }
 
           // Save all updates at once
@@ -1823,6 +1839,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       {currentStep === 'matchPreferences' && (
         <MatchPreferencesModal
           matchPreferences={onboardingData.matchPreferences}
+          startAtLastQuestion={openLifestyleAtLastQuestion}
           onMatchPreferencesChange={(matchPreferences) =>
             updateData({
               matchPreferences: {
@@ -1870,11 +1887,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
                 try {
                   const { profilesRepo } = await import('@/data/repos/profilesRepo');
                   const profileUpdates: any = {};
-                  if (latestData.photos !== undefined) {
-                    const validPhotos = Array.isArray(latestData.photos)
-                      ? latestData.photos.filter((p) => p && p.trim() !== '')
+                  const livePhotos = onboardingDataRef.current.photos;
+                  if (livePhotos !== undefined) {
+                    const validPhotos = Array.isArray(livePhotos)
+                      ? livePhotos.filter((p) => p && p.trim() !== '')
                       : [];
-                    profileUpdates.photos = validPhotos;
+                    profileUpdates.photos = capProfilePhotoList(validPhotos);
                   }
                   if (Object.keys(profileUpdates).length > 0) {
                     await profilesRepo.updateProfile(photosUid, profileUpdates);

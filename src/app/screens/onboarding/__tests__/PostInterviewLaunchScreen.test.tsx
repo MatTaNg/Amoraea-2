@@ -80,6 +80,22 @@ jest.mock('@data/supabase/client', () => ({
   },
 }));
 
+jest.mock('@features/psychometrics/interviewCompletionStatus', () => ({
+  PSYCHOMETRICS_ENABLED: true,
+  fetchUserInterviewCompletionStatus: jest.fn(() =>
+    Promise.resolve({
+      interviewCompleted: true,
+      psychometricsCompletedAt: '2026-01-01T00:00:00Z',
+      gateResultFinalizedAt: '2026-01-01T00:00:00Z',
+      routingRow: null,
+    }),
+  ),
+}));
+
+jest.mock('@features/onboarding/finalizeGateResultAfterPsychometrics', () => ({
+  finalizeGateResultAfterPsychometrics: jest.fn(() => Promise.resolve({ ok: true, attemptId: 'attempt-1' })),
+}));
+
 jest.mock('@features/onboarding/loadInterviewReportAttempt', () => ({
   loadInterviewReportAttempt: jest.fn(() =>
     Promise.resolve({

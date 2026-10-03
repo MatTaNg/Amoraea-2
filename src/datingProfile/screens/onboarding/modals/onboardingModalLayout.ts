@@ -1,8 +1,10 @@
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
+
 /**
  * Shared layout for onboarding modals — matches SingleChoiceModal (centered column + footer).
  */
 
-export const ONBOARDING_MODAL_MAX_WIDTH = 520;
+export const ONBOARDING_MODAL_MAX_WIDTH = PAGE_CONTENT_MAX_WIDTH;
 
 export const onboardingModalLayout = {
   /** Constrains header, scroll body, and footer as one column on wide viewports (web). */

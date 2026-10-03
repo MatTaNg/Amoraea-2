@@ -39,9 +39,7 @@ import { normalizeInterviewPillarScoreMap } from '../../../src/config/scoring/in
 import { PILLAR_ROLLUP_ALGORITHM_VERSION_CURRENT } from '../../../src/config/algorithmVersions.ts';
 import {
   AUTOBIOGRAPHICAL_REPAIR_MOMENTS,
-  HYPOTHETICAL_REPAIR_MOMENTS,
-  REPAIR_SOURCE_SIGNALS_VERSION,
-  SPONTANEOUS_REPAIR_MOMENTS,
+  repairSourceMomentListsForVersion,
 } from '../../../src/config/scoring/repairSourceSignals.ts';
 import {
   REGULATION_SOURCE_MOMENTS,
@@ -305,10 +303,14 @@ function averageRepairFromMoments(
  * assessable S1/S2/S3/M4/M5/support repair scores — missing sources are omitted, not zeroed.
  * Hypothetical vs autobiographical disagreement is stored, never penalized.
  */
-export function extractRepairSourceSignals(rows: LabeledMarkerSlice[]): RepairSourceSignals {
-  const hypothetical = averageRepairFromMoments(rows, [...HYPOTHETICAL_REPAIR_MOMENTS]);
+export function extractRepairSourceSignals(
+  rows: LabeledMarkerSlice[],
+  storedVersion?: string | null,
+): RepairSourceSignals {
+  const lists = repairSourceMomentListsForVersion(storedVersion);
+  const hypothetical = averageRepairFromMoments(rows, [...lists.hypothetical]);
   const autobiographical = averageRepairFromMoments(rows, [...AUTOBIOGRAPHICAL_REPAIR_MOMENTS]);
-  const spontaneous = averageRepairFromMoments(rows, [...SPONTANEOUS_REPAIR_MOMENTS]);
+  const spontaneous = averageRepairFromMoments(rows, [...lists.spontaneous]);
   const s1 = averageRepairFromMoments(rows, ['scenario_1']);
   const s2 = averageRepairFromMoments(rows, ['scenario_2']);
   const m4 = averageRepairFromMoments(rows, ['moment_4']);
@@ -316,7 +318,7 @@ export function extractRepairSourceSignals(rows: LabeledMarkerSlice[]): RepairSo
   const hypo = hypothetical.score;
   const auto = autobiographical.score;
   return {
-    version: REPAIR_SOURCE_SIGNALS_VERSION,
+    version: lists.version,
     hypothetical_repair: hypo,
     autobiographical_repair: auto,
     spontaneous_repair: spontaneous.score,
@@ -337,13 +339,14 @@ export function extractRepairSourceSignals(rows: LabeledMarkerSlice[]): RepairSo
 
 export function extractRepairSourceSignalsFromSlices(
   slices: Array<MarkerScoreSlice | null | undefined>,
+  storedVersion?: string | null,
 ): RepairSourceSignals {
   const rows: LabeledMarkerSlice[] = SLICE_LABELS.map((moment, i) => ({
     moment,
     pillarScores: slices[i]?.pillarScores ?? undefined,
     keyEvidence: slices[i]?.keyEvidence ?? undefined,
   }));
-  return extractRepairSourceSignals(rows);
+  return extractRepairSourceSignals(rows, storedVersion);
 }
 
 export function extractRegulationSourceSignals(rows: LabeledMarkerSlice[]): RegulationSourceSignals {
@@ -478,17 +481,35 @@ export function commitmentThresholdFromSlice(slice: MarkerScoreSlice): number | 
   return nums.reduce((a, b) => a + b, 0) / nums.length;
 }
 
+function finiteMarker(slice: MarkerScoreSlice | null | undefined, key: string): number | null {
+  if (!slice?.pillarScores) return null;
+  const filtered = normalizeScoresByEvidence(slice.pillarScores, slice.keyEvidence);
+  const value = filtered[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
 /**
- * Sets `commitment_persistence` (and legacy `commitment_threshold`) from Moment 4 slices.
+ * Sets `commitment_persistence` (and legacy `commitment_threshold`).
+ * Moment 4 may contain only commitment_orientation, only persistence_exit_judgment, or both.
+ * Missing slices are omitted, not zeroed. Spontaneous exit-judgment on Moment 5 is included
+ * on either commitment path and is not zero-filled when absent.
  */
 export function mergeCommitmentThresholdWeighted(
   aggregated: Record<string, number>,
   _scenario3Slice: MarkerScoreSlice,
-  moment4Slice: MarkerScoreSlice
+  moment4Slice: MarkerScoreSlice,
+  moment5Slice?: MarkerScoreSlice | null,
 ): Record<string, number> {
   const m4 = commitmentThresholdFromSlice(moment4Slice);
-  if (m4 == null) return aggregated;
-  const rounded = Math.round(m4);
+  const m5Exit =
+    finiteMarker(moment5Slice, 'persistence_exit_judgment') ??
+    finiteMarker(moment5Slice, 'commitment_threshold');
+  const values: number[] = [];
+  if (m4 != null) values.push(m4);
+  // Spontaneous Moment 5 exit-judgment still feeds the pillar on either commitment path.
+  if (m5Exit != null) values.push(m5Exit);
+  if (values.length === 0) return aggregated;
+  const rounded = Math.round(values.reduce((a, b) => a + b, 0) / values.length);
   return {
     ...aggregated,
     commitment_persistence: rounded,
@@ -545,6 +566,11 @@ export type PillarAggregateHolisticMeta = {
   communicationStyleEmotionalVocabDensityPercent?: number | null;
   /** M4 user turns — used for situational accountability exemption heuristics on recompute. */
   moment4UserText?: string | null;
+  /**
+   * When set to the v2 stamp, hypothetical repair stays Scenario 3.
+   * Omit on new interviews so the current Scenario 1 mapping is used.
+   */
+  storedRepairSourceSignalsVersion?: string | null;
 };
 
 /** Holistic-only meta; echoed on aggregate for persistence alongside slice-derived pillars. */
@@ -713,7 +739,7 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
 ): PillarAggregateWithCommitmentDetailed {
   const applyM4AccountabilityExempt = rollupOptions?.applyM4AccountabilityExempt !== false;
   const { scores: base, contributorCounts } = aggregateMarkerScoresFromSlicesDetailed(slices);
-  let merged = mergeCommitmentThresholdWeighted(base, slices[2], slices[3]);
+  let merged = mergeCommitmentThresholdWeighted(base, slices[2], slices[3], slices[4]);
 
   let reweightMeta: AccountabilityReweightMeta | null = null;
   const moment4UserTextForConcreteness =
@@ -825,7 +851,10 @@ export function aggregatePillarScoresWithCommitmentMergeDetailed(
     moment4AccountabilitySituationallyExempt: reweightMeta != null,
     moment4AccountabilityExemptReason: reweightMeta?.reason ?? null,
     accountabilityReweightMeta: reweightMeta,
-    repairSourceSignals: extractRepairSourceSignalsFromSlices(slices),
+    repairSourceSignals: extractRepairSourceSignalsFromSlices(
+      slices,
+      holisticMeta?.storedRepairSourceSignalsVersion,
+    ),
     regulationSourceSignals: extractRegulationSourceSignalsFromSlices(slices),
   };
   if (typeof __DEV__ !== 'undefined' && __DEV__) {

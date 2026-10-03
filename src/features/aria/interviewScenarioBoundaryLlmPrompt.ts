@@ -22,7 +22,7 @@ const SCENARIO_CONTEXT: Record<
 const STATIC_FALLBACK_BY_SCENARIO: Record<1 | 2 | 3, string> = {
   1: "Good work — that's the end of this scenario. Here's the next situation.",
   2: "That's the second one done. One more situation and then we'll get personal.",
-  3: "Good work — you just finished the three scenarios. Next are three personal questions. Let's start with something a bit more personal.",
+  3: 'Good work — you just finished the three scenarios. Next are three personal questions.',
 };
 
 export function staticScenarioBoundaryLeadFallback(completedScenario: 1 | 2 | 3): string {
@@ -55,6 +55,7 @@ Requirements:
 - Do **not** include vignette fiction, character setup, or the next scenario's opening question.
 - Do **not** mention "Amoraea", scores, therapy, or clinical labels (attunement, mentalizing, dysregulation, repair cycle).
 - Do **not** start with "Sure", "Okay", "Absolutely", "That makes sense", or "Got it".
+- Do **not** say "Let's start with something more personal" or "Now I want to ask you about something a bit more personal."
 - Output plain text only — no JSON, quotes, labels, or preamble.
 
 Static fallback (match this intent if you cannot ground a specific observation):

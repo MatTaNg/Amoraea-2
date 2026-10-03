@@ -27,6 +27,24 @@ export function looksLikeBriefStreamAckOnly(text: string): boolean {
   return /^(makes sense|got it|okay|ok|alright|all right|mm-?hmm|yeah|right)\.?$/i.test(t);
 }
 
+/**
+ * Standalone receipt ("Makes sense.", "That makes a lot of sense.") with no question after it.
+ * Scenario-complete handoffs already open with their own acknowledgement.
+ */
+export function isAckOnlySentenceBeforeScenarioBoundary(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t || t.length > 80 || /\?\s*$/.test(t)) return false;
+  if (looksLikeBriefStreamAckOnly(t)) return true;
+  if (
+    /^(?:got it|okay|ok|fair|thanks|thank you|sure|absolutely|right|understood|alright|makes sense|that makes sense|that makes a lot of sense|well done|i'm with you|i am with you)\s*[.!?…]?\s*$/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** True when text is a suppressed post-repair S1 paraphrase. */
 export function isUnauthorizedS1FollowUp(text: string): boolean {
   const t = stripControlTokens(text)

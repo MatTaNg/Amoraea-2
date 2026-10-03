@@ -4,6 +4,7 @@ import type { MessageWithScenario } from '@features/aria/interviewScenarioScorin
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import {
   buildMoment4ThresholdProbeWithReflection,
+  MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN,
   transcriptIncludesMoment4ThresholdAssistant,
 } from '@features/aria/moment4ProbeLogic';
 import {
@@ -12,7 +13,10 @@ import {
 } from '@features/aria/deliveredReflectionRegistry';
 import { applyInterviewCanonicalProbeSideEffects } from '@features/aria/interviewCanonicalProbeDeliveryShared';
 import { applyMoment4ThresholdReferenceCard } from '@features/aria/interviewReferenceCardResumeHelpers';
-import { resolveMoment4GrudgeAnswerForThresholdReflection } from '@features/aria/moment4SpecificityFollowUp';
+import {
+  resolveMoment4GrudgeAnswerForThresholdReflection,
+  userLacksRelevantCommitmentRelationship,
+} from '@features/aria/moment4SpecificityFollowUp';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
 import { remoteLog } from '@utilities/remoteLog';
 
@@ -34,7 +38,10 @@ export async function deliverMoment4CommitmentThresholdProbe(args: {
     blockReason = 'not_moment_4';
   } else if (transcriptIncludesMoment4ThresholdAssistant(args.messagesToUse)) {
     blockReason = 'threshold_already_in_transcript';
-  } else if (looksLikeIncompleteCutOffUserAnswer(args.trimmed)) {
+  } else if (
+    looksLikeIncompleteCutOffUserAnswer(args.trimmed) &&
+    !userLacksRelevantCommitmentRelationship(args.trimmed)
+  ) {
     blockReason = 'incomplete_cutoff_answer';
   } else if (looksLikeGoBackToPreviousScenarioRequest(args.trimmed)) {
     blockReason = 'go_back_request';
@@ -47,10 +54,13 @@ export async function deliverMoment4CommitmentThresholdProbe(args: {
     args.messagesToUse,
     args.trimmed,
   );
-  const thresholdProbeText = buildMoment4ThresholdProbeWithReflection(grudgeAnswerForReflection, {
+  const thresholdQuestion = buildMoment4ThresholdProbeWithReflection(grudgeAnswerForReflection, {
     deliveredRegistry: args.deps.deliveredReflectionRegistryRef.current,
     moment4Transcript: args.messagesToUse,
   });
+  const thresholdProbeText = userLacksRelevantCommitmentRelationship(args.trimmed)
+    ? MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN
+    : thresholdQuestion;
 
   void remoteLog(args.logTag, {
     interviewSessionId: args.deps.interviewSessionIdRef.current,

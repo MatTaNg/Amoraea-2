@@ -51,14 +51,14 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.shouldForceMoment4OrientationProbe).toBe(true);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({
           role: 'assistant',
-          content: expect.stringMatching(/keep working on it rather than walking away/i),
+          content: expect.stringMatching(/what made you keep investing in it/i),
         }),
       ]),
     );
@@ -99,7 +99,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(deps.personalHandoffInjectedRef.current).toBe(true);
     expect(result.handled).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
     expect(speakTextSafe).not.toHaveBeenCalledWith(
@@ -206,7 +206,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.shouldForceMoment4OrientationProbe).toBe(true);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
   });
@@ -240,7 +240,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.shouldForceMoment4OrientationProbe).toBe(true);
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
   });
@@ -279,7 +279,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
   });
@@ -310,7 +310,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.shouldForceMoment4ThresholdProbe).toBe(false);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
   });
@@ -339,7 +339,7 @@ describe('runPreClaudeMoment4SpecificityGate', () => {
     expect(result.handled).toBe(true);
     expect(deps.moment4PostGrudgeSpecificityResolvedRef.current).toBe(true);
     expect(speakTextSafe).toHaveBeenCalledWith(
-      expect.stringMatching(/keep working on it rather than walking away/i),
+      expect.stringMatching(/what made you keep investing in it/i),
       expect.any(Object),
     );
   });

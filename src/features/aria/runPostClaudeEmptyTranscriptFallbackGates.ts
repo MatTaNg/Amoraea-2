@@ -8,10 +8,12 @@ import {
   looksLikeInterviewClosingAssistantMessage,
   moment5AnswerIncludesResolutionOutcome,
   parallelStreamDeliveredMoment5ClosingAttempt,
+  streamSpokeAudibleInterviewClosingContent,
   stripDuplicateInterviewClosingSentencesWithinDraft,
   transcriptHasInterviewClosingAssistantMessage,
 } from '@features/aria/elongatingProbe';
 import { hasInterviewClosingTtsDeliveredForSession } from '@features/aria/interviewClosingTtsSession';
+import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import { assistantTurnHasPersistableContent } from '@features/aria/interviewTranscriptTurns';
 import { computeMoment5InterviewCloseGate, computeMoment5ResolutionFollowUpGateState, countUserTurnsAfterLastMoment5PrimaryAnchor } from '@features/aria/interviewProgressSync';
@@ -39,7 +41,12 @@ import {
   scenarioAMinimumEngagementForHandoff,
   shouldDeliverScenarioFollowUpQuestion,
   transcriptContainsScenarioAContemptProbe,
+  transcriptContainsScenarioCRepairQuestion,
 } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import {
+  SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+  scenarioCSophiePerspectiveProbeAlreadyDelivered,
+} from '@features/aria/scenarioCPromptDetection';
 import { MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { SCENARIO_2_TEXT } from '@features/aria/interviewScenarioVignetteCopy';
 import {
@@ -110,6 +117,32 @@ function resolveLiveTranscriptForScoring(
   ) as PostClaudeInterviewMessage[];
   if (!extraAssistant) return base;
   return compactInterviewTranscriptTurns([...base, extraAssistant]) as PostClaudeInterviewMessage[];
+}
+
+const CLOSING_TTS_BEFORE_COMPLETE = {
+  ...ASSISTANT_INTERVIEW_SPEECH,
+  forceSpeakDespiteParallelStream: true,
+  allowDuplicateConsecutiveTts: true,
+  skipClosingSessionDedup: true,
+} as const;
+
+async function speakClosingBeforeInterviewCompleteIfUnheard(
+  deps: PostClaudeAssistantTurnDeps,
+  speakAssistantTurn: PostClaudeSpeakAssistantTurn,
+  closing: string,
+): Promise<void> {
+  const spoken = (deps.parallelStreamingTtsRef.current.spokenCompleteText ?? '').trim();
+  const sessionKey =
+    deps.interviewSessionAttemptIdRef.current ?? deps.interviewSessionIdRef.current;
+  const alreadyAudible =
+    hasInterviewClosingTtsDeliveredForSession(sessionKey) ||
+    streamSpokeAudibleInterviewClosingContent(spoken);
+  if (alreadyAudible || !closing.trim()) return;
+  try {
+    await speakAssistantTurn(closing, CLOSING_TTS_BEFORE_COMPLETE);
+  } catch {
+    /* still hand off to preparing results if playback fails */
+  }
 }
 
 export type PostClaudeEmptyTranscriptFallbackResult =
@@ -344,6 +377,19 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
             preview: nextDisplayText.slice(0, 280),
             engagementMet: scenarioAMinimumEngagementForHandoff(params.messagesToUse),
           });
+        } else if (
+          !isInterviewCanonicalProbeRetired('s3_repair') &&
+          deps.currentInterviewMomentRef.current === 3 &&
+          deps.currentScenarioRef.current === 3 &&
+          !deps.s3RepairProbeDeliveredRef.current &&
+          !transcriptContainsScenarioCRepairQuestion(params.messagesToUse) &&
+          scenarioCSophiePerspectiveProbeAlreadyDelivered(params.messagesToUse)
+        ) {
+          nextDisplayText = SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+          void remoteLog('[S3_REPAIR_EMPTY_FALLBACK]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
+            preview: nextDisplayText.slice(0, 220),
+          });
         } else {
           const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
             '',
@@ -359,6 +405,19 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
               interviewSessionId: deps.interviewSessionIdRef.current,
               interviewMoment: deps.currentInterviewMomentRef.current,
               preview: nextDisplayText.slice(0, 280),
+            });
+          } else if (
+            deps.currentInterviewMomentRef.current === 1 &&
+            !isInterviewCanonicalProbeRetired('s1_repair') &&
+            shouldDeliverScenarioFollowUpQuestion(
+              params.messagesToUse,
+              SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+            )
+          ) {
+            nextDisplayText = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+            void remoteLog('[S1_REPAIR_EMPTY_FALLBACK]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              preview: nextDisplayText.slice(0, 220),
             });
           } else {
             void remoteLog('[SCENARIO_SUPPRESSED_ELONGATING_NO_FALLBACK]', {
@@ -376,6 +435,18 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
       interviewSessionId: deps.interviewSessionIdRef.current,
       postM5UserTurns: postM5UserTurnsForClose,
     });
+    const priorClosing = [...params.messagesToUse]
+      .reverse()
+      .find(
+        (m) =>
+          m.role === 'assistant' &&
+          looksLikeInterviewClosingAssistantMessage((m as { content?: string }).content ?? ''),
+      );
+    await speakClosingBeforeInterviewCompleteIfUnheard(
+      deps,
+      speakAssistantTurn,
+      ((priorClosing as { content?: string } | undefined)?.content ?? '').trim(),
+    );
     deps.setVoiceState('idle');
     const transcriptForScoring = resolveLiveTranscriptForScoring(deps, params.messagesToUse);
     await finalizePostClaudePendingInterviewCompletion(deps, {
@@ -428,6 +499,7 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
       ),
       streamSpokeIncompleteOnly: !looksLikeInterviewClosingAssistantMessage(streamClosingRaw),
     });
+    await speakClosingBeforeInterviewCompleteIfUnheard(deps, speakAssistantTurn, enrichedClosing);
     deps.setVoiceState('idle');
     const streamClosingMsg: PostClaudeInterviewMessage = {
       role: 'assistant',
@@ -536,16 +608,8 @@ export async function runPostClaudeEmptyTranscriptFallbackGates(
       finalAssistant,
     );
     deps.setMessages(transcriptForScoring);
-    try {
-      await speakAssistantTurn(closingDisplay, {
-        telemetrySource: 'turn',
-        interviewSpeechRole: 'assistant_response',
-      });
-    } catch {
-      /* proceed to scoring even if TTS fails */
-    } finally {
-      deps.setVoiceState('idle');
-    }
+    await speakClosingBeforeInterviewCompleteIfUnheard(deps, speakAssistantTurn, closingDisplay);
+    deps.setVoiceState('idle');
     await finalizePostClaudePendingInterviewCompletion(deps, {
       source: 'elongating_suppressed_m5_close',
       transcriptForScoring,

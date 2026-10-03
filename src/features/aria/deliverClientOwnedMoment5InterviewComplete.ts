@@ -63,6 +63,8 @@ export async function deliverClientOwnedMoment5InterviewComplete(
   await deps.speakTextSafe(closing, {
     ...ASSISTANT_INTERVIEW_SPEECH,
     skipLastQuestionRef: true,
+    allowDuplicateConsecutiveTts: true,
+    skipClosingSessionDedup: true,
   });
   markQuestionDelivered(new Date().toISOString());
 

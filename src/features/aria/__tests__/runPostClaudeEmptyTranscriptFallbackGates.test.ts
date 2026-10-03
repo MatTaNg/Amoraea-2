@@ -69,6 +69,52 @@ describe('runPostClaudeEmptyTranscriptFallbackGates', () => {
     expect(speak).not.toHaveBeenCalled();
   });
 
+  it('speaks the scenario 3 repair question after a one-word Sophie answer is stripped', async () => {
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 3 },
+      currentScenarioRef: { current: 3 },
+      s3RepairProbeDeliveredRef: { current: false },
+    });
+    const params = createMockPostClaudeParams({
+      elongatingSuppressedForUserTurn: true,
+      messagesToUse: [
+        {
+          role: 'assistant',
+          content:
+            "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?",
+        },
+        {
+          role: 'user',
+          content:
+            'Dr. Daniel needed some time to process things or maybe even time to calm down before actually having a calm conversation with Zoe.',
+        },
+        {
+          role: 'assistant',
+          content: 'What do you think this pattern of leaving has been like for Sophie over time?',
+        },
+        { role: 'user', content: 'Frustrated.' },
+      ],
+    });
+    const speak = createMockSpeakAssistantTurn();
+
+    const result = await runPostClaudeEmptyTranscriptFallbackGates(
+      deps,
+      params,
+      emptyCtx({
+        streamFullTrimmed: 'Makes sense. How do you think this situation could be repaired?',
+      }),
+      'Makes sense. How do you think this situation could be repaired?',
+      '',
+      speak,
+    );
+
+    expect(result.handled).toBe(false);
+    if (!result.handled) {
+      expect(result.displayText).not.toContain('How do you think this situation could be repaired?');
+    }
+    expect(deps.setVoiceState).not.toHaveBeenCalledWith('idle');
+  });
+
   it('uses M4 threshold fallback instead of neutral ack when commitment follow-up is due', async () => {
     const deps = createMockPostClaudeDeps({
       currentInterviewMomentRef: { current: 4 },
@@ -165,7 +211,7 @@ describe('runPostClaudeEmptyTranscriptFallbackGates', () => {
     }
   });
 
-  it('injects S1→S2 when elongating suppressed after Q1 Emma clear-line contempt (repair retired)', async () => {
+  it('injects the Ryan repair question when elongating is suppressed after a contempt-quality Q1', async () => {
     const deps = createMockPostClaudeDeps({
       scenarioAContemptProbeAskedRef: { current: false },
       scenarioARepairQuestionAskedRef: { current: false },
@@ -203,9 +249,7 @@ describe('runPostClaudeEmptyTranscriptFallbackGates', () => {
 
     expect(result.handled).toBe(false);
     if (!result.handled) {
-      expect(result.displayText).not.toMatch(/if you were ryan/i);
-      expect(result.text).toMatch(/\[SCENARIO_COMPLETE:1\]/i);
-      expect(result.displayText).toMatch(/Sarah has been job hunting/i);
+      expect(result.displayText).toBe('If you were Ryan, how would you repair this?');
     }
   });
 
@@ -335,6 +379,63 @@ describe('runPostClaudeEmptyTranscriptFallbackGates', () => {
     expect(setInterviewStatus).toHaveBeenCalledWith('preparing_results');
     expect(setPendingCompletion).toHaveBeenCalledWith(true);
     expect(kickCompletionScoring).toHaveBeenCalled();
+    expect(speak).not.toHaveBeenCalled();
+  });
+
+  it('speaks the closing before Interview Complete when the stream text closed but audio never played', async () => {
+    const resolutionAnswer =
+      'I raised my voice and should have listened first. We talked it through after.';
+    const unspokenClosing =
+      'Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Alex.';
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT },
+      { role: 'user', content: 'My coach called me out during practice.', interviewMoment: 5 },
+      {
+        role: 'assistant',
+        content: 'What do you think you did or said that contributed to the conflict?',
+      },
+      { role: 'user', content: resolutionAnswer, interviewMoment: 5 },
+    ];
+    const setInterviewStatus = jest.fn();
+    const deps = createMockPostClaudeDeps({
+      currentInterviewMomentRef: { current: 5 },
+      moment5QuestionDeliveredRef: { current: true },
+      moment5PrimaryAnchorDeliveredSessionRef: { current: true },
+      moment5PostPromptUserTurnCountRef: { current: 2 },
+      moment5AccountabilityProbeFiredRef: { current: true },
+      setInterviewStatus,
+      parallelStreamingTtsRef: {
+        current: {
+          ...createInitialParallelStreamingTtsState(),
+          spokenCompleteText: 'Got it.',
+        },
+      },
+    });
+    const params = createMockPostClaudeParams({
+      participantFirstNameForSpoken: 'Alex',
+      messagesToUse,
+      textToParallelStream: { full: unspokenClosing, spokenStarted: true, closingSpoken: false },
+    });
+    const speak = createMockSpeakAssistantTurn();
+
+    const result = await runPostClaudeEmptyTranscriptFallbackGates(
+      deps,
+      params,
+      emptyCtx({ parallelStreamingPlaybackUsed: true, streamFullTrimmed: unspokenClosing }),
+      '',
+      '',
+      speak,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(speak).toHaveBeenCalledWith(
+      expect.stringMatching(/your interview is complete/i),
+      expect.objectContaining({ forceSpeakDespiteParallelStream: true }),
+    );
+    expect(setInterviewStatus).toHaveBeenCalledWith('preparing_results');
+    const speakOrder = speak.mock.invocationCallOrder[0] ?? 0;
+    const statusOrder = setInterviewStatus.mock.invocationCallOrder[0] ?? 0;
+    expect(speakOrder).toBeLessThan(statusOrder);
   });
 
   it('injects S3→M4 advance when repair Q2 was answered and Sophie-receive misparaphrase stripped to empty', async () => {

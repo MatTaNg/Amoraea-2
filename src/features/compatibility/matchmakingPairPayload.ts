@@ -79,6 +79,7 @@ export type MatchmakingPreInterviewPsychometrics = {
 export type AttachmentStyleLabel = 'secure' | 'anxious' | 'avoidant' | 'disorganised';
 
 export type MatchmakingPostInterviewTypology = {
+  /** @deprecated Historical typology payload. Not sent to ranking or the AI blend. */
   sexualCommunicationMean?: number | null;
   attachment?: {
     anxiety?: number | null;

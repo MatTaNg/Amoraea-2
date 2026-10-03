@@ -57,6 +57,23 @@ describe('emotionTransitionModalTtsGuards', () => {
     ).toBe('');
   });
 
+  it('skips the S3→M4 lead when the stream already spoke the scenarios close', () => {
+    const beforeModal =
+      "Good work — you just finished the three scenarios. Next are three personal questions. Let's start with something a bit more personal.";
+    const streamSpoke =
+      "Got it. Makes sense. That's the end of the three described scenarios. Next are three personal questions. Now I want to ask you about something a bit more personal.";
+    expect(
+      prepareEmotionTransitionBeforeModalForTts(beforeModal, {
+        scenarioJustCompleted: 3,
+        streamAlreadySpokeBefore: true,
+        streamSpokeText: streamSpoke,
+        playbackConfirmedKinds: {},
+        messages: [],
+        interviewMoment: 3,
+      }),
+    ).toBe('');
+  });
+
   it('speaks S3→M4 transition lead before modal when stream only delivered reflection', () => {
     const beforeModal =
       "That's the end of the three described situations. Good work, Matt — you recognized Daniel's confusion. There are only two questions left. Now I want to ask you about something a bit more personal.";

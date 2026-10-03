@@ -35,7 +35,7 @@ describe('resolveInterviewStackScreenFromStatus (psychometrics enabled)', () => 
     });
   });
 
-  it('routes psychometrics complete without gate finalization to PsychometricsComplete', () => {
+  it('routes psychometrics complete without gate finalization to the post-interview screen', () => {
     expect(
       resolveInterviewStackScreenFromStatus(
         {
@@ -46,7 +46,7 @@ describe('resolveInterviewStackScreenFromStatus (psychometrics enabled)', () => 
         true,
       ),
     ).toEqual({
-      screen: 'PsychometricsComplete',
+      screen: 'PostInterview',
       legacyPsychometricsMode: false,
       interviewAlreadyCompleted: true,
     });

@@ -317,9 +317,12 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     alignItems: 'center',
     justifyContent: 'center',
+    alignSelf: 'center',
+    width: '100%',
   },
   flameScale: {
     transform: [{ scale: 0.52 }],
+    transformOrigin: 'center',
   },
   button: {
     marginBottom: 12,

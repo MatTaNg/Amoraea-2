@@ -11,7 +11,10 @@ import {
   type PsychometricResponsesMap,
 } from './assessmentContent';
 import { PSYCHOMETRIC_BATTERY_VERSION } from '@config/algorithmVersions';
+import { ACTIVE_BATTERY_SCORE_COLUMNS } from '@config/psychometrics/activeNewUserScoring';
+import { sexualCommunicationSoftModifier } from '@config/psychometrics/sexualCommunicationSoftModifier';
 import {
+  coercePsychometricScore,
   isMissingUsersPsychometricsSd3ColumnsError,
   sd3NarcissismLegacyNarqSavePayload,
   sd3NarcissismPrimarySavePayload,
@@ -36,6 +39,7 @@ export type PsychometricResponsesRow = {
   psychometrics_scs_private_responses?: unknown;
   psychometrics_mspss_responses?: unknown;
   psychometrics_amoraea_entitlement_v1_responses?: unknown;
+  psychometrics_sexual_communication_comfort_responses?: unknown;
   psychometrics_sd3_narcissism_responses?: unknown;
   psychometrics_narq_s_responses?: unknown;
   psychometrics_npi_entitlement_responses?: unknown;
@@ -68,6 +72,13 @@ export const PSYCHOMETRICS_RESPONSES_SELECT = psychometricResponseColumnsForAsse
 const PSYCHOMETRICS_RESPONSES_SELECT_STABLE = psychometricResponseColumnsForAssessments(
   STABLE_BATTERY_ASSESSMENT_IDS,
 ).join(',\n  ');
+
+/** Score columns required before psychometrics_completed_at may be set. */
+export const PSYCHOMETRICS_ACTIVE_SCORE_SELECT = (
+  Object.values(ACTIVE_BATTERY_SCORE_COLUMNS) as string[]
+).join(',\n  ');
+
+const PSYCHOMETRICS_COMPLETION_SELECT = `${PSYCHOMETRICS_RESPONSES_SELECT},\n  ${PSYCHOMETRICS_ACTIVE_SCORE_SELECT}`;
 
 /** When 20260628140000_users_psychometrics_sd3_narcissism.sql is not applied yet. */
 const PSYCHOMETRICS_RESPONSES_SELECT_LEGACY_SD3 = psychometricResponseColumnsForAssessments(
@@ -108,6 +119,8 @@ function isAssessmentPersisted(assessmentId: AssessmentId, row: PsychometricResp
       return hasStoredResponses(row.psychometrics_conflict_catastrophizing_responses);
     case 'amoraea_entitlement_v1':
       return hasStoredResponses(row.psychometrics_amoraea_entitlement_v1_responses);
+    case 'sexual_communication_comfort':
+      return hasStoredResponses(row.psychometrics_sexual_communication_comfort_responses);
     case 'dweck':
       return hasStoredResponses(row.psychometrics_dweck_responses);
     case 'aaq2':
@@ -125,6 +138,30 @@ function isAssessmentPersisted(assessmentId: AssessmentId, row: PsychometricResp
         (row as Record<string, unknown>)[`psychometrics_${assessmentId}_responses`],
       );
   }
+}
+
+/** Active instruments whose score column is null, non-numeric, or absent from the row. */
+export function getMissingPsychometricScores(row: Record<string, unknown>): AssessmentId[] {
+  const missing: AssessmentId[] = [];
+  for (const assessmentId of ASSESSMENT_ORDER) {
+    const column = ACTIVE_BATTERY_SCORE_COLUMNS[assessmentId];
+    if (coercePsychometricScore(row[column]) == null) missing.push(assessmentId);
+  }
+  return missing;
+}
+
+/**
+ * Instruments that still lack persisted responses or a non-null score.
+ * Retired columns (dweck, aaq2, rfq) are not substitutes for the active battery.
+ */
+export function getIncompleteActiveBatteryInstruments(
+  row: PsychometricResponsesRow & Record<string, unknown>,
+): AssessmentId[] {
+  const responseMissing = new Set(getMissingPsychometricAssessments(row));
+  const scoreMissing = new Set(getMissingPsychometricScores(row));
+  return ASSESSMENT_ORDER.filter(
+    (assessmentId) => responseMissing.has(assessmentId) || scoreMissing.has(assessmentId),
+  );
 }
 
 export function formatMissingPsychometricAssessmentNames(missing: AssessmentId[]): string {
@@ -183,7 +220,8 @@ export function buildAssessmentSavePayload(
   } else if (
     assessmentId === 'amoraea_entitlement_v1' ||
     assessmentId === 'relationship_growth_beliefs' ||
-    assessmentId === 'conflict_catastrophizing'
+    assessmentId === 'conflict_catastrophizing' ||
+    assessmentId === 'sexual_communication_comfort'
   ) {
     const assessment = ASSESSMENTS[assessmentId];
     const scoredResponses: Record<number, number> = {};
@@ -200,6 +238,15 @@ export function buildAssessmentSavePayload(
     updatePayload[`psychometrics_${assessmentId}_version`] =
       assessment.assessmentVersion ?? assessmentId;
     updatePayload.psychometrics_battery_version = PSYCHOMETRIC_BATTERY_VERSION;
+    if (assessmentId === 'amoraea_entitlement_v1') {
+      updatePayload.psychometrics_entitlement_score = scores.total;
+    }
+    if (assessmentId === 'sexual_communication_comfort') {
+      updatePayload.psychometrics_sexual_communication_comfort_soft_modifier =
+        sexualCommunicationSoftModifier(
+          typeof scores.total === 'number' ? scores.total : null,
+        );
+    }
   } else {
     updatePayload[`psychometrics_${assessmentId}_responses`] = finalResponses;
     updatePayload[`psychometrics_${assessmentId}_score`] = scores.total;
@@ -312,14 +359,21 @@ export async function persistPsychometricProgress(
 export async function verifyAllPsychometricsPersisted(userId: string): Promise<{
   complete: boolean;
   missingAssessmentIds: AssessmentId[];
+  schemaColumnsUnavailable?: boolean;
 }> {
+  let schemaColumnsUnavailable = false;
   let { data, error } = await supabase
     .from('users')
-    .select(PSYCHOMETRICS_RESPONSES_SELECT)
+    .select(PSYCHOMETRICS_COMPLETION_SELECT)
     .eq('id', userId)
     .maybeSingle();
 
   if (error && isRecoverablePsychometricsSelectError(error)) {
+    schemaColumnsUnavailable = true;
+    console.warn(
+      '[Psychometrics] active battery columns missing from schema; refusing completion until relationship_growth_beliefs, conflict_catastrophizing, entitlement, and sexual_communication_comfort columns exist',
+      error,
+    );
     const stable = await supabase
       .from('users')
       .select(PSYCHOMETRICS_RESPONSES_SELECT_STABLE)
@@ -348,8 +402,14 @@ export async function verifyAllPsychometricsPersisted(userId: string): Promise<{
     return { complete: false, missingAssessmentIds: [...ASSESSMENT_ORDER] };
   }
 
-  const missingAssessmentIds = getMissingPsychometricAssessments(data as PsychometricResponsesRow);
-  return { complete: missingAssessmentIds.length === 0, missingAssessmentIds };
+  const missingAssessmentIds = getIncompleteActiveBatteryInstruments(
+    data as PsychometricResponsesRow & Record<string, unknown>,
+  );
+  return {
+    complete: missingAssessmentIds.length === 0 && !schemaColumnsUnavailable,
+    missingAssessmentIds,
+    schemaColumnsUnavailable,
+  };
 }
 
 export type PsychometricResponsesBundle = {
@@ -464,12 +524,20 @@ export async function fetchPsychometricResponsesBundle(
 }
 
 export async function clearPsychometricsCompleted(userId: string): Promise<void> {
-  await supabase
+  const full = await supabase
     .from('users')
     .update({
       psychometrics_completed_at: null,
+      psychometrics_fully_completed: false,
     })
     .eq('id', userId);
+  if (full.error && isRecoverablePsychometricsSelectError(full.error)) {
+    console.warn(
+      '[Psychometrics] psychometrics_fully_completed column missing; cleared psychometrics_completed_at only',
+      full.error,
+    );
+    await supabase.from('users').update({ psychometrics_completed_at: null }).eq('id', userId);
+  }
 }
 
 export async function markPsychometricsCompleted(userId: string): Promise<PsychometricSaveResult> {
@@ -477,6 +545,7 @@ export async function markPsychometricsCompleted(userId: string): Promise<Psycho
     .from('users')
     .update({
       psychometrics_completed_at: new Date().toISOString(),
+      psychometrics_fully_completed: true,
       psychometrics_current_assessment: null,
       psychometrics_current_question_index: null,
       psychometrics_partial_responses: null,

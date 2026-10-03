@@ -1,3 +1,5 @@
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from './interviewDisengagementProbeCopy';
 import type { MessageWithScenario } from './interviewScenarioScoringSlice';
 import {
   isScenarioARepairFollowUpCompleteInTranscript,
@@ -16,6 +18,8 @@ import {
   SCENARIO_B_Q1_CANONICAL,
 } from './scenarioBProbeLogic';
 import {
+  scenarioCSophiePerspectiveAnsweredInTranscript,
+  scenarioCSophiePerspectiveProbeAlreadyDelivered,
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from './scenarioCPromptDetection';
 import { SCENARIO_1_OPENING, SCENARIO_3_OPENING } from './interviewScenarioOpeningStreamGate';
@@ -113,10 +117,19 @@ function resolveScenarioCQuestionSkipProgression(
   if (!q1Asked) {
     return { nextPrompt: SCENARIO_3_OPENING, scenarioMomentComplete: false };
   }
-  if (!transcriptContainsScenarioCRepairQuestion(messages)) {
-    return { nextPrompt: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioMomentComplete: false };
+  if (
+    !scenarioCSophiePerspectiveProbeAlreadyDelivered(messages) &&
+    !scenarioCSophiePerspectiveAnsweredInTranscript(messages)
+  ) {
+    return { nextPrompt: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, scenarioMomentComplete: false };
   }
-  return { nextPrompt: '', scenarioMomentComplete: true };
+  if (
+    isInterviewCanonicalProbeRetired('s3_repair') ||
+    transcriptContainsScenarioCRepairQuestion(messages)
+  ) {
+    return { nextPrompt: '', scenarioMomentComplete: true };
+  }
+  return { nextPrompt: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioMomentComplete: false };
 }
 
 /** Next scripted beat after the user confirms skipping the active question (not the whole scenario). */

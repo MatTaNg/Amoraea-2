@@ -1,24 +1,29 @@
-export const DEALBREAKER_QUESTION_HIGHLIGHT_PHRASE = 'dealbreaker';
+export const DEALBREAKER_QUESTION_HIGHLIGHT_PHRASE = 'important';
 
-/** Shared dealbreaker framing for partner-alignment questions (onboarding + edit profile). */
+/** Shared importance framing for partner-alignment questions (onboarding + edit profile). */
 export function partnerAlignmentDealbreakerQuestion(shareSubject: string): string {
-  return `If you met someone amazing who didn't share ${shareSubject} with you, how much of a dealbreaker would that be?`;
+  return `How important is it that your match shares ${shareSubject}?`;
+}
+
+/** Substance questions ask whether a match should share the same relationship, not whether it is a dealbreaker. */
+export function partnerRelationshipShareQuestion(topic: string): string {
+  return `How important is it that your match shares your relationship with ${topic}?`;
 }
 
 export const PARTNER_ALIGNMENT_TOBACCO_DEALBREAKER_QUESTION =
-  partnerAlignmentDealbreakerQuestion('your relationship with cigarettes or vaping');
+  partnerRelationshipShareQuestion('cigarettes or vaping');
 
 export const PARTNER_ALIGNMENT_ALCOHOL_DEALBREAKER_QUESTION =
-  partnerAlignmentDealbreakerQuestion('your relationship with alcohol');
+  partnerRelationshipShareQuestion('alcohol');
 
 export const PARTNER_ALIGNMENT_RECREATIONAL_DRUGS_DEALBREAKER_QUESTION =
-  partnerAlignmentDealbreakerQuestion('your relationship with recreational drugs');
+  partnerRelationshipShareQuestion('recreational drugs');
 
 export const PARTNER_ALIGNMENT_PSYCHEDELICS_DEALBREAKER_QUESTION =
-  partnerAlignmentDealbreakerQuestion('your relationship with psychedelics or plant medicines');
+  partnerRelationshipShareQuestion('psychedelics or plant medicines');
 
 export const PARTNER_ALIGNMENT_CANNABIS_DEALBREAKER_QUESTION =
-  partnerAlignmentDealbreakerQuestion('your relationship with cannabis or tobacco');
+  partnerRelationshipShareQuestion('cannabis or tobacco');
 
 export const PARTNER_POLITICAL_VIEWS_DEALBREAKER_QUESTION =
   partnerAlignmentDealbreakerQuestion('your political views');

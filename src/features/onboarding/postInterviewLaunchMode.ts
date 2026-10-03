@@ -6,7 +6,7 @@ import type { StandardPostInterviewStackRoute } from '@utilities/postInterviewPr
 /** Temporary: hide pass/fail/pending post-interview screens; show launch waitlist instead. */
 export const POST_INTERVIEW_LAUNCH_WAITLIST_MODE = true;
 
-export const LAUNCH_WAITLIST_USER_GOAL = 500;
+export const LAUNCH_WAITLIST_USER_GOAL = 600;
 
 export const LAUNCH_WAITLIST_VALUE_PROPS = [
   'Scientifically backed compatibility matching',

@@ -26,6 +26,7 @@ import {
 import {
   looksLikeScenarioCSophiePerspectiveAssessableShortAnswer,
   looksLikeScenarioCSophiePerspectiveQuestion,
+  SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from '@features/aria/scenarioCPromptDetection';
 import { looksLikeScenarioAContemptProbeAssessableShortAnswer } from '@features/aria/scenarioAContemptProbeCoverage';
 import { looksLikeScenarioAContemptProbeQuestion } from '@features/aria/scenarioAContemptProbeLogic';
@@ -128,7 +129,14 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
   constructSatisfactionResolvedByProbe: ConstructSatisfactionResolvedByProbe = {},
   orchestratorSkippedProbeId: InterviewCanonicalProbeId | null = null,
 ): Promise<PreClaudeClientOwnedCanonicalConstructGateResult> {
-  if (isDecline(trimmed) || suppressForcedConstructProbesForMetaFrustration) {
+  const sophieAffectDespiteShortLength =
+    looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(trimmed) &&
+    (looksLikeScenarioCSophiePerspectiveQuestion(lastAssistantContent) ||
+      looksLikeScenarioCSophiePerspectiveQuestion(deps.lastQuestionTextRef.current ?? ''));
+  if (
+    (isDecline(trimmed) && !sophieAffectDespiteShortLength) ||
+    suppressForcedConstructProbesForMetaFrustration
+  ) {
     return { handled: false };
   }
   if (looksLikeInterviewProcessMetaComment(trimmed)) {
@@ -157,6 +165,7 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
     allowScenarioARepairAfterContemptAnswer,
     shouldForceScenarioBJamesRepairProbe,
     shouldForceScenarioCSophiePerspectiveProbe,
+    shouldForceScenarioCRepairProbe,
   } = constructProbeFlags;
 
   if (
@@ -187,8 +196,14 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
       constructSatisfactionResolvedByProbe,
       orchestratorSkippedProbeId,
       probeId: 's1_repair',
-      eligible: false,
-      logTag: '[S1_REPAIR_RETIRED_SKIP]',
+      eligible:
+        constructProbeFlags.allowScenarioARepairAfterContemptAnswer &&
+        shouldDeliverScenarioFollowUpQuestion(
+          messagesToUse,
+          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+        ),
+      logTag: '[S1_REPAIR_CLIENT_OWNED_SKIP_CLAUDE]',
+      withBriefAck: true,
     })
   ) {
     return { handled: true };
@@ -255,6 +270,22 @@ export async function runPreClaudeClientOwnedCanonicalConstructGate(
         shouldDeliverScenarioFollowUpQuestion(messagesToUse, SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE),
       logTag: '[S3_SOPHIE_CLIENT_OWNED_SKIP_CLAUDE]',
       withBriefAck: true,
+    })
+  ) {
+    return { handled: true };
+  }
+
+  if (
+    await deliverClientOwnedProbeIfEligible({
+      deps,
+      trimmed,
+      messagesToUse,
+      constructProbeFlags,
+      constructSatisfactionResolvedByProbe,
+      orchestratorSkippedProbeId,
+      probeId: 's3_repair',
+      eligible: false,
+      logTag: '[S3_REPAIR_RETIRED_SKIP]',
     })
   ) {
     return { handled: true };

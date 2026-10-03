@@ -168,9 +168,10 @@ describe('sexual communication is not a pair-ranking signal', () => {
     expect(lowSimilar.contributionBreakdown?.adjustments.sexualDiscrepancy).toBe(0);
   });
 
-  it('keeps the person-level score on mapped inputs for profile/research', () => {
+  it('does not copy a typology sexual-communication mean onto ranking inputs', () => {
     const mapped = mapMatchmakingUserToCompatibilityInputs(idealPairUserA, fixtureMappingExtras);
-    expect(mapped.sexualCommunicationMean).toBe(4.0);
+    expect(idealPairUserA.postInterviewTypology?.sexualCommunicationMean).toBe(4.0);
+    expect(mapped.sexualCommunicationMean).toBeNull();
   });
 
   it('does not derive an intimacy domain score from sexual-communication similarity', () => {

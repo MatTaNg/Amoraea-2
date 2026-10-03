@@ -29,7 +29,7 @@ describe('interviewAssistantReflection', () => {
     const text =
       'So for you, the emotional moment needed to land before anything practical could. What do you think James could have done differently to help Sarah feel appreciated?';
     const out = coerceMidScenarioRelationalReflectionToBriefAck(text);
-    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.|I'm with you\.)/);
+    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.)/);
     expect(out).toContain('What do you think James could have done differently');
     expect(out).not.toMatch(/^So for you,/);
   });
@@ -37,7 +37,7 @@ describe('interviewAssistantReflection', () => {
   it('coerceMidScenarioRelationalReflectionToBriefAck prepends ack when question has no lead', () => {
     const text = 'What if you were Ryan — how would you repair this situation?';
     const out = coerceMidScenarioRelationalReflectionToBriefAck(text);
-    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.|I'm with you\.)/);
+    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.)/);
     expect(out).toContain('What if you were Ryan');
   });
 

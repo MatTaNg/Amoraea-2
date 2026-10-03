@@ -85,12 +85,14 @@ export const BRIEF_SCENARIO_ACKS = [
   'Got it.',
   'Makes sense.',
   'That makes a lot of sense.',
-  "I'm with you.",
 ] as const;
+
+/** Still recognized so an old "I'm with you" lead is not stacked with another receipt. */
+const RECOGNIZED_BRIEF_SCENARIO_ACKS = [...BRIEF_SCENARIO_ACKS, "I'm with you."] as const;
 
 export function extractLeadingBriefScenarioAck(text: string): string | null {
   const t = (text ?? '').trim();
-  for (const ack of BRIEF_SCENARIO_ACKS) {
+  for (const ack of RECOGNIZED_BRIEF_SCENARIO_ACKS) {
     const esc = ack.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     if (new RegExp(`^${esc}(?:\\s|$)`, 'i').test(t)) return ack;
   }

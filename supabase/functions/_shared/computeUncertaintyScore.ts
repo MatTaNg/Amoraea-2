@@ -1,4 +1,8 @@
 import {
+  SEXUAL_COMMUNICATION_SOFT_MODIFIER_FLAG,
+  sexualCommunicationUncertaintyContribution,
+} from '../../../src/config/psychometrics/sexualCommunicationSoftModifier.ts';
+import {
   UNCERTAINTY_GATE_PROXIMITY_SCORE,
   UNCERTAINTY_ROUTING_THRESHOLD,
 } from '../../../src/config/psychometrics/uncertaintyAndGaming.ts';
@@ -47,6 +51,13 @@ export function computeUncertaintyScore(attempt: {
   psychometrics_rfq_score: number | null;
   psychometrics_scs_public_score: number | null;
   psychometrics_scs_private_score: number | null;
+  /**
+   * Pre-interview sexual_communication_comfort mean. Omit or null when the
+   * instrument was not collected. Do not pass the historical typology column.
+   */
+  psychometrics_sexual_communication_comfort_score?: number | null;
+  /** Persisted sexual_communication_soft_modifier. Preferred over recomputing from the mean. */
+  psychometrics_sexual_communication_comfort_soft_modifier?: number | null;
   reasoning_pending: boolean | null;
   defenseCrossReference?: DefenseCrossReferenceResult | null;
   /** Pass 2 only — gaming correction level from computeGamingCorrection (breaks circular dependency). */
@@ -204,6 +215,12 @@ export function computeUncertaintyScore(attempt: {
   if (attempt.reasoning_pending) {
     depthConcerns += 0.1;
     activeFlags.push('reasoning_pending');
+  }
+
+  const sexualCommunicationConcern = sexualCommunicationUncertaintyContribution(attempt);
+  if (sexualCommunicationConcern > 0) {
+    depthConcerns += sexualCommunicationConcern;
+    activeFlags.push(SEXUAL_COMMUNICATION_SOFT_MODIFIER_FLAG);
   }
 
   const defenseCrossReference = attempt.defenseCrossReference;

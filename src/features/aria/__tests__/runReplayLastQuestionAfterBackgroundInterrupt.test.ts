@@ -163,6 +163,25 @@ describe('runReplayLastQuestionAfterBackgroundInterrupt', () => {
     expect(speakTextSafe).not.toHaveBeenCalled();
   });
 
+  it('does not replay welcome while resume hydration already owns playback', async () => {
+    acquireResumeWelcomePlaybackLock('attempt-1');
+    const speakTextSafe = jest.fn(async () => undefined);
+    const deps = baseDeps({
+      resumeOfferWelcomeTtsRef: { current: true },
+      speakTextSafe,
+    });
+
+    await runReplayWelcomeAfterInterviewReentry(
+      deps,
+      'foreground_after_app_background_idle',
+      null,
+    );
+
+    expect(speakTextSafe).not.toHaveBeenCalled();
+    expect(isResumeWelcomePlaybackLocked('attempt-1')).toBe(true);
+    releaseResumeWelcomePlaybackLock('attempt-1');
+  });
+
   it('offers welcome on idle app return even when resumeOfferWelcomeTtsRef is false', async () => {
     const speakTextSafe = jest.fn(async () => undefined);
     const expectedWelcome = buildResumeWelcomeMessage({

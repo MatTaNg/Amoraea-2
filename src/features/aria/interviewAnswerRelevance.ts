@@ -217,7 +217,11 @@ export function looksLikeIncompleteCutOffUserAnswer(text: string): boolean {
     return true;
   }
   // Common Whisper hallucination / media outro — not an interview answer.
-  if (/^thank\s+you\s+for\s+(?:watching|listening|tuning\s+in|joining)\s*[.,;:!?…—–-]*$/i.test(low)) {
+  if (
+    /^(?:thanks|thank\s+you)\s+for\s+(?:watching|listening|tuning\s+in|joining)(?:\s+(?:this(?:\s+video)?|guys|everyone|y'?all))?\s*[.,;:!?…—–-]*$/i.test(
+      low,
+    )
+  ) {
     return true;
   }
   // Relationship setup with no episode — e.g. "Yeah, me and my partner" (mic-stop before the story).

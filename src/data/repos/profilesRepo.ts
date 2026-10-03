@@ -1,7 +1,11 @@
 import { supabase } from '../supabase/client';
 import { PROFILES_ROW_SELECT } from '../supabase/userInterviewRoutingSelect';
 import { fetchAccountGenderDb } from '@/shared/utils/accountGender';
+import { capProfilePhotoList } from '@/shared/profilePhotoLimit';
 import type { Result, UserProfile } from '../../datingProfile/types';
+
+/** One in-flight profile write per user so a slower earlier save cannot overwrite a later one. */
+const profileUpdateChain = new Map<string, Promise<unknown>>();
 
 /** When `profiles.profile_json` is missing on the server, we stash dating fields here until migrations run. */
 const OVERLAY_METADATA_KEY = 'dating_profile_overlay';
@@ -96,8 +100,28 @@ function mergedFlatHasPhotoUrls(flat: Record<string, unknown>): boolean {
   return typeof prim === 'string' && prim.trim() !== '';
 }
 
-/** Append URLs from `profile_photos` when onboarding/API stored gallery rows but `photos` JSON stayed empty. */
+function photoUrlsFromProfileField(existingRaw: unknown): string[] {
+  const stringsFromExisting: string[] = [];
+  if (!Array.isArray(existingRaw)) return stringsFromExisting;
+  for (const x of existingRaw) {
+    if (typeof x === 'string' && x.trim()) stringsFromExisting.push(x.trim());
+    else if (x && typeof x === 'object') {
+      const o = x as Record<string, unknown>;
+      const u = o.public_url ?? o.publicUrl ?? o.url ?? o.uri;
+      if (typeof u === 'string' && u.trim()) stringsFromExisting.push(u.trim());
+    }
+  }
+  return stringsFromExisting;
+}
+
+/** Fill `photos` from `profile_photos` only when profile JSON has no gallery. Never grow past 6. */
 async function mergeProfilePhotosJoinTable(userId: string, flat: Record<string, unknown>): Promise<void> {
+  const stringsFromExisting = photoUrlsFromProfileField(flat.photos);
+  if (stringsFromExisting.length > 0) {
+    flat.photos = capProfilePhotoList(stringsFromExisting);
+    return;
+  }
+
   try {
     const { data, error } = await supabase
       .from('profile_photos')
@@ -111,30 +135,8 @@ async function mergeProfilePhotosJoinTable(userId: string, flat: Record<string, 
         return typeof u === 'string' ? u.trim() : '';
       })
       .filter(Boolean);
-    if (!tableUrls.length) return;
-
-    const existingRaw = flat.photos;
-    const stringsFromExisting: string[] = [];
-    if (Array.isArray(existingRaw)) {
-      for (const x of existingRaw) {
-        if (typeof x === 'string' && x.trim()) stringsFromExisting.push(x.trim());
-        else if (x && typeof x === 'object') {
-          const o = x as Record<string, unknown>;
-          const u = o.public_url ?? o.publicUrl ?? o.url ?? o.uri;
-          if (typeof u === 'string' && u.trim()) stringsFromExisting.push(u.trim());
-        }
-      }
-    }
-
-    const seen = new Set(stringsFromExisting);
-    const merged = [...stringsFromExisting];
-    for (const u of tableUrls) {
-      if (!seen.has(u)) {
-        seen.add(u);
-        merged.push(u);
-      }
-    }
-    if (merged.length) flat.photos = merged;
+    const fromTable = capProfilePhotoList(tableUrls);
+    if (fromTable.length) flat.photos = fromTable;
   } catch {
     /* optional legacy table / RLS */
   }
@@ -258,6 +260,8 @@ export const profilesRepo = {
   },
 
   async updateProfile(userId: string, patch: Record<string, unknown>): Promise<Result<UserProfile>> {
+    const prev = profileUpdateChain.get(userId) ?? Promise.resolve();
+    const run = prev.catch(() => undefined).then(async () => {
     try {
       const { data: existingRowData, error: existingErr } = await supabase
         .from('profiles')
@@ -269,6 +273,9 @@ export const profilesRepo = {
 
       const current = await readMergedProfile(userId, { existingRow: ex });
       const nextFlat = { ...current, ...patch };
+      if (Array.isArray(nextFlat.photos)) {
+        nextFlat.photos = capProfilePhotoList(nextFlat.photos);
+      }
       const profile_json = { ...nextFlat };
 
       const { data: authData } = await supabase.auth.getUser();
@@ -365,5 +372,8 @@ export const profilesRepo = {
     } catch (e) {
       return { success: false, error: e instanceof Error ? e : new Error(String(e)) };
     }
+    });
+    profileUpdateChain.set(userId, run);
+    return run as Promise<Result<UserProfile>>;
   },
 };

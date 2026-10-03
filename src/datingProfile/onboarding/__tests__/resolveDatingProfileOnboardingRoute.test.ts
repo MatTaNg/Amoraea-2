@@ -16,31 +16,22 @@ jest.mock('@/datingProfile/screens/onboarding/modals/services/modalOnboardingSer
 }));
 
 jest.mock('@/data/services/assessmentService', () => {
-  const BATTERY = ['SEXUAL_COMMUNICATION', 'PVQ-21', 'CONFLICT-30', 'ECR-36'];
+  const BATTERY = ['PVQ-21', 'CONFLICT-30', 'ECR-36'];
   return {
     getCompletedAssessments: jest.fn(),
     getFirstIncompleteAssessment: jest.fn(),
-    FIRST_DATING_PROFILE_ASSESSMENT_ID: 'SEXUAL_COMMUNICATION',
+    FIRST_DATING_PROFILE_ASSESSMENT_ID: 'PVQ-21',
     isDatingProfileTypologyBatteryComplete: (list: string[]) =>
       BATTERY.every((id) => list.includes(id)),
     syncProfileIfTypologyBatteryComplete: jest.fn(),
     isActiveAssessmentId: jest.fn(
-      (id: string) =>
-        id === 'SEXUAL_COMMUNICATION' ||
-        id === 'PVQ-21' ||
-        id === 'CONFLICT-30' ||
-        id === 'ECR-36',
+      (id: string) => id === 'PVQ-21' || id === 'CONFLICT-30' || id === 'ECR-36',
     ),
     resolveActiveAssessmentId: jest.fn((instrument: string | null, completed: string[] = []) => {
-      if (
-        instrument === 'SEXUAL_COMMUNICATION' ||
-        instrument === 'PVQ-21' ||
-        instrument === 'CONFLICT-30' ||
-        instrument === 'ECR-36'
-      ) {
+      if (instrument === 'PVQ-21' || instrument === 'CONFLICT-30' || instrument === 'ECR-36') {
         return instrument;
       }
-      return completed.includes('SEXUAL_COMMUNICATION') ? 'PVQ-21' : 'SEXUAL_COMMUNICATION';
+      return completed.includes('PVQ-21') ? 'CONFLICT-30' : 'PVQ-21';
     }),
     markAssessmentsStarted: jest.fn(),
   };
@@ -100,7 +91,7 @@ describe('resolveDatingProfileOnboardingEntryRoute', () => {
 
     const route = await resolveDatingProfileOnboardingEntryRoute('user-1');
     expect(route.screen).toBe('DatingInstrument');
-    expect(route.params).toEqual({ instrument: 'SEXUAL_COMMUNICATION' });
+    expect(route.params).toEqual({ instrument: 'PVQ-21' });
   });
 
   it('skips instruments when relationship validation battery is already complete', async () => {

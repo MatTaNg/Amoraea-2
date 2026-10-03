@@ -634,7 +634,7 @@ const styles = StyleSheet.create({
   referralNoticeDismiss: { alignSelf: 'flex-end' },
   referralNoticeDismissLabel: { fontFamily: FONT_BODY, fontSize: 13, fontWeight: '600', color: ACCENT },
   referFriendSectionSpacing: { marginTop: 20 },
-  retakeSection: { width: '100%', maxWidth: 440, alignSelf: 'center', marginTop: 28, paddingHorizontal: 4, alignItems: 'center' },
+  retakeSection: { width: '100%', alignSelf: 'center', marginTop: 28, paddingHorizontal: 4, alignItems: 'center' },
   retakeButton: {
     width: '100%',
     borderWidth: 1,

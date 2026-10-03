@@ -128,7 +128,8 @@ describe('buildMoment4ThresholdAnswerToMoment5Bundle', () => {
   it('includes pivot and the scripted Moment 5 question without praise when no threshold answer', () => {
     const out = buildMoment4ThresholdAnswerToMoment5Bundle('', MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
     expect(out).not.toContain('Great work');
-    expect(out.toLowerCase()).toContain('one more question about you');
+    expect(out).toContain("Last one, and then we'll wrap up.");
+    expect(out.toLowerCase()).not.toMatch(/personal question|still personal/);
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
@@ -140,7 +141,8 @@ describe('buildMoment4ThresholdAnswerToMoment5Bundle', () => {
     );
     expect(out).not.toContain('Thanks for sharing that.');
     expect(out).not.toMatch(REFLECTION_ANCHOR);
-    expect(out).toContain('one more question about you');
+    expect(out).toContain("Last one, and then we'll wrap up.");
+    expect(out.toLowerCase()).not.toMatch(/personal question|still personal/);
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
@@ -160,6 +162,8 @@ describe('buildMoment4ToSupportBundle', () => {
   it('includes the standard personal-block pivot then the support question', () => {
     const out = buildMoment4ToSupportBundle();
     expect(out).toContain(MOMENT_SUPPORT_HANDOFF_PIVOT);
+    expect(out).toMatch(/^Good work\./);
+    expect(out.toLowerCase()).not.toMatch(/personal question|still personal|another question about you/);
     expect(out).toContain(MOMENT_SUPPORT_QUESTION_TEXT);
     expect(out).not.toMatch(/one more question about you/i);
     expect(out).not.toMatch(/wrap up/i);

@@ -2,14 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Ionicons } from '@expo/vector-icons';
 import * as Clipboard from 'expo-clipboard';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Platform, Pressable, StyleSheet, Text } from 'react-native';
 import type { NavigationState } from '@react-navigation/native';
 
 import { isLaunchWaitlistPostInterviewModeEnabled } from '@features/onboarding/postInterviewLaunchMode';
@@ -21,6 +14,7 @@ import {
 import { referralCodeIntroSeenStorageKey } from '@features/referrals/referralCodeIntroStorage';
 import { PostInterviewLaunchReferralCard } from '@features/referrals/PostInterviewLaunchReferralCard';
 import { PostInterviewReferFriendSection } from '@features/referrals/PostInterviewReferFriendSection';
+import { ReferralDiscountModal } from '@features/referrals/ReferralDiscountModal';
 
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 
@@ -182,46 +176,30 @@ export function ReferralCodeIntroShell({
         <Text style={styles.reopenLabel}>Referral code</Text>
       </Pressable>
 
-      <Modal
+      <ReferralDiscountModal
         visible={popupVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => void dismissPopup()}
+        onDismiss={() => void dismissPopup()}
+        closeAccessibilityLabel="Close referral popup"
       >
-        <Pressable style={styles.modalBackdrop} onPress={() => void dismissPopup()}>
-          <Pressable style={styles.modalCard} onPress={(event) => event.stopPropagation()}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Close referral popup"
-              onPress={() => void dismissPopup()}
-              style={styles.modalClose}
-            >
-              <Ionicons name="close" size={20} color="rgba(255,255,255,0.72)" />
-            </Pressable>
-            {useLaunchReferralCard ? (
-              <PostInterviewLaunchReferralCard
-                referralStatus={referralStatus}
-                displayDiscount={displayDiscount}
-                copyFeedback={copyFeedback}
-                onCopyPress={() => void copyReferralCode()}
-                style={styles.modalLaunchReferralCard}
-                variant={referralCardVariant}
-              />
-            ) : (
-              <PostInterviewReferFriendSection
-                referralCode={referralStatus.referralCode}
-                copyFeedback={copyFeedback}
-                onCopyPress={() => void copyReferralCode()}
-                showTopDivider={false}
-                style={styles.modalReferSection}
-              />
-            )}
-            <Pressable onPress={() => void dismissPopup()} style={styles.modalSecondaryButton}>
-              <Text style={styles.modalSecondaryText}>Got it</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+        {useLaunchReferralCard ? (
+          <PostInterviewLaunchReferralCard
+            referralStatus={referralStatus}
+            displayDiscount={displayDiscount}
+            copyFeedback={copyFeedback}
+            onCopyPress={() => void copyReferralCode()}
+            style={styles.modalLaunchReferralCard}
+            variant={referralCardVariant}
+          />
+        ) : (
+          <PostInterviewReferFriendSection
+            referralCode={referralStatus.referralCode}
+            copyFeedback={copyFeedback}
+            onCopyPress={() => void copyReferralCode()}
+            showTopDivider={false}
+            style={styles.modalReferSection}
+          />
+        )}
+      </ReferralDiscountModal>
     </>
   );
 }
@@ -262,30 +240,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#E8F4FF',
   },
-  modalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(3,7,18,0.72)',
-    paddingHorizontal: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalCard: {
-    width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#0B1324',
-    borderWidth: 1,
-    borderColor: 'rgba(91,168,232,0.26)',
-    borderRadius: 18,
-    paddingTop: 24,
-    paddingBottom: 20,
-    paddingHorizontal: 20,
-  },
-  modalClose: {
-    position: 'absolute',
-    top: 14,
-    right: 14,
-    padding: 6,
-  },
   modalReferSection: {
     marginTop: 0,
     marginBottom: 8,
@@ -297,15 +251,5 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     paddingHorizontal: 0,
     paddingVertical: 0,
-  },
-  modalSecondaryButton: {
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  modalSecondaryText: {
-    fontFamily: FONT_BODY,
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#9CCBFF',
   },
 });

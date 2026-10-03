@@ -13,11 +13,12 @@ export const LikertScale: React.FC<{
 }> = ({ min, max, value, onChange, minLabel, maxLabel }) => {
   const { width } = useWindowDimensions();
   const narrow = width < 420;
+  const tablet = width >= 600;
   const items: number[] = [];
   for (let i = min; i <= max; i++) items.push(i);
   return (
     <View style={styles.wrap}>
-      <View style={[styles.row, narrow && styles.rowNarrow]}>
+      <View style={[styles.row, narrow && styles.rowNarrow, tablet && styles.rowTablet]}>
         {items.map((n) => (
           <Pressable
             key={n}
@@ -29,7 +30,7 @@ export const LikertScale: React.FC<{
         ))}
       </View>
       {(minLabel || maxLabel) && (
-        <View style={styles.edgeLabelsRow}>
+        <View style={[styles.edgeLabelsRow, tablet && styles.edgeLabelsTablet]}>
           <Text style={[styles.edgeLabel, styles.edgeLabelMin]}>{minLabel ?? ''}</Text>
           <Text style={[styles.edgeLabel, styles.edgeLabelMax]}>{maxLabel ?? ''}</Text>
         </View>
@@ -44,6 +45,7 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', flexWrap: 'nowrap', gap: SCALE_GAP, width: '100%', maxWidth: 360, alignSelf: 'flex-start' },
   rowNarrow: { maxWidth: '100%' },
+  rowTablet: { maxWidth: '100%', alignSelf: 'stretch', justifyContent: 'space-between' },
   dot: {
     flex: 1,
     minWidth: 32,
@@ -69,6 +71,10 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 360,
     gap: SCALE_GAP,
+  },
+  edgeLabelsTablet: {
+    maxWidth: '100%',
+    alignSelf: 'stretch',
   },
   edgeLabel: {
     color: '#9CB4D8',

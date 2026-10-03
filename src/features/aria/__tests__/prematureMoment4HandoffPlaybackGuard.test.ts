@@ -36,6 +36,17 @@ describe('prematureMoment4HandoffPlaybackGuard', () => {
     ).toBe(true);
   });
 
+  it('detects the streamed middle sentence of the canonical S3 close', () => {
+    expect(isPrematureStandaloneM4PersonalTransitionLine('Next are three personal questions.')).toBe(
+      true,
+    );
+    expect(
+      isPrematureStandaloneM4PersonalTransitionLine(
+        "Let's start with something a bit more personal.",
+      ),
+    ).toBe(true);
+  });
+
   it('does not treat full S3→M4 handoff lead as premature standalone personal bridge', () => {
     expect(isPrematureStandaloneM4PersonalTransitionLine(MOMENT_4_HANDOFF_NO_NAME_LEAD)).toBe(false);
     const withReflection =

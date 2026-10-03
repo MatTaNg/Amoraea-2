@@ -10,7 +10,10 @@ import {
   CONTEMPT_TIER_BREAKDOWN_JSON_INSTRUCTION,
   CONTEMPT_TIER_BREAKDOWN_JSON_TEMPLATE,
 } from './contemptExpressionScoringRubric';
-import { MOMENT_4_GRUDGE_QUESTION_TEXT } from './moment4ProbeLogic';
+import {
+  MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT,
+  MOMENT_4_GRUDGE_QUESTION_TEXT,
+} from './moment4ProbeLogic';
 import { PILLAR_CONFIDENCE_METADATA_ONLY_RULES } from './holisticScoringPrompt';
 
 /** Shared across scenario + personal moment prompts; JSON field \`mentalizing_overcertainty\` (boolean, top-level; \`keyEvidence\` or \`scoringMetadata\` mirrors accepted — see {@link coerceMentalizingOvercertaintyFromModelJson}). */
@@ -203,8 +206,8 @@ MOMENT 4 — CONSTRUCT SCOPE (this slice only):
   In this moment, chronic "I can’t win" / global blame **without** reflective ownership may sit in the mid/lower **expression** range when it functions as a contemptuous narrative; that is separate from **fair** moral language about the other’s **concrete** harmful **actions** (not automatically low 1–4 per the rubric).
 - **attunement:** Do not score. Omit or null — the grudge prompt does not test real-time attunement to another's emotional state.
 - **regulation:** Score when the grudge or commitment answers show how they managed their own emotional state under interpersonal strain. Prefer autobiographical behavioral evidence over abstract claims. If no meaningful regulation evidence, use JSON null — do not invent a midpoint.
-- **persistence_exit_judgment:** Primary score for the walk-away / work-through follow-up. Also copy the same numeric score to **commitment_threshold** for historical rollup.
-- **commitment_orientation:** Primary score for the complementary "what made you keep investing" follow-up. Persist independently; do not average it into persistence_exit_judgment.
+- **persistence_exit_judgment:** Score walk-away vs work-through reasoning wherever it appears in this moment — the conditional fallback question when it was asked, or spontaneous exit-judgment in the grudge or keep-investing answer when the fallback was not asked. Absence is JSON null, not a low score. Also copy the same numeric score to **commitment_threshold**. Do not require the fallback question to have been asked.
+- **commitment_orientation:** Score the autobiographical "what made you keep investing" answer. If they had no relationship to draw on and only the fallback was usable, this marker may be JSON null. Do not average it into persistence_exit_judgment. Do not treat stay-versus-leave framing as required for this marker.
 
 CONTEXTUAL REASONING (uses existing ego-development / depth framework — not a new pillar):
 Higher-quality reasoning includes contextual reasoning, calibrated uncertainty, multiple plausible interpretations, and holding competing truths. Lower-quality reasoning includes rigid always/never rules, black-and-white interpretations, unjustified certainty, and rote therapy language without contextual understanding. Let this inform mentalizing, ego_development_level, and mentalizing_overcertainty — do not create a separate pillar score.
@@ -254,9 +257,10 @@ If the surrounding tone is dismissive, contemptuous, or frames the other person 
 
 Other resolution-orientation indicators remain direct evidence when present: explicit forgiveness, perspective-taking, acknowledgment of personal growth, or ongoing relationship survival. Do not include "neutral acceptance without ongoing hostility" as a standalone indicator.
 
-COMMITMENT SLICES (persist independently; both feed commitment_persistence):
-- **persistence_exit_judgment** — walk-away vs work-through follow-up. Dual-write the same number to **commitment_threshold**.
-- **commitment_orientation** — what made them keep investing rather than pulling away. Do not average into persistence_exit_judgment.
+COMMITMENT SLICES (persist independently; both feed commitment_persistence; either slice may be absent):
+- **commitment_orientation** — autobiographical keep-investing answer: "${MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT}" Score only investment reasoning. Do not require a stay-versus-leave comparison.
+- **persistence_exit_judgment** — exit-judgment / discernment. Score the conditional fallback when it was asked: "At what point do you decide when a relationship is something to work through versus something you need to walk away from?" Also score the same construct when that reasoning shows up spontaneously in the grudge or keep-investing answer and the fallback was not asked. Dual-write the same number to **commitment_threshold**. If neither the fallback nor spontaneous exit-judgment is present, JSON null — do not invent a midpoint.
+- Set \`scoringMetadata.commitment_source\` to **"autobiographical"** when the keep-investing answer is the commitment evidence, or **"hypothetical_fallback"** when the walk-away fallback was asked and is the commitment evidence. The client also stamps \`commitment_source\` on the stored Moment 4 slice from the transcript.
 
 COMMITMENT_THRESHOLD (Moment 4 — first-person):
 - **Low scores (about 2–4):** Unconditional persistence, "I never walk away," "just keep trying no matter what," or no workable invest/communicate/assess/decide structure — **without** reflective limits or self-critique.

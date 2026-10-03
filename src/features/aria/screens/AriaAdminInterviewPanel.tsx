@@ -256,7 +256,7 @@ export function AriaAdminInterviewPanel({
                   <Text style={styles.resultsReferFriendTitle}>Know someone who can pass?</Text>
                   <Text style={styles.resultsReferFriendBody}>
                     Share your personal code with someone you think is ready. If they complete the full interview, you
-                    will both receive a 20% discount at our next event!
+                    will both receive a 15% discount at our next event!
                   </Text>
                   <View style={styles.resultsReferCodeRow}>
                     <Text style={styles.resultsReferCodeText} selectable>

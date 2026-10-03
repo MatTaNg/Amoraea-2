@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { useWindowDimensions, type ViewStyle } from 'react-native';
 import { spacing } from '@ui/theme/spacing';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 /** Viewports narrower than this use tighter padding and slightly smaller type. */
 export const NARROW_ASSESSMENT_VIEWPORT_WIDTH = 420;
@@ -15,7 +16,7 @@ export function assessmentScrollContentStyle(width: number, extra?: ViewStyle): 
     padding: narrow ? 16 : spacing.lg,
     paddingTop: narrow ? 16 : spacing.lg,
     paddingBottom: narrow ? spacing.xxl : spacing.xxl * 2,
-    maxWidth: 560,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     width: '100%',
     alignSelf: 'center',
     ...extra,

@@ -8,6 +8,7 @@ import {
 import {
   shouldAdvanceScenarioAAfterSatisfiedRepair,
 } from '@features/aria/interviewDisengagementProbes';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import { isScenarioCRepairAssistantPrompt, isScenarioCBoundaryReflectionWithoutMoment4Handoff, isScenarioCQ1Prompt, looksLikeScenarioCRepairWithUserAnswerEcho, looksLikeScenarioCSophiePerspectiveQuestion, looksLikeScenarioCSophieRolePlayMisparaphraseQuestion, looksLikeScenarioCSophieReceiveMisparaphraseQuestion, scenarioCRepairConstructStillPending, scenarioCUserAnswerHasSubstantiveRepairContent, scenarioCUserAnswerSatisfiesRepairQuestionAnswer } from '@features/aria/scenarioCPromptDetection';
 import { isScenarioModalFollowUpProbe } from '@features/aria/interviewScenarioModalPrompt';
 import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
@@ -211,7 +212,25 @@ export function applyPostClaudeScenarioAdvanceBundleOverride(
   }
 
   if (activeScenario === 3) {
-    if (scenarioCRepairConstructStillPending(messages)) {
+    if (isInterviewCanonicalProbeRetired('s3_repair')) {
+      const sophieIndex = messages.findIndex(
+        (m) => m.role === 'assistant' && looksLikeScenarioCSophiePerspectiveQuestion(m.content ?? ''),
+      );
+      const sophieAnswered =
+        sophieIndex >= 0 &&
+        messages.slice(sophieIndex + 1).some((m) => m.role === 'user' && (m.content ?? '').trim());
+      const draft = strippedText.trim();
+      if (
+        sophieAnswered &&
+        (!draft ||
+          isScenarioCRepairAssistantPrompt(draft) ||
+          looksLikeScenarioCSophiePerspectiveQuestion(draft) ||
+          looksLikeScenarioCRepairWithUserAnswerEcho(draft) ||
+          isShortAckOnlySentence(draft))
+      ) {
+        return `[SCENARIO_COMPLETE:3]\n\n${scenarioCompleteClientBundle(3, firstName, messages)}`;
+      }
+    } else if (scenarioCRepairConstructStillPending(messages)) {
       return null;
     }
     const { lastUserContent, priorAssistantContent } = findLastUserWithPriorAssistantContent(messages);

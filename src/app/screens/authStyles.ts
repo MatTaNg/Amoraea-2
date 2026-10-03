@@ -1,4 +1,5 @@
 import { StyleSheet, Platform } from 'react-native';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 const BG = '#05060D';
 const SURFACE = 'rgba(13,17,32,0.9)';
@@ -27,7 +28,7 @@ export const authStyles = StyleSheet.create({
   },
   inner: {
     width: '100%',
-    maxWidth: 380,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     position: 'relative',
     zIndex: 1,
   },

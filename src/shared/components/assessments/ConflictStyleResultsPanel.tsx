@@ -8,8 +8,7 @@ import {
 import { styleDisplayName } from "@/data/assessments/conflictStyleResultsNarrative";
 import { AssessmentPreparingResults } from "@/shared/components/assessments/AssessmentPreparingResults";
 import { theme } from "@/shared/theme/theme";
-
-const WHAT_WE_USE = `Your conflict style profile helps us find someone whose approach to disagreement complements yours. We look at the full profile — not just your dominant style — to identify combinations that research suggests work well together.`;
+import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
 
 export type ConflictStyleResultsFooter =
   | { kind: "none" }
@@ -19,12 +18,14 @@ export type ConflictStyleResultsFooter =
 type Props = {
   userId: string;
   footer: ConflictStyleResultsFooter;
+  /** Edit profile: grow with the page scroll instead of scrolling inside the panel. */
+  embedded?: boolean;
 };
 
 /**
  * Same conflict-style results body as {@link ConflictStyleResultsScreen}, for embedding or stack.
  */
-export function ConflictStyleResultsPanel({ userId, footer }: Props) {
+export function ConflictStyleResultsPanel({ userId, footer, embedded = false }: Props) {
   const {
     loading,
     dominant,
@@ -57,14 +58,8 @@ export function ConflictStyleResultsPanel({ userId, footer }: Props) {
     );
   }
 
-  return (
-    <View style={styles.root}>
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scroll}
-        nestedScrollEnabled
-        keyboardShouldPersistTaps="handled"
-      >
+  const body = (
+    <>
         <View style={styles.heroCard}>
           <Text style={styles.eyebrow}>Conflict style</Text>
           <Text style={styles.dominantTitle}>{dominantLabel}</Text>
@@ -104,11 +99,6 @@ export function ConflictStyleResultsPanel({ userId, footer }: Props) {
           ) : null}
         </View>
 
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionTitle}>What we use this for</Text>
-          <Text style={styles.body}>{WHAT_WE_USE}</Text>
-        </View>
-
         {footer.kind === "onboarding" ? (
           <Button
             title="Continue →"
@@ -125,6 +115,21 @@ export function ConflictStyleResultsPanel({ userId, footer }: Props) {
             style={{ marginTop: 24 }}
           />
         ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return <View style={styles.embedded}>{body}</View>;
+  }
+
+  return (
+    <View style={styles.root}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.scroll}
+        keyboardShouldPersistTaps="handled"
+      >
+        {body}
       </ScrollView>
     </View>
   );
@@ -135,6 +140,14 @@ const styles = StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: theme.colors.background,
+  },
+  embedded: {
+    width: "100%",
+    overflow: "visible",
+    backgroundColor: theme.colors.background,
+    padding: 20,
+    paddingBottom: 32,
+    gap: 16,
   },
   scrollView: {
     flex: 1,
@@ -147,7 +160,7 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 32,
     width: "100%",
-    maxWidth: 680,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: "center",
     gap: 16,
   },

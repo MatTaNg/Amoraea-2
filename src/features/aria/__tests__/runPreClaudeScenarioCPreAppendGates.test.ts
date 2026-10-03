@@ -37,6 +37,20 @@ describe('runPreClaudeScenarioCPreAppendGates', () => {
     expect(deps.setVoiceState).toHaveBeenCalledWith('idle');
   });
 
+  it('returns handled:false when the answer reads Daniel leaving because he does not know what to say', async () => {
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 3 },
+      currentScenarioRef: { current: 3 },
+      messages: [{ role: 'assistant', content: SCENARIO_C_Q1_PROMPT }],
+    });
+    const interpretation =
+      "It sounds like Daniel has difficulty knowing what to say and how to handle the situation specifically with Sophie and so instead of facing it he tries to run away and when he does walk away and come back he realizes that the situation is that he actually just doesn't know what to say and I think that's a pretty fair and honest response.";
+
+    const result = await runPreClaudeScenarioCMisplacedQ1Gate(deps, interpretation);
+
+    expect(result).toEqual({ handled: false });
+  });
+
   it('returns handled:false for interpretation-style Scenario C Q1 answer', async () => {
     const deps = createMockPreClaudeDeps({
       currentInterviewMomentRef: { current: 3 },

@@ -81,6 +81,11 @@ export interface PsychometricScores {
   sd3NarcissismScore: number | null;
   npiEntitlementScore: number | null;
   rfqScore: number | null;
+  /** Active-battery scores. Null means that instrument did not run; it is not a zero contribution. */
+  relationshipGrowthBeliefsScore?: number | null;
+  conflictCatastrophizingScore?: number | null;
+  entitlementScore?: number | null;
+  sexualCommunicationComfortScore?: number | null;
 }
 
 export interface PsychometricModifierResult {
@@ -114,6 +119,64 @@ export interface PsychometricModifierResult {
     npiEntitlementBand: string;
     rfqBand: string;
   };
+  /**
+   * Active-battery instruments that were null when this modifier was computed.
+   * A null score contributes nothing; it is not treated as a healthy zero.
+   */
+  missingRequiredInputs: string[];
+}
+
+const ACTIVE_BATTERY_MODIFIER_INPUTS: Array<{
+  id: string;
+  read: (scores: PsychometricScores) => number | null | undefined;
+}> = [
+  { id: 'brs', read: (scores) => scores.brsScore },
+  { id: 'anxiety_trait', read: (scores) => scores.anxietyTraitScore },
+  { id: 'scs_sf', read: (scores) => scores.scsSfScore },
+  { id: 'gasp', read: (scores) => scores.gaspScore },
+  { id: 'rses', read: (scores) => scores.rsesScore },
+  { id: 'relationship_growth_beliefs', read: (scores) => scores.relationshipGrowthBeliefsScore },
+  { id: 'conflict_catastrophizing', read: (scores) => scores.conflictCatastrophizingScore },
+  { id: 'entitlement', read: (scores) => scores.entitlementScore },
+  { id: 'sexual_communication_comfort', read: (scores) => scores.sexualCommunicationComfortScore },
+];
+
+const GATING_MODIFIER_INPUT_IDS = new Set([
+  'brs',
+  'anxiety_trait',
+  'scs_sf',
+  'gasp',
+  'rses',
+]);
+
+/**
+ * Instruments with no numeric score. Null is omitted from the modifier sum.
+ * Experimental battery scores are included when `includeExperimentalBattery` is set
+ * or when the caller passed those fields (including explicit null).
+ */
+export function missingPsychometricModifierInputs(
+  scores: PsychometricScores,
+  options?: { includeExperimentalBattery?: boolean },
+): string[] {
+  const includeExperimental =
+    options?.includeExperimentalBattery === true ||
+    'relationshipGrowthBeliefsScore' in scores ||
+    'conflictCatastrophizingScore' in scores ||
+    'entitlementScore' in scores ||
+    'sexualCommunicationComfortScore' in scores;
+  return ACTIVE_BATTERY_MODIFIER_INPUTS.filter(({ id, read }) => {
+    if (!includeExperimental && !GATING_MODIFIER_INPUT_IDS.has(id)) return false;
+    const value = read(scores);
+    return value == null || !Number.isFinite(value);
+  }).map(({ id }) => id);
+}
+
+export function logMissingPsychometricModifierInputs(missing: readonly string[]): void {
+  if (missing.length === 0) return;
+  console.warn(
+    '[PsychometricModifier] computed with missing required battery scores (null instruments were not defaulted to zero):',
+    missing.join(', '),
+  );
 }
 
 // GASP recalibrated for 4-item externalization subscale only (guilt-repair and shame-withdraw removed).
@@ -215,7 +278,15 @@ export function computePsychometricModifier(
     sd3_narcissism?: Record<number, number>;
     rfq?: Record<number, number>;
   },
+  options?: { enforceActiveBatteryCompleteness?: boolean },
 ): PsychometricModifierResult {
+  const missingRequiredInputs = missingPsychometricModifierInputs(scores, {
+    includeExperimentalBattery: options?.enforceActiveBatteryCompleteness === true,
+  });
+  if (options?.enforceActiveBatteryCompleteness) {
+    logMissingPsychometricModifierInputs(missingRequiredInputs);
+  }
+
   let modifier = 0;
   let brsComponent = 0;
   let anxietyTraitComponent = 0;
@@ -554,5 +625,6 @@ export function computePsychometricModifier(
       npiEntitlementBand,
       rfqBand,
     },
+    missingRequiredInputs,
   };
 }

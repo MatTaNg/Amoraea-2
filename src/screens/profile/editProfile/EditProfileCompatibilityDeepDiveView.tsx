@@ -410,6 +410,8 @@ export function EditProfileCompatibilityDeepDiveView({
 
   onOpenQuestionsDomainIdChange,
 
+  userId,
+
 }: {
 
   wantKids?: string | null;
@@ -437,6 +439,8 @@ export function EditProfileCompatibilityDeepDiveView({
   openQuestionsDomainId?: LifeDomainId | null;
 
   onOpenQuestionsDomainIdChange?: (domainId: LifeDomainId | null) => void;
+
+  userId: string;
 
 }) {
 
@@ -512,6 +516,8 @@ export function EditProfileCompatibilityDeepDiveView({
         <EditProfileLifeDomainQuestionsModal
 
           visible
+
+          userId={userId}
 
           domainId={questionsDomainId}
 

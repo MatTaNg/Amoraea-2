@@ -74,7 +74,7 @@ export function buildScenarioScoringPrompt(
     3: {
       name: 'Scenario C (Sophie/Daniel)',
       constructs:
-        'regulation, repair, mentalizing, attunement, accountability, contempt_expression',
+        'regulation, mentalizing, attunement, accountability, contempt_expression; repair only if volunteered (no dedicated repair probe)',
       markerIds: [
         'regulation',
         'repair',
@@ -104,19 +104,19 @@ export function buildScenarioScoringPrompt(
   const scenario3RepairAccountabilityEvidenceBlock =
     scenarioNumber === 3 && (scenario3BeforeRepairExcerpt.trim() || scenario3AfterRepairExcerpt.trim())
       ? `
-SCENARIO C — REPAIR & ACCOUNTABILITY EVIDENCE (use with REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED above):
-- **Unprompted excerpt** (primary signal for repair & accountability in this slice — typically Q1 and prior user turns before the general repair prompt):
-"""${scenario3BeforeRepairExcerpt.trim() || '(none)'}"""
-- **Prompted excerpt** (supplementary — answer after "How do you think this situation could be repaired?" or equivalent):
-"""${scenario3AfterRepairExcerpt.trim() || '(none)'}"""
-Score **repair** and **accountability** using the ~70% / ~30% unprompted/prompted weighting; tag **keyEvidence** as unprompted / prompted / both.
+SCENARIO C — REPAIR (SUPPLEMENTARY ONLY):
+The dedicated repair prompt is **retired**. Do not expect "How do you think this situation could be repaired?".
+- **Volunteered repair language** (score only if present; otherwise repair = null):
+"""${scenario3BeforeRepairExcerpt.trim() || scenario3AfterRepairExcerpt.trim() || '(none)'}"""
+If a legacy transcript still contains the old repair prompt, the answer after it may be scored, but this scenario is no longer the hypothetical-repair anchor. Chronic withdrawal / cumulative-pattern repair is supplementary nuance, not the primary repair rubric.
 `
       : '';
   const scenario3RepairIsolationCalibration =
     scenarioNumber === 3
       ? `
-Scenario C — REPAIR (this slice does not score commitment_threshold):
-- Apply **REPAIR & ACCOUNTABILITY — UNPROMPTED VS. PROMPTED** when scoring **repair** and **accountability** (combine unprompted + prompted excerpts per weighting; see Scenario C evidence block when present). Pure exit or "not worth fixing" framing without constructive repair moves keeps **repair** in a **3–5** range when the prompted repair answer lacks workable bilateral content.
+Scenario C — REPAIR (supplementary; dedicated probe retired):
+- There is **no** required repair question in this slice. Score **repair** only when the user volunteers a repair move. Otherwise **repair = JSON null**. Do not assign a low score for analyzing the Sophie/Daniel pattern without repair language.
+- When repair language is present, chronic-pattern nuance may still apply: pure exit or "not worth fixing" without a constructive move stays in a **3–5** range. The primary hypothetical-repair rubric is Scenario A (Emma/Ryan dinner interruption), not this slice.
 `
       : '';
   const scenario1ContemptCalibration =
@@ -132,8 +132,14 @@ ${SCENARIO_A_APPRECIATION_ANCHORS}
   const scenario1RetiredRepairScoring =
     scenarioNumber === 1
       ? `
-SCENARIO A — REPAIR SCORING AFTER PROBE REMOVAL:
-The dedicated repair-as-Ryan prompt is **retired**. Score **repair** only if (a) a repair-as-Ryan question actually appears in this transcript, or (b) the user volunteered meaningful repair process unprompted. Otherwise **repair = JSON null** with keyEvidence that there is no assessable repair evidence. Do **not** assign a low repair score because they analyzed Emma/Ryan without volunteering repair.
+SCENARIO A — REPAIR (PRIMARY HYPOTHETICAL REPAIR ANCHOR):
+The dedicated probe is **"If you were Ryan, how would you repair this?"** after the contempt probe about Emma's "you've made that very clear."
+Score the prompted answer against this **acute dinner-interruption** incident:
+- **Ownership** of the dinner-interruption (taking the call / leaving Emma mid-dinner).
+- **Validation** of Emma's feeling deprioritized.
+- A **concrete corrective behavior** or reconnection gesture.
+Unprompted repair before that prompt is context; the prompted Ryan answer is the primary hypothetical-repair signal. If the question is missing and the user did not volunteer repair, **repair = JSON null** — do not assign a low score merely for analyzing the scene.
+Chronic-pattern / cumulative-withdrawal repair (the former Scenario C framing) may inform nuance when the user names a pattern, but it is **not** the primary anchor for this slice.
 `
       : '';
   const scenario2RetiredRepairScoring =

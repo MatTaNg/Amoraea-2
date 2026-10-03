@@ -53,7 +53,7 @@ export function HobbyDealbreakerField({
       onValueChange={(next) =>
         onProfessionalHobbyIdChange(next === NONE_VALUE ? null : next)
       }
-      sheetTitle="Hobby dealbreaker"
+      sheetTitle={HOBBY_PROFESSIONAL_LABEL}
     />
   );
 }

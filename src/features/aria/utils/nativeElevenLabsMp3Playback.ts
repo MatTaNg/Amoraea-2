@@ -52,7 +52,8 @@ export function resetNativeElevenLabsMp3PlaybackState(): void {
 export async function playNativeElevenLabsMpegArrayBuffer(
   arrayBuffer: ArrayBuffer,
   onPlaybackStarted: (() => void) | undefined,
-  telemetrySource: TtsTelemetrySource
+  telemetrySource: TtsTelemetrySource,
+  playbackRate = 1,
 ): Promise<void> {
   const base64 = arrayBufferToBase64(arrayBuffer);
   const dir = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
@@ -65,9 +66,12 @@ export async function playNativeElevenLabsMpegArrayBuffer(
   const Audio = getExpoAvAudio();
   const { sound } = await Audio.Sound.createAsync(
     { uri: fileUri },
-    { shouldPlay: false, volume: 1.0, isMuted: false }
+    { shouldPlay: false, volume: 1.0, isMuted: false, rate: playbackRate, shouldCorrectPitch: true }
   );
   activeNativeTtsSound = sound;
+  if (playbackRate !== 1 && typeof sound.setRateAsync === 'function') {
+    await sound.setRateAsync(playbackRate, true);
+  }
 
   try {
     await new Promise<void>((resolve, reject) => {

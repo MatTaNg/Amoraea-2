@@ -30,9 +30,9 @@ describe('buildInterviewResponseTimingEntry', () => {
 
     const entry = buildInterviewResponseTimingEntry(deps, 'I would apologize first.');
     expect(entry).toEqual({
-      question_id: 'q_1',
+      question_id: 's1_repair',
       scenario: 1,
-      question_text: 'If you were Ryan, how would you repair this situation?',
+      question_text: 'If you were Ryan, how would you repair this?',
       latency_ms: 200,
       duration_ms: expect.any(Number),
       word_count: 4,

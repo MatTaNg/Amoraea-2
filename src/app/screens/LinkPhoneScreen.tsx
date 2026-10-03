@@ -266,7 +266,14 @@ const styles = StyleSheet.create({
   wordmarkRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'center', marginBottom: 18 },
   wordmarkNoBottomMargin: { marginBottom: 0, textAlign: 'left' },
   taglineTight: { marginBottom: 20 },
-  flameWrap: { marginBottom: 16, alignItems: 'center', minHeight: AUTH_FLAME_ORB_SIZE },
+  flameWrap: {
+    marginBottom: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    width: '100%',
+    minHeight: AUTH_FLAME_ORB_SIZE,
+  },
   button: { marginTop: 16, marginBottom: 12 },
   sentIcon: { fontSize: 32, marginBottom: 20, color: '#C8E4FF' },
 });

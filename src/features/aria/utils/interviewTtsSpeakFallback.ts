@@ -8,7 +8,7 @@ import {
 import { applyNativeTtsPrePlaybackAudioMode, setPlaybackMode } from './audioModeHelpers';
 import type { ElevenLabsSpeakOptions } from './elevenLabsSpeakTypes';
 import { stopElevenLabsPlayback } from './elevenLabsTtsPlaybackStop';
-import { getLocalDevPlaybackRateMultiplier } from './interviewTtsPlaybackRate';
+import { getInterviewDeviceSpeechRate } from './interviewTtsPlaybackRate';
 import { applyAmoraeaPronunciationForDeviceSpeech } from './elevenLabsTtsVoice';
 
 /** Expo-speech fallback when ElevenLabs network TTS is unavailable (native apps). */
@@ -34,7 +34,7 @@ export function speakFallback(
       const iosSpeechSession = Platform.OS === 'ios' ? { useApplicationAudioSession: false as const } : {};
       Speech.speak(speechText, {
         language: 'en-US',
-        rate: Math.min(2, Math.max(0.4, 0.78 * getLocalDevPlaybackRateMultiplier())),
+        rate: getInterviewDeviceSpeechRate(),
         pitch: 0.92,
         ...iosSpeechSession,
         onDone: () => {

@@ -6,6 +6,7 @@ import {
   clearResumeWelcomeSpokenForHydration,
   getResumeWelcomePlaybackGeneration,
   markResumeWelcomeSpoken,
+  isResumeWelcomePlaybackInFlight,
   peekMountResumeOwnsWelcomePlayback,
   releaseResumeWelcomePlaybackLock,
   resolveResumeWelcomeStorageAttemptId,
@@ -157,6 +158,15 @@ export async function runReplayWelcomeAfterInterviewReentry(
   if (deps.interviewStatusRef.current !== 'in_progress') return;
   if (!deps.speakTextSafe) return;
   if (peekMountResumeOwnsWelcomePlayback()) {
+    return;
+  }
+  /**
+   * Resume hydration already has the welcome in flight. Android often emits a short
+   * inactive→active flicker while that audio is queued; replaying here speaks the
+   * same welcome again as soon as the first playback ends.
+   * A real mic/TTS interrupt still replays.
+   */
+  if (!interrupted && isResumeWelcomePlaybackInFlight()) {
     return;
   }
 

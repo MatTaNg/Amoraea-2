@@ -1,3 +1,4 @@
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
 import { isApprovedElongatingProbeOnly } from './elongatingProbe';
 import { isStandalonePersonalDisclosureAcknowledgment } from './personalDisclosureAckPatterns';
 import {
@@ -448,6 +449,9 @@ function finalizeRepeatableInterviewQuestionText(
     coerceScenarioBJamesRepairQuestionForTts(resolved),
   );
   resolved = coerceScenarioCRepairQuestionForTts(resolved);
+  if (activeScenario === 3 && !resolved.trim()) {
+    return resolveSituation3ExactModalPrompt(messages);
+  }
   if (activeScenario === 3 && isPriorScenarioBleedForActiveScenario(resolved, 3)) {
     return resolveSituation3ExactModalPrompt(messages);
   }
@@ -689,9 +693,12 @@ export function findLastRepeatableInterviewQuestionText(
   if (activeScenario === 2) {
     return resolveScenario2RepeatFallbackQuestion(messages);
   }
-  return looksLikeScenarioCSophieReceiveMisparaphraseQuestion(fb)
-    ? SCENARIO_C_REPAIR_QUESTION_CANONICAL
-    : coerceScenarioCRepairQuestionForTts(fb);
+  if (looksLikeScenarioCSophieReceiveMisparaphraseQuestion(fb)) {
+    return isInterviewCanonicalProbeRetired('s3_repair')
+      ? SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE
+      : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+  }
+  return coerceScenarioCRepairQuestionForTts(fb);
 }
 
 /** After Sophie impact probe is answered, resume should offer repair Q2 — not replay the wrap or re-ask Sophie. */
@@ -700,6 +707,7 @@ function resolveScenarioCResumeReplayQuestion(
   candidate: string,
 ): string {
   if (transcriptContainsScenarioCRepairQuestion(messages)) return candidate;
+  if (isInterviewCanonicalProbeRetired('s3_repair')) return candidate;
   let sophieProbeIndex = -1;
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i];

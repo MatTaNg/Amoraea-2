@@ -17,5 +17,6 @@ export function isValidWithinScenarioAck(text: string): boolean {
   if (/\[\w+/.test(t)) return false;
   if (/\bnext situation\b/i.test(t)) return false;
   if (/\btwo questions left\b/i.test(t)) return false;
+  if (/\bcomes through clearly\b/i.test(t)) return false;
   return true;
 }

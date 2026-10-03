@@ -116,6 +116,8 @@ describe('interviewAnswerRelevance', () => {
     expect(looksLikeUnassessableScenarioAnswer('Yeah, me and my partner.')).toBe(true);
     expect(looksLikeIncompleteCutOffUserAnswer('Thank you for watching!')).toBe(true);
     expect(looksLikeUnassessableScenarioAnswer('Thank you for watching!')).toBe(true);
+    expect(looksLikeIncompleteCutOffUserAnswer('Thanks for watching.')).toBe(true);
+    expect(looksLikeUnassessableScenarioAnswer('Thanks for watching.')).toBe(true);
   });
 
   it('flags unassessable answers including identity asks and empty engagement', () => {

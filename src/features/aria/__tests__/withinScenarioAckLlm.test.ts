@@ -26,17 +26,22 @@ describe('within-scenario ack LLM', () => {
     expect(isValidWithinScenarioAck('Thanks for sharing that.')).toBe(true);
     expect(isValidWithinScenarioAck('What do you think?')).toBe(false);
     expect(isValidWithinScenarioAck("Here's the next situation.")).toBe(false);
+    expect(
+      isValidWithinScenarioAck('Being there without pushing — that comes through clearly.'),
+    ).toBe(false);
   });
 
-  it('resolveWithinScenarioBriefAckForInterview uses LLM when valid', async () => {
-    fetchMock.mockResolvedValue('You picked up on the contempt line.');
+  it('resolveWithinScenarioBriefAckForInterview uses a static receipt, not a content reflection', async () => {
+    fetchMock.mockResolvedValue('She was expecting celebration, not questions.');
     const { ack, source } = await resolveWithinScenarioBriefAckForInterview({
       messages: [{ role: 'assistant', content: 'What do you think is going on?' }],
-      userText: 'Emma was being contemptuous.',
-      activeQuestionPreview: 'What do you think is going on here?',
+      userText: 'Sarah expected celebration, not questions about the job.',
+      activeQuestionPreview: 'What do you think is happening for Sarah?',
       interviewSessionId: 'sess-1',
     });
-    expect(source).toBe('llm');
-    expect(ack).toContain('contempt');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(source).toBe('static');
+    expect(ack).not.toMatch(/celebration|questions/i);
+    expect(['Got it.', 'Makes sense.', 'That makes a lot of sense.']).toContain(ack);
   });
 });

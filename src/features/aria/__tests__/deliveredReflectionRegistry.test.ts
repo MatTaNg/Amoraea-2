@@ -50,7 +50,7 @@ describe('M4/M5 handoff reflection dedup', () => {
     );
     const m5Reflection = extractLeadingReflectionFromMoment5HandoffBundle(m5Bundle);
     expect(m5Reflection).toBeNull();
-    expect(m5Bundle).toContain("Here's one more question about you");
+    expect(m5Bundle).toContain("Last one, and then we'll wrap up.");
   });
 
   it('omits threshold→M5 reflection even when registry already has a prior line', () => {
@@ -65,7 +65,7 @@ describe('M4/M5 handoff reflection dedup', () => {
     );
     const m5Reflection = extractLeadingReflectionFromMoment5HandoffBundle(m5Bundle);
     expect(m5Reflection).toBeNull();
-    expect(m5Bundle).toContain("Here's one more question about you");
+    expect(m5Bundle).toContain("Last one, and then we'll wrap up.");
     expect(m5Bundle).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
@@ -83,6 +83,6 @@ describe('M4/M5 handoff reflection dedup', () => {
     );
     const m5Reflection = extractLeadingReflectionFromMoment5HandoffBundle(m5Bundle);
     expect(m5Reflection).toBeNull();
-    expect(m5Bundle).toContain("Here's one more question about you");
+    expect(m5Bundle).toContain("Last one, and then we'll wrap up.");
   });
 });

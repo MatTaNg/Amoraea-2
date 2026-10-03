@@ -37,12 +37,21 @@ describe('resolveAssessableQuestionTextForResponseTiming', () => {
     ).toBe('How do you think this situation could be repaired?');
   });
 
-  it('maps Scenario B James repair paraphrase to James-differently', () => {
+  it('maps a James repair paraphrase to the James repair question, not James-differently', () => {
     expect(
       resolveAssessableQuestionTextForResponseTiming(
         'How do you think James could repair this with Sarah now?',
       ),
-    ).toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
+    ).toBe(SCENARIO_B_JAMES_REPAIR_CANONICAL);
+    expect(SCENARIO_B_JAMES_REPAIR_CANONICAL).not.toBe(SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL);
+  });
+
+  it('maps a Ryan repair paraphrase to the canonical Scenario 1 repair question', () => {
+    expect(
+      resolveAssessableQuestionTextForResponseTiming(
+        'If you were Ryan, how would you repair this situation?',
+      ),
+    ).toBe('If you were Ryan, how would you repair this?');
   });
 });
 

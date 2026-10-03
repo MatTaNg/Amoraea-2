@@ -31,6 +31,14 @@ export function isPrematureStandaloneM4PersonalTransitionLine(text: string): boo
   const hasQuestionsLeftCue = /\btwo questions left\b/.test(low);
   if (hasQuestionsLeftCue) return true;
 
+  /** Model streams the middle sentence of the canonical S3 close before the card bundle. */
+  if (
+    /\bnext are three personal questions\b/.test(low) ||
+    /\blet'?s start with something (?:a bit )?more personal\b/.test(low)
+  ) {
+    return true;
+  }
+
   const hasPersonalBridge =
     /\bnow (?:for|i want to ask you about) something (?:a bit )?more personal\b/.test(low) ||
     /\bnow (?:let's move to|let us move to) something (?:a bit )?more personal\b/.test(low) ||

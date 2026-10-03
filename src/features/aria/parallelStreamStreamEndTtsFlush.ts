@@ -224,11 +224,22 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
   if (!repairSatisfiedHandoffPending) {
     await speakMissedScenarioBoundaryLeadAtStreamEnd(ctx);
   }
+  const s1HandoffTranscriptCorpus = params.messagesToUse.map((m) => m.content ?? '').join('\n');
+  const s2VignetteAlreadyPresent =
+    textContainsScenarioBVignetteBody(s1HandoffTranscriptCorpus) ||
+    textContainsScenarioBVignetteBody(deps.parallelStreamingTtsRef.current.spokenCompleteText);
   if (
     state.pendingS1RepairSatisfiedHandoff &&
     !state.s1RepairSatisfiedHandoffSpokenThisStream &&
-    isActiveScenarioAConstructProbeTurn(deps.currentScenarioRef.current, deps.currentInterviewMomentRef.current) &&
-    scenarioAMinimumEngagementForHandoff(params.messagesToUse)
+    !s2VignetteAlreadyPresent &&
+    scenarioAMinimumEngagementForHandoff(params.messagesToUse) &&
+    deps.currentInterviewMomentRef.current < 4 &&
+    deps.currentScenarioRef.current !== 3 &&
+    (isActiveScenarioAConstructProbeTurn(
+      deps.currentScenarioRef.current,
+      deps.currentInterviewMomentRef.current,
+    ) ||
+      deps.currentInterviewMomentRef.current <= 2)
   ) {
     state.pendingS1RepairSatisfiedHandoff = false;
     const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
@@ -536,7 +547,12 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       );
       state.deferredScenarioBJamesDifferentlyLeadSentence = null;
       maybeQueueSentenceForTts(merged, false);
-    } else if (deps.currentScenarioRef.current === 2) {
+    } else if (
+      deps.currentScenarioRef.current === 2 &&
+      textContainsScenarioBVignetteBody(
+        params.messagesToUse.map((m) => m.content ?? '').join('\n'),
+      )
+    ) {
       maybeQueueSentenceForTts(`${holdAck} ${SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL}`.trim(), false);
     } else {
       maybeQueueSentenceForTts(holdAck, false);

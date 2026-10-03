@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { PersonalityDocumentsUpload } from '@/features/profile/PersonalityDocumentsUpload';
 import { Button } from '@/shared/ui/Button';
 import { theme } from '@/shared/theme/theme';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 interface Props {
   userId: string;
@@ -58,7 +59,7 @@ const styles = StyleSheet.create({
   },
   inner: {
     width: '100%',
-    maxWidth: 520,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
     flexGrow: 1,
   },

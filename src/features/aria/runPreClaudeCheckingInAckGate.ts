@@ -6,7 +6,10 @@ import {
   resolveCheckingInBriefAckForInterview,
   transcriptContainsAssessableQuestion,
 } from '@features/aria/interviewCheckingInAck';
-import { classifyPriorAnswerMetaKind } from '@features/aria/interviewPriorAnswerMetaDetection';
+import {
+  classifyPriorAnswerMetaKind,
+  looksLikeInterviewStillOpenCheck,
+} from '@features/aria/interviewPriorAnswerMetaDetection';
 import type { InterviewCanonicalProbeId } from '@features/aria/interviewCanonicalProbeRegistry';
 import { ASSISTANT_INTERVIEW_SPEECH } from '@features/aria/interviewTtsSpeakOptions';
 import { userAnswerSatisfiesScenarioBJamesRepairPrompt } from '@features/aria/interviewRepairRefusalDetection';
@@ -109,6 +112,39 @@ export async function runPreClaudeCheckingInAckGate(
         lastInterviewerContent,
       )
     : null;
+
+  if (looksLikeInterviewStillOpenCheck(trimmed)) {
+    const reaskOpen = activeQuestionPreview.trim();
+    if (reaskOpen) {
+      const spoken = `Not yet. ${reaskOpen}`;
+      const liveTranscript = (deps.currentMessagesRef.current.length > 0
+        ? deps.currentMessagesRef.current
+        : messagesToUse) as MessageWithScenario[];
+      commitDedupedAssistantTranscriptTurn(
+        liveTranscript,
+        messagesToUse,
+        spoken,
+        {
+          scenarioNumber: scenarioTag,
+          interviewMoment: moment,
+        },
+        (next) => deps.setMessages(next),
+      );
+      deps.lastQuestionTextRef.current = reaskOpen;
+      void remoteLog('[CHECKING_IN_STILL_OPEN_REASK]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        preview: spoken.slice(0, 220),
+      });
+      await deps.speakTextSafe(spoken, {
+        ...ASSISTANT_INTERVIEW_SPEECH,
+        skipLastQuestionRef: true,
+      });
+      markQuestionDelivered(new Date().toISOString());
+      deps.setVoiceState('idle');
+      deps.setIsWaiting(false);
+      return { handled: true };
+    }
+  }
 
   const pendingAdvanceProbe: InterviewCanonicalProbeId | null = advanceFlags
     ? resolvePendingCanonicalProbeForTurn({

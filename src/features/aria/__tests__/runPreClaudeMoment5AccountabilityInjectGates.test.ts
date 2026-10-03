@@ -206,6 +206,29 @@ describe('runPreClaudeMoment5AccountabilityInjectGates', () => {
     expect(deps.moment5AccountabilityProbeFiredRef.current).toBe(false);
   });
 
+  it('issues specificity redirect for a generic listening approach with no episode', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const deps = baseMoment5Deps({ speakTextSafe, setMessages });
+    const generic =
+      "When I think about having a conflict between somebody that is very important to me, for me, I just like to have a conversation. I don't want to talk through a text message, preferably in person, and just really listen to the other person. And hopefully they're going to listen to you so that we can hear each other's heart. And then from there, proceed, because when you allow time and space, people really just want to be heard. And so listening would be my answer.";
+    const messagesToUse = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: generic, interviewMoment: 5 },
+    ];
+
+    const result = await runPreClaudeMoment5AccountabilityInjectGates(
+      deps,
+      generic,
+      messagesToUse,
+      MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+    );
+
+    expect(result.handled).toBe(true);
+    expect(deps.moment5SpecificityRedirectIssuedRef.current).toBe(true);
+    expect(speakTextSafe).toHaveBeenCalledWith(MOMENT_5_SPECIFICITY_REDIRECT_TEXT, expect.any(Object));
+  });
+
   it('issues specificity redirect for abstract answers without a concrete anchor', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();

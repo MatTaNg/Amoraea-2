@@ -23,6 +23,8 @@ export const MOMENT_4_SPECIFICITY_FOLLOW_UP_TEXT =
 /** Aligns with elaboration probe unprompted threshold (25 words) — M4 specificity redirect. */
 export const MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD = 25;
 
+export type Moment4SpecificityProbeContext = 'grudge' | 'commitment_orientation';
+
 export type Moment4SpecificityProbeEval = {
   hasNamedPerson: boolean;
   hasSpecificEvent: boolean;
@@ -32,11 +34,90 @@ export type Moment4SpecificityProbeEval = {
   triggerReason: string | null;
 };
 
+/** Explicit "I have never been in a relationship" (and close variants), even in a longer explanation. */
+function statesNoLivedRelationship(t: string): boolean {
+  const qualifier = '(?:really |actually |ever )?';
+  const article = '(?:a |an |any |that )?';
+  const kind = '(?:serious |romantic |real |actual |long[- ]term |committed |past |previous )?';
+  return (
+    new RegExp(
+      `\\b(?:never|haven'?t|have not|hasn'?t|has not) ${qualifier}(?:had|been in) ${article}${kind}(?:relationship|relationships|one)\\b`,
+    ).test(t) ||
+    new RegExp(`\\b(?:never|haven'?t|have not) ${qualifier}(?:dated|been dating|been on a date)\\b`).test(t) ||
+    new RegExp(
+      `\\b(?:never|haven'?t|have not) ${qualifier}had ${article}(?:partner|boyfriend|girlfriend|significant other)\\b`,
+    ).test(t) ||
+    /\b(?:never|haven'?t|have not) (?:really |actually |ever )?been with (?:anyone|anybody)\b/.test(t) ||
+    /\b(?:don'?t|do not|dont) (?:really )?have (?:a |any |much )?(?:past |previous |romantic )?(?:relationship|dating) experience\b/.test(
+      t,
+    ) ||
+    /\bno (?:relationship|dating) (?:experience|history)\b/.test(t) ||
+    /\b(?:can'?t|cannot) think of (?:a |any )(?:past |previous )?(?:relationship|one)\b/.test(t) ||
+    /\b(?:don'?t|do not|dont) have (?:a |any )?(?:past |previous )?(?:relationship|relationships|one)(?: to (?:talk about|draw on))?\b/.test(
+      t,
+    )
+  );
+}
+
+/** A specific past relationship, so "never been in a relationship that was easy" is still a story. */
+function describesSpecificPastRelationship(t: string): boolean {
+  const namesSomeone =
+    /\b(?:my |our )?(?:ex|partner|boyfriend|girlfriend|husband|wife|fiance|fiancé)\b/.test(t);
+  const tellsWhatHappened =
+    /\b(?:we|kept|stayed|invested|broke up|dated for|together for|worked through)\b/.test(t);
+  return namesSomeone && tellsWhatHappened;
+}
+
+/** No lived relationship to answer the keep-investing question from. */
+export function userLacksRelevantCommitmentRelationship(text: string): boolean {
+  const t = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!t) return false;
+  if (statesNoLivedRelationship(t) && !describesSpecificPastRelationship(t)) return true;
+  if (countInterviewWords(text) > 22) return false;
+  return (
+    moment4UserDeclinesToNameSpecificPerson(text) ||
+    /\b(?:i )?(?:can'?t|cannot|couldn'?t) think of one\b/.test(t) ||
+    /\b(?:don'?t|do not|dont) have (?:a |any )?(?:relationship|one)\b/.test(t) ||
+    /\bno relationship (?:comes to mind|to draw on|like that)\b/.test(t) ||
+    /\bnothing comes to mind\b/.test(t)
+  );
+}
+
+function commitmentOrientationHasConcreteAnchor(
+  text: string,
+  evalResult: Pick<
+    Moment4SpecificityProbeEval,
+    'hasNamedPerson' | 'hasSpecificEvent' | 'genericOpenerDetected' | 'wordCount'
+  >,
+): boolean {
+  if (evalResult.genericOpenerDetected && evalResult.wordCount < MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD) {
+    return false;
+  }
+  if (evalResult.hasNamedPerson && evalResult.hasSpecificEvent) return true;
+  const hasInvestmentReasoning =
+    /\b(keep investing|kept investing|kept going|kept working|kept showing up|kept trying|stayed because|worked on it|invested because|still believed we|both showed up|built so much|work(?:ing)? through|break up|broke up|love each other|care enough)\b/i.test(
+      text,
+    );
+  if (hasInvestmentReasoning && (evalResult.hasSpecificEvent || evalResult.wordCount >= MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD)) {
+    return true;
+  }
+  // A developed answer is not a thin deflect just because it has no proper name.
+  return !evalResult.genericOpenerDetected && evalResult.wordCount >= MOMENT4_SPECIFICITY_LOW_WORD_THRESHOLD;
+}
+
 /**
- * Evaluate whether the Moment 4 specificity redirect should fire.
- * Fires when ANY bypass signal is present unless both a named person and specific event are present.
+ * Evaluate whether a thin-answer redirect should fire.
+ * Grudge (default): named person + specific event skips the redirect; declining to name someone does not re-ask.
+ * Commitment orientation: a missing relationship ("I've never been in a relationship") is flagged
+ * so the walk-away fallback can be offered. A short or generic answer does not.
  */
-export function evaluateMoment4SpecificityProbe(text: string): Moment4SpecificityProbeEval {
+export function evaluateMoment4SpecificityProbe(
+  text: string,
+  context: Moment4SpecificityProbeContext = 'grudge',
+): Moment4SpecificityProbeEval {
   const wordCount = countInterviewWords(text);
   const hasNamedPerson = moment4HasNamedOrReferencedPerson(text);
   const hasSpecificEvent = moment4HasSpecificEventDescription(text);
@@ -53,14 +134,25 @@ export function evaluateMoment4SpecificityProbe(text: string): Moment4Specificit
     };
   }
 
+  if (context === 'commitment_orientation' && userLacksRelevantCommitmentRelationship(text)) {
+    return {
+      hasNamedPerson,
+      hasSpecificEvent,
+      genericOpenerDetected,
+      wordCount,
+      probeShouldFire: true,
+      triggerReason: 'no_relevant_relationship',
+    };
+  }
+
   if (moment4UserDeclinesToNameSpecificPerson(text)) {
     return {
       hasNamedPerson,
       hasSpecificEvent,
       genericOpenerDetected,
       wordCount,
-      probeShouldFire: false,
-      triggerReason: 'declined_specific_person',
+      probeShouldFire: context === 'commitment_orientation',
+      triggerReason: context === 'commitment_orientation' ? 'no_relevant_relationship' : 'declined_specific_person',
     };
   }
 
@@ -91,6 +183,20 @@ export function evaluateMoment4SpecificityProbe(text: string): Moment4Specificit
     triggerReason = 'low_word_count_no_event';
   }
 
+  if (
+    context === 'commitment_orientation' &&
+    probeShouldFire &&
+    commitmentOrientationHasConcreteAnchor(text, {
+      hasNamedPerson,
+      hasSpecificEvent,
+      genericOpenerDetected,
+      wordCount,
+    })
+  ) {
+    probeShouldFire = false;
+    triggerReason = null;
+  }
+
   return {
     hasNamedPerson,
     hasSpecificEvent,
@@ -99,6 +205,16 @@ export function evaluateMoment4SpecificityProbe(text: string): Moment4Specificit
     probeShouldFire,
     triggerReason,
   };
+}
+
+/**
+ * Walk-away fallback after the keep-investing question.
+ * Only when they say they have no relationship to draw on — not for a short or generic answer.
+ */
+export function shouldAskCommitmentHypotheticalFallback(text: string): boolean {
+  const trimmed = (text ?? '').trim();
+  if (!trimmed) return false;
+  return userLacksRelevantCommitmentRelationship(trimmed);
 }
 
 /**

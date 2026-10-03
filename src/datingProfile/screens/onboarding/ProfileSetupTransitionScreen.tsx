@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { Button } from '@/shared/ui/Button';
 import { theme } from '@/shared/theme/theme';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 import {
   applyDatingProfileOnboardingRoute,
   resolvePostAssessmentsRoute,
@@ -120,7 +121,7 @@ const styles = StyleSheet.create({
   },
   inner: {
     width: '100%',
-    maxWidth: 520,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
     flexGrow: 1,
   },

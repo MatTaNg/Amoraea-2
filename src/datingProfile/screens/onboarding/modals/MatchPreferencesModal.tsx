@@ -59,11 +59,23 @@ const LIFESTYLE_DEALBREAKERS: {
   },
 ];
 
-const REQUIRED_DEALBREAKER_KEYS: (keyof DealbreakerPreferences)[] = [
-  'longTermLivingPreference',
-  'lifestylePreference',
-  'relocationPreference',
-];
+/** First unanswered lifestyle question, or the last one when every question is already answered. */
+export function resumeLifestyleQuestionIndex(prefs: DealbreakerPreferences): number {
+  const index = LIFESTYLE_DEALBREAKERS.findIndex(
+    ({ key }) => !String(prefs[key] ?? '').trim(),
+  );
+  if (index === -1) return LIFESTYLE_DEALBREAKERS.length - 1;
+  return index;
+}
+
+/** Back from the following step should reopen the last lifestyle question. */
+export function initialLifestyleQuestionIndex(
+  prefs: DealbreakerPreferences,
+  startAtLastQuestion: boolean,
+): number {
+  if (startAtLastQuestion) return LIFESTYLE_DEALBREAKERS.length - 1;
+  return resumeLifestyleQuestionIndex(prefs);
+}
 
 /** Relationship style is edited on Edit Profile (`relationship_type`), not in dealbreakers. */
 function withoutRelationshipType(
@@ -77,6 +89,8 @@ function withoutRelationshipType(
 
 interface MatchPreferencesModalProps {
   matchPreferences?: DealbreakerPreferences;
+  /** When true, open on the relocate question instead of the first unanswered one. */
+  startAtLastQuestion?: boolean;
   onMatchPreferencesChange: (preferences: DealbreakerPreferences) => void;
   onNext: () => void;
   onBack: () => void;
@@ -84,6 +98,7 @@ interface MatchPreferencesModalProps {
 
 export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
   matchPreferences,
+  startAtLastQuestion = false,
   onMatchPreferencesChange,
   onNext,
   onBack,
@@ -94,6 +109,9 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
     );
     return base;
   });
+  const [questionIndex, setQuestionIndex] = useState(() =>
+    initialLifestyleQuestionIndex(preferences, startAtLastQuestion),
+  );
   const preferencesRef = useRef(preferences);
   preferencesRef.current = preferences;
 
@@ -102,6 +120,12 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
       setPreferences(normalizeDealbreakerPreferences(withoutRelationshipType(matchPreferences)));
     }
   }, [matchPreferences]);
+
+  useEffect(() => {
+    if (startAtLastQuestion) {
+      setQuestionIndex(LIFESTYLE_DEALBREAKERS.length - 1);
+    }
+  }, [startAtLastQuestion]);
 
   const setPref = useCallback(
     (patch: Partial<DealbreakerPreferences>) => {
@@ -113,43 +137,48 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
     [onMatchPreferencesChange],
   );
 
-  const canContinue = REQUIRED_DEALBREAKER_KEYS.every((key) =>
-    String((preferences as Record<string, unknown>)[key] ?? '').trim(),
-  );
+  const currentQuestion = LIFESTYLE_DEALBREAKERS[questionIndex] ?? LIFESTYLE_DEALBREAKERS[0];
+
+  const handleBack = () => {
+    if (questionIndex > 0) {
+      setQuestionIndex(questionIndex - 1);
+      return;
+    }
+    onBack();
+  };
+
+  const handleSelect = (value: string) => {
+    setPref({ [currentQuestion.key]: value } as Partial<DealbreakerPreferences>);
+    if (questionIndex < LIFESTYLE_DEALBREAKERS.length - 1) {
+      setQuestionIndex(questionIndex + 1);
+      return;
+    }
+    onNext();
+  };
 
   return (
     <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
-      <OnboardingHeader title="Lifestyle" onBack={onBack} />
+      <OnboardingHeader title="Lifestyle" onBack={handleBack} />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
-          {LIFESTYLE_DEALBREAKERS.map(({ key, question, options }, index) => (
-            <View
-              key={key}
-              style={[styles.questionBlock, index > 0 && styles.questionBlockSpaced]}
-            >
-              <Text style={styles.questionTitle}>{question}</Text>
-              <SingleChoiceOptionList
-                options={options.map((o) => ({ label: o, value: o }))}
-                value={String((preferences as Record<string, unknown>)[key] ?? '')}
-                onSelect={(value) => setPref({ [key]: value } as Partial<DealbreakerPreferences>)}
-              />
-            </View>
-          ))}
+          <View style={styles.questionBlock}>
+            <Text style={styles.questionTitle}>{currentQuestion.question}</Text>
+            <SingleChoiceOptionList
+              options={currentQuestion.options.map((o) => ({ label: o, value: o }))}
+              value={String(preferences[currentQuestion.key] ?? '')}
+              deferSelectUntilPaint
+              onSelect={handleSelect}
+            />
+          </View>
         </View>
       </ScrollView>
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
         <View style={styles.buttonRow}>
-          <Button title="Back" variant="outline" onPress={onBack} style={styles.backButton} />
-          <Button
-            title="Next"
-            onPress={onNext}
-            disabled={!canContinue}
-            style={styles.nextButton}
-          />
+          <Button title="Back" variant="outline" onPress={handleBack} style={styles.backButton} />
         </View>
       </SafeAreaView>
     </SafeAreaView>

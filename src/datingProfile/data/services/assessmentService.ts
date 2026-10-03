@@ -17,9 +17,11 @@ export type AssessmentId =
   | "CONFLICT-30"
   | "SEXUAL_COMMUNICATION";
 
-/** Profile psychometrics after interview — shortest instruments first. */
+/**
+ * Profile psychometrics after interview — shortest instruments first.
+ * Sexual communication moved to the pre-interview battery (`sexual_communication_comfort`).
+ */
 export const ASSESSMENT_IDS = [
-  "SEXUAL_COMMUNICATION",
   "PVQ-21",
   "CONFLICT-30",
   "ECR-36",
@@ -27,7 +29,6 @@ export const ASSESSMENT_IDS = [
 
 /** Approximate minutes per instrument on the post-interview typology intro. */
 export const TYPOLOGY_ASSESSMENT_DURATION_MIN: Record<(typeof ASSESSMENT_IDS)[number], number> = {
-  SEXUAL_COMMUNICATION: 1,
   "PVQ-21": 3,
   "CONFLICT-30": 9,
   "ECR-36": 5,
@@ -38,14 +39,12 @@ export const TYPOLOGY_PROFILE_SETUP_DURATION_MIN = 12;
 export const TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL = "20–30 min";
 
 const ASSESSMENT_NEXT_META: Record<(typeof ASSESSMENT_IDS)[number], string> = {
-  SEXUAL_COMMUNICATION: "10 questions · ~1 min",
   "PVQ-21": "21 questions · ~3 min",
   "CONFLICT-30": "21 situations · ~9 min",
   "ECR-36": "36 questions · ~5 min",
 };
 
 const ASSESSMENT_DISPLAY_TITLES: Record<(typeof ASSESSMENT_IDS)[number], string> = {
-  SEXUAL_COMMUNICATION: "Sexual Communication",
   "PVQ-21": "Schwartz Values",
   "CONFLICT-30": "Conflict Style",
   "ECR-36": "Attachment Style",

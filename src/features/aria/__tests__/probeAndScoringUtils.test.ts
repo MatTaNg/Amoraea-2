@@ -1591,6 +1591,13 @@ describe('probeAndScoringUtils', () => {
       ).toBe(false);
     });
 
+    it('does not treat a generic listening approach as a concrete conflict episode', () => {
+      const answer =
+        "When I think about having a conflict between somebody that is very important to me, for me, I just like to have a conversation. I don't want to talk through a text message, preferably in person, and just really listen to the other person. And hopefully they're going to listen to you so that we can hear each other's heart. And then from there, proceed, because when you allow time and space, people really just want to be heard. And so listening would be my answer.";
+      expect(moment5PersonalNarrativeHasConcreteAnchor(answer)).toBe(false);
+      expect(moment5ResponseIsAbstract(answer)).toBe(true);
+    });
+
     it('treats first-person process-only habits as lacking concrete anchor', () => {
       expect(
         moment5PersonalNarrativeHasConcreteAnchor(

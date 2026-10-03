@@ -127,8 +127,8 @@ export function DownloadPartialReportButton({
       ) : (
         <>
           <Text style={styles.sectionHint}>
-            Your PDF preview is ready, written from your interview conversation. It highlights strengths
-            and growth areas you can improve on. Complete the self assessments to
+            Your partial report is ready! Based on your answers to the interview questions, it highlights strengths
+            and weaknesses you can improve on. Complete the self assessments to
             unlock your full report.
           </Text>
           <TouchableOpacity

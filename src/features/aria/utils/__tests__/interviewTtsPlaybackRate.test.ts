@@ -1,5 +1,8 @@
 import { setInterviewTtsSessionEmail } from '../interviewTtsDevAccount';
-import { getLocalDevPlaybackRateMultiplier } from '../interviewTtsPlaybackRate';
+import {
+  getInterviewDeviceSpeechRate,
+  getLocalDevPlaybackRateMultiplier,
+} from '../interviewTtsPlaybackRate';
 
 jest.mock('react-native', () => ({
   Platform: { OS: 'web' },
@@ -26,6 +29,7 @@ describe('interviewTtsPlaybackRate', () => {
     (global as { __DEV__?: boolean }).__DEV__ = false;
     setInterviewTtsSessionEmail('mattang5280@gmail.com');
     expect(getLocalDevPlaybackRateMultiplier()).toBe(2);
+    expect(getInterviewDeviceSpeechRate()).toBe(2);
   });
 
   it('uses 2x for configured accounts on production hostname in a dev bundle', () => {
@@ -46,5 +50,17 @@ describe('interviewTtsPlaybackRate', () => {
     (global as { __DEV__?: boolean }).__DEV__ = true;
     setInterviewTtsSessionEmail('other@example.com');
     expect(getLocalDevPlaybackRateMultiplier()).toBe(2);
+    expect(getInterviewDeviceSpeechRate()).toBe(2);
+  });
+
+  it('keeps the slower interviewer pace for other accounts outside local web dev', () => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { hostname: 'app.amoraea.com' },
+    });
+    (global as { __DEV__?: boolean }).__DEV__ = false;
+    setInterviewTtsSessionEmail('other@example.com');
+    expect(getLocalDevPlaybackRateMultiplier()).toBe(1);
+    expect(getInterviewDeviceSpeechRate()).toBe(0.78);
   });
 });

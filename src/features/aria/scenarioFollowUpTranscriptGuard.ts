@@ -317,7 +317,10 @@ export function scenarioOneFollowUpFlagsFromTranscript(msgs: readonly ScenarioFo
 export function scenarioAMinimumEngagementForHandoff(
   messages: readonly ScenarioFollowUpTranscriptMessage[],
 ): boolean {
-  if (transcriptHasUserResponseAfterScenarioAContemptProbe(messages)) {
+  if (
+    isInterviewCanonicalProbeRetired('s1_repair') &&
+    transcriptHasUserResponseAfterScenarioAContemptProbe(messages)
+  ) {
     return true;
   }
   // Q1 already covered Emma's closing line with contempt quality — skip retired repair, hand off to S2.
@@ -386,6 +389,14 @@ export function resolveScenarioANextRequiredFollowUpPrompt(
   }
   if (!transcriptHasUserResponseAfterScenarioAContemptProbe(messages)) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
+  }
+  if (
+    !isInterviewCanonicalProbeRetired('s1_repair') &&
+    !messages.some(
+      (m) => m.role === 'assistant' && looksLikeScenarioARepairQuestion(m.content ?? ''),
+    )
+  ) {
+    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
   }
   return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
 }

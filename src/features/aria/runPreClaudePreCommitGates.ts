@@ -5,6 +5,7 @@ import {
 } from '@features/aria/runPreClaudeScenarioCPreAppendGates';
 import { runPreClaudeScenarioAMisplacedAnswerGate } from '@features/aria/runPreClaudeScenarioAMisplacedAnswerGate';
 import { runPreClaudeScenarioBAheadOfScheduleAnswerGate } from '@features/aria/runPreClaudeScenarioBAheadOfScheduleAnswerGate';
+import { runPreClaudeSupportNoSituationHypotheticalGate } from '@features/aria/runPreClaudeSupportNoSituationHypotheticalGate';
 import {
   runPreClaudeClosingAdditionGate,
 } from '@features/aria/runPreClaudeClosingAdditionGate';
@@ -69,6 +70,11 @@ export async function runPreClaudePreCommitGates(
 
   const scenarioBAheadOfSchedule = await runPreClaudeScenarioBAheadOfScheduleAnswerGate(deps, trimmed);
   if (scenarioBAheadOfSchedule.handled) {
+    return { handled: true, participantFirstNameForSpoken: spokenName, isNameEntryTurn };
+  }
+
+  const supportNoSituation = await runPreClaudeSupportNoSituationHypotheticalGate(deps, trimmed);
+  if (supportNoSituation.handled) {
     return { handled: true, participantFirstNameForSpoken: spokenName, isNameEntryTurn };
   }
 

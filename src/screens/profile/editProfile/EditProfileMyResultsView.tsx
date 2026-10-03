@@ -6,18 +6,17 @@ import { ConflictStyleResultsPanel } from '@/shared/components/assessments/Confl
 import { EditProfileSubsectionTitle } from '@/screens/profile/editProfile/EditProfileUi';
 import { ep } from '@/screens/profile/editProfile/editProfileTheme';
 
-const RESULT_TABS: { id: AssessmentId; label: string }[] = [
+export const EDIT_PROFILE_ASSESSMENT_RESULT_TABS: { id: AssessmentId; label: string }[] = [
   { id: 'ECR-36', label: 'Attachment (ECR-36)' },
   { id: 'CONFLICT-30', label: 'Conflict-30' },
   { id: 'PVQ-21', label: 'Schwartz values (PVQ-21)' },
-  { id: 'SEXUAL_COMMUNICATION', label: 'Sexual communication' },
 ];
 
 export function EditProfileMyResultsView({ userId }: { userId: string }) {
   const [activeId, setActiveId] = useState<AssessmentId>('ECR-36');
 
   return (
-    <View>
+    <View style={styles.root}>
       <View style={styles.viewOnlyBanner}>
         <Text style={styles.viewOnlyBannerText}>
           View only — these results come from your assessments and cannot be edited here.
@@ -25,7 +24,7 @@ export function EditProfileMyResultsView({ userId }: { userId: string }) {
       </View>
       <EditProfileSubsectionTitle>Assessment results</EditProfileSubsectionTitle>
       <View style={styles.tabRow}>
-        {RESULT_TABS.map((tab) => {
+        {EDIT_PROFILE_ASSESSMENT_RESULT_TABS.map((tab) => {
           const selected = activeId === tab.id;
           return (
             <Pressable
@@ -44,7 +43,7 @@ export function EditProfileMyResultsView({ userId }: { userId: string }) {
       </View>
       <View style={styles.panel} pointerEvents="box-none">
         {activeId === 'CONFLICT-30' ? (
-          <ConflictStyleResultsPanel userId={userId} footer={{ kind: 'none' }} />
+          <ConflictStyleResultsPanel userId={userId} footer={{ kind: 'none' }} embedded />
         ) : (
           <AssessmentInsightResultsPanel userId={userId} instrumentId={activeId} />
         )}
@@ -54,6 +53,10 @@ export function EditProfileMyResultsView({ userId }: { userId: string }) {
 }
 
 const styles = StyleSheet.create({
+  root: {
+    width: '100%',
+    overflow: 'visible',
+  },
   viewOnlyBanner: {
     padding: 12,
     borderRadius: ep.spacing.inputRadius,
@@ -98,7 +101,8 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   panel: {
+    width: '100%',
+    overflow: 'visible',
     borderRadius: ep.spacing.cardRadius,
-    overflow: 'hidden',
   },
 });

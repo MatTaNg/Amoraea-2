@@ -17,10 +17,13 @@ jest.mock('../elevenLabsTtsPlaybackStop', () => ({
 
 jest.mock('../audioModeHelpers', () => ({
   logAndApplyPlaybackModeForTts: jest.fn(async () => undefined),
+  applyNativeTtsPrePlaybackAudioMode: jest.fn(async () => undefined),
+  setPlaybackMode: jest.fn(async () => undefined),
 }));
 
 jest.mock('../interviewTtsPlaybackRate', () => ({
   getLocalDevPlaybackRateMultiplier: jest.fn(() => 1),
+  getInterviewDeviceSpeechRate: jest.fn(() => 0.78),
 }));
 
 jest.mock('expo-constants', () => ({

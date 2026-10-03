@@ -192,7 +192,7 @@ describe('scoreAssessment', () => {
     expect(scoreAssessment('npi_entitlement', responses).total).toBe(4);
   });
 
-  it('runs 8 active instruments in configured order', () => {
+  it('runs 9 active instruments in configured order', () => {
     expect(ASSESSMENT_ORDER).toEqual([
       'brs',
       'anxiety_trait',
@@ -202,6 +202,7 @@ describe('scoreAssessment', () => {
       'conflict_catastrophizing',
       'rses',
       'amoraea_entitlement_v1',
+      'sexual_communication_comfort',
     ]);
     expect(ASSESSMENT_ORDER).not.toContain('aaq2');
     expect(ASSESSMENT_ORDER).not.toContain('rfq');
@@ -210,6 +211,7 @@ describe('scoreAssessment', () => {
     expect(ASSESSMENT_ORDER).not.toContain('sexual_communication');
     expect(ASSESSMENT_ORDER).not.toContain('mspss');
     expect(ASSESSMENT_ORDER).not.toContain('scs');
+    expect(ASSESSMENTS.sexual_communication_comfort.questions).toHaveLength(10);
   });
 
   it('means sexual communication post-interview responses', () => {
@@ -295,10 +297,18 @@ describe('resolvePsychometricsResumePosition', () => {
     });
   });
 
-  it('marks flow complete when index is past the final assessment', () => {
+  it('advances from entitlement into sexual communication comfort', () => {
     expect(resolvePsychometricsResumePosition('amoraea_entitlement_v1', 8)).toEqual({
-      assessmentIndex: 7,
-      questionIndex: 7,
+      assessmentIndex: 8,
+      questionIndex: 0,
+      allQuestionsAnswered: false,
+    });
+  });
+
+  it('marks flow complete when index is past the final assessment', () => {
+    expect(resolvePsychometricsResumePosition('sexual_communication_comfort', 10)).toEqual({
+      assessmentIndex: 8,
+      questionIndex: 9,
       allQuestionsAnswered: true,
     });
   });

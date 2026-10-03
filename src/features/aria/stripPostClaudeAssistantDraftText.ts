@@ -21,7 +21,9 @@ import {
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
   coerceScenarioCSophieRolePlayQuestionForTts,
   coerceScenarioCRepairQuestionForTts,
+  looksLikeScenarioCRepairAsDanielQuestion,
   looksLikeScenarioCRepairWithUserAnswerEcho,
+  scenarioCSophiePerspectiveAnsweredInTranscript,
   shouldSuppressScenarioCRepairReplay,
 } from '@features/aria/scenarioCPromptDetection';
 import { userAnswerHasSophiePerspectiveLanguage } from '@features/aria/interviewMentalizingAndAnswerSignals';
@@ -729,7 +731,7 @@ export function stripPostClaudeAssistantDraftText(
         interviewSessionId: deps.interviewSessionIdRef.current,
         beforePreview: beforeS3RepairReplay.slice(0, 220),
       });
-      if (skipS3RepairInject) {
+      if (skipS3RepairInject || isInterviewCanonicalProbeRetired('s3_repair')) {
         strippedText = injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
           strippedText,
           params,
@@ -796,7 +798,8 @@ export function stripPostClaudeAssistantDraftText(
     }
     if (
       activeScenario === 3 &&
-      skipS3RepairInject &&
+      (skipS3RepairInject || isInterviewCanonicalProbeRetired('s3_repair')) &&
+      scenarioCSophiePerspectiveAnsweredInTranscript(params.messagesToUse) &&
       looksLikeScenarioCSophiePerspectiveQuestion(strippedText) &&
       !isScenarioCRepairAssistantPrompt(strippedText) &&
       !assistantTextLooksLikeMoment4HandoffLead(strippedText)
@@ -827,14 +830,15 @@ export function stripPostClaudeAssistantDraftText(
           '[S3_REPAIR_SATISFIED_BUNDLE_INJECTED_AFTER_SOPHIE_ROLEPLAY_STRIP]',
         );
       } else if (userAnswerHasSophiePerspectiveLanguage(lastUserAnswer ?? '')) {
-        strippedText = skipS3RepairInject
-          ? injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
-              '',
-              params,
-              deps,
-              '[S3_REPAIR_SATISFIED_BUNDLE_INJECTED_AFTER_SOPHIE_ROLEPLAY_STRIP]',
-            )
-          : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+        strippedText =
+          skipS3RepairInject || isInterviewCanonicalProbeRetired('s3_repair')
+            ? injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
+                '',
+                params,
+                deps,
+                '[S3_REPAIR_SATISFIED_BUNDLE_INJECTED_AFTER_SOPHIE_ROLEPLAY_STRIP]',
+              )
+            : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
       } else {
         strippedText = coerceScenarioCSophieRolePlayQuestionForTts(strippedText);
       }
@@ -850,7 +854,17 @@ export function stripPostClaudeAssistantDraftText(
         isIncompleteScenarioCSophieReceiveLeadSentence(strippedText))
     ) {
       const beforeSophieReceiveStrip = strippedText;
-      if (q1FollowUpsAlreadySatisfied || skipS3RepairInject) {
+      if (isInterviewCanonicalProbeRetired('s3_repair')) {
+        strippedText = resolveScenarioCNextProbeAfterSatisfiedQ1(params.messagesToUse);
+        if (!strippedText.trim()) {
+          strippedText = injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
+            '',
+            params,
+            deps,
+            '[S3_REPAIR_SATISFIED_BUNDLE_INJECTED_AFTER_SOPHIE_RECEIVE_STRIP]',
+          );
+        }
+      } else if (q1FollowUpsAlreadySatisfied || skipS3RepairInject) {
         strippedText = injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
           '',
           params,
@@ -870,6 +884,7 @@ export function stripPostClaudeAssistantDraftText(
     }
     if (
       activeScenario === 3 &&
+      !isInterviewCanonicalProbeRetired('s3_repair') &&
       params.shouldForceScenarioCRepairProbe &&
       !transcriptContainsScenarioCRepairQuestion(params.messagesToUse) &&
       !isScenarioCRepairAssistantPrompt(strippedText) &&
@@ -887,6 +902,7 @@ export function stripPostClaudeAssistantDraftText(
       transcriptContainsScenarioCSophiePerspectiveProbe(params.messagesToUse) &&
       !transcriptContainsScenarioCRepairQuestion(params.messagesToUse) &&
       !isScenarioCRepairAssistantPrompt(strippedText) &&
+      !isInterviewCanonicalProbeRetired('s3_repair') &&
       !skipS3RepairInject &&
       (hasScenarioBoundaryWrapPhrase(strippedText) ||
         /\bthat'?s a wrap on this one\b/i.test(strippedText) ||
@@ -958,6 +974,35 @@ export function stripPostClaudeAssistantDraftText(
           beforePreview: beforeS3ModalFollowUpStrip.slice(0, 220),
           preview: strippedText.slice(0, 280),
         });
+      }
+    }
+    if (activeScenario === 3 && isInterviewCanonicalProbeRetired('s3_repair')) {
+      const beforeRetiredRepairStrip = strippedText;
+      const kept = strippedText
+        .split(/\n\n+/)
+        .map((part) => part.trim())
+        .filter(
+          (part) =>
+            part.length > 0 &&
+            !isScenarioCRepairAssistantPrompt(part) &&
+            !looksLikeScenarioCRepairAsDanielQuestion(part) &&
+            !looksLikeScenarioCRepairWithUserAnswerEcho(part),
+        );
+      strippedText = kept.join('\n\n').trim();
+      if (!strippedText.trim()) {
+        strippedText = injectScenarioAdvanceIfRepairSatisfiedAndEmpty(
+          '',
+          params,
+          deps,
+          '[S3_RETIRED_REPAIR_DRAFT_REPLACED_WITH_M4_BUNDLE]',
+        );
+      }
+      if (strippedText !== beforeRetiredRepairStrip) {
+        logPostClaudeAssistantDraftSanitizeChange(
+          '[S3_RETIRED_REPAIR_DRAFT_STRIPPED]',
+          beforeRetiredRepairStrip,
+          strippedText,
+        );
       }
     }
   }

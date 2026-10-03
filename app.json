@@ -39,7 +39,7 @@
         "NSSpeechRecognitionUsageDescription": "Amoraea uses speech recognition to turn your voice answers into text.",
         "ITSAppUsesNonExemptEncryption": false
       },
-      "buildNumber": "10"
+      "buildNumber": "11"
     },
     "android": {
       "icon": "./assets/icons/icon-512x512.png",

@@ -28,7 +28,7 @@ import {
 } from '@features/aria/scenarioBProbeLogic';
 
 /** Scripted Situation 1 footer when a retired Ryan repair ask would otherwise surface. */
-function situation1ModalPromptForRepairBleed(): string {
+export function situation1ModalPromptForRepairBleed(): string {
   if (isInterviewCanonicalProbeRetired('s1_repair')) {
     return SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY;
   }

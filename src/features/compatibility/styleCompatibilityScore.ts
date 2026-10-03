@@ -1,4 +1,4 @@
-/** Final compatibility score from pillar scores (pure — no I/O). */
+/** Final compatibility score from the four AI subscores. Sexual communication is not an input. */
 export function computeFinalCompatibilityScore(params: {
   attachmentScore: number; // 0..1
   valuesScore: number; // 0..1

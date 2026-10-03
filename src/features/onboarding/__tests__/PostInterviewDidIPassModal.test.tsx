@@ -13,7 +13,7 @@ describe('PostInterviewDidIPassModal', () => {
     render(<PostInterviewDidIPassModal visible onClose={onClose} />);
 
     expect(screen.getByText("We're Blazing New Trails Here!")).toBeTruthy();
-    expect(screen.getByText(/When we reach 500 users/)).toBeTruthy();
+    expect(screen.getByText(/When we reach 600 users/)).toBeTruthy();
 
     fireEvent.press(screen.getByLabelText('Got it!'));
     expect(onClose).toHaveBeenCalledTimes(1);

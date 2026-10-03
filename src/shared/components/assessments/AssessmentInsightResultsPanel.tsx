@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ScrollView } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import {
   ASSESSMENT_BATTERY_COMPLETE_BODY,
   ASSESSMENT_BATTERY_COMPLETE_TITLE,
@@ -66,11 +66,7 @@ export function AssessmentInsightResultsPanel({
       <View style={styles.progressTrack}>
         <View style={[styles.progressFill, { width: "100%" }]} />
       </View>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.scrollContent}
-        nestedScrollEnabled
-      >
+      <View style={styles.scrollContent}>
         <AssessmentInsightBody
           snapshot={snapshotWithAi}
           badgeSuffix={showFlowFooter ? " · Complete ✓" : undefined}
@@ -92,14 +88,15 @@ export function AssessmentInsightResultsPanel({
             ) : null}
           </View>
         ) : null}
-      </ScrollView>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   wrap: {
-    minHeight: 280,
+    width: "100%",
+    overflow: "visible",
     backgroundColor: theme.colors.background,
   },
   progressTrack: {
@@ -111,13 +108,11 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: theme.colors.primary,
   },
-  scroll: { maxHeight: 640 },
   scrollContent: {
+    width: "100%",
+    overflow: "visible",
     padding: 20,
     paddingBottom: 32,
-    width: "100%",
-    maxWidth: 680,
-    alignSelf: "center",
   },
   nextCard: {
     marginTop: 4,

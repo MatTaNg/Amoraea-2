@@ -64,7 +64,7 @@ export async function speakWithElevenLabs(
 ): Promise<void> {
   const onPlaybackStarted = options?.onPlaybackStarted;
   const telemetrySource = options?.telemetry?.source ?? 'other';
-  void getEffectivePlaybackRateMultiplier(options?.playbackRateMultiplier);
+  const playbackRate = getEffectivePlaybackRateMultiplier(options?.playbackRateMultiplier);
   if (!options?.skipStopElevenLabsPlaybackBeforeStart) {
     await stopElevenLabsPlayback();
   }
@@ -108,7 +108,12 @@ export async function speakWithElevenLabs(
     }
 
     try {
-      await playNativeElevenLabsMpegArrayBuffer(arrayBuffer, onPlaybackStarted, telemetrySource);
+      await playNativeElevenLabsMpegArrayBuffer(
+        arrayBuffer,
+        onPlaybackStarted,
+        telemetrySource,
+        playbackRate,
+      );
     } catch (e) {
       if (e instanceof Error && e.message === 'native_tts_no_cache_dir') {
         await fallbackToDeviceSpeech(deviceSpeechText, onFallback, options);

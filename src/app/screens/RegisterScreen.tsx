@@ -18,6 +18,7 @@ import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { FlameOrb } from '@app/screens/FlameOrb';
 import { AUTH_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 import { authStyles } from '@app/screens/authStyles';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 import { supabase } from '@data/supabase/client';
 import { isAlphaTesterReferralCode } from '@/constants/alphaReferral';
 import {
@@ -514,7 +515,7 @@ const styles = StyleSheet.create({
   innerCentered: {
     alignItems: 'center',
     width: '100%',
-    maxWidth: 380,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
     ...(Platform.OS === 'web'
       ? ({

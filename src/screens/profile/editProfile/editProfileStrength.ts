@@ -2,6 +2,7 @@ import { validateProfilePromptsForSave } from '@/features/profile/profilePromptV
 import { isCompleteArchetypeSelection } from '@/shared/constants/archetypes';
 import { MIN_HOBBY_SELECTIONS } from '@/shared/constants/hobbies';
 import {
+  getEssentialsProfileQuestions,
   isLifeDomainAnswerFilled,
   LIFE_DOMAIN_ONBOARDING_DOMAIN_ORDER,
   LIFE_DOMAIN_ONBOARDING_QUESTIONS,
@@ -61,6 +62,20 @@ export function parseLifeDomainStrengthItemId(
     }
   }
   return null;
+}
+
+function buildEssentialsLifeDomainStrengthChecks(
+  input: EditProfileFormSnapshotInput,
+): StrengthCheck[] {
+  const answers = input.lifeDomainAnswers ?? {};
+  return getEssentialsProfileQuestions().map(({ domainId, question }) => ({
+    item: {
+      id: `essentialsLife.${domainId}.${question.id}`,
+      label: question.text,
+      tab: 'essentials' as const,
+    },
+    complete: isLifeDomainAnswerFilled(answers[domainId]?.[question.id]),
+  }));
 }
 
 function buildLifeDomainQuestionStrengthChecks(
@@ -228,6 +243,7 @@ function buildCoreProfileStrengthChecks(input: EditProfileFormSnapshotInput): St
 function buildProfileStrengthChecks(input: EditProfileFormSnapshotInput): StrengthCheck[] {
   return [
     ...buildCoreProfileStrengthChecks(input),
+    ...buildEssentialsLifeDomainStrengthChecks(input),
     ...buildLifeDomainQuestionStrengthChecks(input),
     ...buildTypologyStrengthChecks(input),
   ];

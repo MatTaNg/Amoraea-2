@@ -4,6 +4,10 @@ import { deliverMoment4CommitmentThresholdProbe } from '@features/aria/deliverMo
 import { isDecline } from '@features/aria/interviewControlTokens';
 import { evaluateHybridCutOffDetection } from '@features/aria/interviewCutOffDetection';
 import { looksLikeUnassessableScenarioAnswer, looksLikeInterviewProcessMetaComment } from '@features/aria/interviewAnswerRelevance';
+import {
+  looksLikeScenarioCSophiePerspectiveAssessableShortAnswer,
+  looksLikeScenarioCSophiePerspectiveQuestion,
+} from '@features/aria/scenarioCPromptDetection';
 import type { InterviewCanonicalProbeId } from '@features/aria/interviewCanonicalProbeRegistry';
 import { INTERVIEW_TURN_ORCHESTRATOR_EXECUTE_DECISIONS_ENABLED } from '@features/aria/interviewTurnOrchestratorConfig';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
@@ -20,6 +24,7 @@ const SCENARIO_CANONICAL_PROBE_IDS = new Set<InterviewCanonicalProbeId>([
   's1_contempt',
   's2_james_differently',
   's3_sophie_perspective',
+  's3_repair',
 ]);
 
 export type PreClaudeOrchestratorExecuteGateResult = {
@@ -41,7 +46,16 @@ export async function runPreClaudeOrchestratorExecuteGate(args: {
   if (!INTERVIEW_TURN_ORCHESTRATOR_EXECUTE_DECISIONS_ENABLED) {
     return { handled: false };
   }
-  if (isDecline(args.trimmed) || args.suppressForcedConstructProbesForMetaFrustration) {
+  const lastAssistantContent =
+    [...args.messagesToUse].reverse().find((m) => m.role === 'assistant')?.content ?? '';
+  const sophieAffectDespiteShortLength =
+    looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(args.trimmed) &&
+    (looksLikeScenarioCSophiePerspectiveQuestion(args.deps.lastQuestionTextRef.current ?? '') ||
+      looksLikeScenarioCSophiePerspectiveQuestion(lastAssistantContent));
+  if (
+    (isDecline(args.trimmed) && !sophieAffectDespiteShortLength) ||
+    args.suppressForcedConstructProbesForMetaFrustration
+  ) {
     return { handled: false };
   }
   if (looksLikeInterviewProcessMetaComment(args.trimmed)) {
@@ -146,7 +160,7 @@ export async function runPreClaudeOrchestratorExecuteGate(args: {
       deps: args.deps,
       messagesToUse: args.messagesToUse,
       probeId,
-      withBriefAck: true,
+      withBriefAck: false,
       userText: args.trimmed,
       logTag: `[ORCHESTRATOR_EXECUTE_CANONICAL_${probeId.toUpperCase()}]`,
     });

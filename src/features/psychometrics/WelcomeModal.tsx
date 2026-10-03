@@ -232,7 +232,10 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
   },
   logoWrap: {
+    width: '100%',
+    alignSelf: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: spacing.md,
   },
   title: {

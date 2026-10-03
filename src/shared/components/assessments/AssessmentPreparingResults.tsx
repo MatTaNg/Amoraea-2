@@ -1,6 +1,7 @@
 import React from "react";
 import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
 import { theme } from "@/shared/theme/theme";
+import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
 
 type Props = {
   /** Optional supporting line under the title (e.g. what is loading). */
@@ -37,7 +38,7 @@ const styles = StyleSheet.create({
   },
   card: {
     width: "100%",
-    maxWidth: 420,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     borderRadius: 22,
     borderWidth: 1,
     borderColor: "rgba(91,168,232,0.24)",

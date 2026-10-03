@@ -1,6 +1,7 @@
 import React from 'react';
 import { Platform, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 export const POST_INTERVIEW_BG = '#05060D';
 
@@ -43,7 +44,7 @@ const styles = StyleSheet.create({
     paddingTop: 24,
     paddingBottom: 48,
     alignItems: 'center',
-    maxWidth: 440,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     width: '100%',
     alignSelf: 'center',
   },

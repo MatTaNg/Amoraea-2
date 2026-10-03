@@ -221,7 +221,7 @@ export function resolveInterviewStackScreenFromStatus(
 
   if (input.gateResultFinalizedAt == null) {
     return {
-      screen: 'PsychometricsComplete',
+      screen: input.postInterviewScreen ?? 'PostInterview',
       legacyPsychometricsMode: false,
       interviewAlreadyCompleted: true,
     };

@@ -15,6 +15,7 @@ const fullRow = {
   psychometrics_conflict_catastrophizing_responses: { 7: 2 },
   psychometrics_rses_responses: { 1: 4 },
   psychometrics_amoraea_entitlement_v1_responses: { 1: 3 },
+  psychometrics_sexual_communication_comfort_responses: { 1: 4 },
 };
 
 describe('getMissingPsychometricAssessments', () => {
@@ -54,9 +55,10 @@ describe('getMissingPsychometricAssessments', () => {
       'relationship_growth_beliefs',
       'conflict_catastrophizing',
       'amoraea_entitlement_v1',
+      'sexual_communication_comfort',
     ]);
     expect(formatMissingPsychometricAssessmentNames(missing)).toBe(
-      'Relationship Growth Beliefs, Conflict Beliefs, Relationship Attitudes',
+      'Relationship Growth Beliefs, Conflict Beliefs, Relationship Attitudes, Sexual Communication',
     );
   });
 });

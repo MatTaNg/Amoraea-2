@@ -186,6 +186,9 @@ const CHECKING_IN_RES: RegExp[] = [
   /\bdoes that work (for you)?\b/i,
   /\bis that (what you (wanted|needed))\b/i,
   /\bwas that (good|okay|alright)\b/i,
+  /^\s*is\s+(?:that|this)\s+(?:it|all|everything)\s*[.?!]*\s*$/i,
+  /^\s*that'?s\s+(?:it|all)\s*[.?!]*\s*$/i,
+  /^\s*are\s+we\s+(?:done|finished)\s*[.?!]*\s*$/i,
 ];
 
 /** Client-owned checking-in replies — not assessable scenario questions to re-ask or "looking for". */

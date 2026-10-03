@@ -138,6 +138,12 @@ function buildUncertaintyInput(
     psychometrics_rfq_score: coercePsychometricScore(user.psychometrics_rfq_score),
     psychometrics_scs_public_score: coercePsychometricScore(user.psychometrics_scs_public_score),
     psychometrics_scs_private_score: coercePsychometricScore(user.psychometrics_scs_private_score),
+    psychometrics_sexual_communication_comfort_score: coercePsychometricScore(
+      user.psychometrics_sexual_communication_comfort_score,
+    ),
+    psychometrics_sexual_communication_comfort_soft_modifier: coercePsychometricScore(
+      user.psychometrics_sexual_communication_comfort_soft_modifier,
+    ),
     reasoning_pending: attempt.reasoning_pending === true,
     defenseCrossReference:
       (attempt.defense_cross_reference as DefenseCrossReferenceResult | null) ?? null,

@@ -168,9 +168,8 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
     expect(result).toEqual({ haltTurn: true });
     expect(deps.frustrationSkipOfferPendingRef.current).toBe(false);
     expect(deps.inabilityCountByMomentRef.current[2]).toBe(0);
-    expect(speakTextSafe).toHaveBeenCalledTimes(2);
-    expect(speakTextSafe).toHaveBeenNthCalledWith(
-      1,
+    expect(speakTextSafe).toHaveBeenCalledTimes(1);
+    expect(speakTextSafe).toHaveBeenCalledWith(
       expect.stringMatching(/stay on this one/i),
       expect.objectContaining({
         skipLastQuestionRef: true,
@@ -178,10 +177,9 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
         allowDuplicateConsecutiveTts: true,
       }),
     );
-    expect(speakTextSafe).toHaveBeenNthCalledWith(
-      2,
+    expect(speakTextSafe).not.toHaveBeenCalledWith(
       expect.stringMatching(/What is going on between these two/i),
-      expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
+      expect.anything(),
     );
     expect(setMessages).toHaveBeenCalledWith(
       expect.arrayContaining([
@@ -193,7 +191,7 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
     );
   });
 
-  it('re-asks the pending scenario question after skip decline encouragement', async () => {
+  it('does not repeat the pending question after the user declines a skip', async () => {
     const speakTextSafe = jest.fn().mockResolvedValue(undefined);
     const setMessages = jest.fn();
     const repairQ = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
@@ -216,9 +214,8 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
     const result = await runPreClaudeFrustrationSkipDeclineGate(deps, messages);
 
     expect(result).toEqual({ haltTurn: true });
-    expect(speakTextSafe).toHaveBeenCalledTimes(2);
-    expect(speakTextSafe).toHaveBeenNthCalledWith(
-      1,
+    expect(speakTextSafe).toHaveBeenCalledTimes(1);
+    expect(speakTextSafe).toHaveBeenCalledWith(
       expect.stringMatching(/stay on this one/i),
       expect.objectContaining({
         skipLastQuestionRef: true,
@@ -226,11 +223,16 @@ describe('runPreClaudeFrustrationSkipDeclineGate', () => {
         allowDuplicateConsecutiveTts: true,
       }),
     );
-    expect(speakTextSafe).toHaveBeenNthCalledWith(
-      2,
-      expect.stringMatching(/If you were Ryan, how would you repair this/i),
-      expect.objectContaining({ allowDuplicateConsecutiveTts: true }),
-    );
+    const spoken = speakTextSafe.mock.calls.map((call) => String(call[0] ?? '')).join(' ');
+    expect(spoken).not.toMatch(/If you were Ryan, how would you repair this/i);
     expect(deps.lastQuestionTextRef.current).toBe(repairQ);
+    expect(setMessages).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          role: 'assistant',
+          content: expect.stringMatching(/^Great, let's stay on this one then/i),
+        }),
+      ]),
+    );
   });
 });

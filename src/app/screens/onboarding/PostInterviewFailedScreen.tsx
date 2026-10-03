@@ -745,7 +745,7 @@ const styles = StyleSheet.create({
   },
   copyCodeBtn: { backgroundColor: 'rgba(59,130,246,0.25)', borderRadius: 8, paddingVertical: 8, paddingHorizontal: 14 },
   copyCodeBtnLabel: { fontFamily: FONT_BODY, fontSize: 13, fontWeight: '600', color: '#93c5fd' },
-  retakeSection: { width: '100%', maxWidth: 440, alignSelf: 'center', marginTop: 28, paddingHorizontal: 4, alignItems: 'center' },
+  retakeSection: { width: '100%', alignSelf: 'center', marginTop: 28, paddingHorizontal: 4, alignItems: 'center' },
   retakeButton: {
     width: '100%',
     borderWidth: 1,

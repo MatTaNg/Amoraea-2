@@ -96,6 +96,7 @@ export function logScorePipelineBaseline(baseline: AttemptScoringBaseline): void
 export function buildMoment4ScoresRecord(
   moment4: PersonalMomentSliceForSanitize,
   specificityScoringMetadata?: unknown | null,
+  commitmentSource?: 'autobiographical' | 'hypothetical_fallback' | null,
 ): Record<string, unknown> {
   return {
     pillarScores: moment4.pillarScores,
@@ -109,6 +110,7 @@ export function buildMoment4ScoresRecord(
     emotional_vocab_count: moment4.emotional_vocab_count ?? null,
     emotional_vocab_words: moment4.emotional_vocab_words ?? [],
     user_slice_word_count: moment4.user_slice_word_count ?? null,
+    ...(commitmentSource ? { commitment_source: commitmentSource } : {}),
     ...(specificityScoringMetadata ? { specificityScoringMetadata } : {}),
     ...(moment4.scoringMetadata ? { scoringMetadata: moment4.scoringMetadata } : {}),
   };
@@ -185,8 +187,13 @@ export async function persistMoment4ScoresImmediate(
   moment4: PersonalMomentSliceForSanitize,
   baseline: AttemptScoringBaseline,
   specificityScoringMetadata?: unknown | null,
+  commitmentSource?: 'autobiographical' | 'hypothetical_fallback' | null,
 ): Promise<AttemptScoringBaseline> {
-  const moment_4_scores = buildMoment4ScoresRecord(moment4, specificityScoringMetadata);
+  const moment_4_scores = buildMoment4ScoresRecord(
+    moment4,
+    specificityScoringMetadata,
+    commitmentSource,
+  );
   const scenario_specific_patterns = mergeScenarioSpecificPatterns(baseline.patterns, {
     moment_4_scores,
   });

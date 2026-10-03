@@ -137,31 +137,42 @@ const FlameOrbNative: React.FC<Props> = ({ state = 'idle', size = 200 }) => {
 
   const stateScale = FLAME_STATE_SCALE[state];
   const maxPulse = state === 'speaking' ? 1.2 : 1.1;
-  const containerSize = size * stateScale * maxPulse * 1.15;
+  const containerSize = Math.ceil(size * stateScale * maxPulse * 1.15);
+  const offset = Math.round((containerSize - size) / 2);
+  const scale = Animated.multiply(pulseAnim, stateScale);
 
   return (
-    <View style={[styles.container, { width: containerSize, height: containerSize }]}>
-      <View style={{ transform: [{ scale: stateScale }] }}>
-        <Animated.View
-          style={{
-            opacity: glowAnim,
-            transform: [{ scale: pulseAnim }],
-          }}
-        >
-          <Image
-            source={AMORAEA_FLAME_ORB_LOGO}
-            accessibilityLabel="Amoraea"
-            style={{ width: size, height: size }}
-            resizeMode="contain"
-          />
-        </Animated.View>
-      </View>
+    <View
+      collapsable={false}
+      style={[styles.container, { width: containerSize, height: containerSize }]}
+    >
+      <Animated.View
+        collapsable={false}
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          left: offset,
+          top: offset,
+          opacity: glowAnim,
+          transform: [{ scale }],
+          transformOrigin: 'center',
+        }}
+      >
+        <Image
+          source={AMORAEA_FLAME_ORB_LOGO}
+          accessibilityLabel="Amoraea"
+          style={{ width: size, height: size }}
+          resizeMode="contain"
+        />
+      </Animated.View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
+    alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',

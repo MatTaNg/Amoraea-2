@@ -16,6 +16,7 @@ import {
   Alert,
   Pressable,
 } from "react-native";
+import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
@@ -418,7 +419,7 @@ const styles = StyleSheet.create({
   },
   introCard: {
     width: "100%",
-    maxWidth: 760,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",
@@ -454,7 +455,7 @@ const styles = StyleSheet.create({
   },
   questionCard: {
     width: "100%",
-    maxWidth: 760,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     borderRadius: 20,
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.1)",

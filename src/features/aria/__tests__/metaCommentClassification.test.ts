@@ -169,6 +169,7 @@ describe('classifyUserMetaComment', () => {
     expect(classifyUserMetaComment('This one time...')).toBeNull();
     expect(classifyUserMetaComment('Yeah, me and my partner.')).toBeNull();
     expect(classifyUserMetaComment('Thank you for watching!')).toBeNull();
+    expect(classifyUserMetaComment('Thanks for watching.')).toBeNull();
     expect(classifyUserMetaComment('What do you mean by that?')?.type).toBe('confusion');
     expect(classifyUserMetaComment('can we move on')?.type).toBe('skip_request');
   });

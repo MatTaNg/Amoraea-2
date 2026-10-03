@@ -109,6 +109,13 @@ export function prepareEmotionTransitionBeforeModalForTts(
 
   if (
     ctx.scenarioJustCompleted === 3 &&
+    streamAlreadySpokeScenarioBoundaryClosingLead(ctx.streamSpokeText, 3)
+  ) {
+    return '';
+  }
+
+  if (
+    ctx.scenarioJustCompleted === 3 &&
     isShowScenarioCardCanonicalPlaybackConfirmed(ctx.playbackConfirmedKinds, 'moment_4')
   ) {
     return tryKeepUnspokenBoundaryLead();
@@ -159,11 +166,11 @@ export function prepareEmotionTransitionAfterModalForTts(
 
   if (
     ctx.scenarioJustCompleted === 3 &&
-    isShowScenarioCardCanonicalPlaybackConfirmed(ctx.playbackConfirmedKinds, 'moment_4') &&
-    (ctx.streamAlreadySpokeBefore ||
-      looksLikeMoment4GrudgePrompt(ctx.streamSpokeText) ||
-      looksLikeMoment4GrudgePrompt(raw) ||
-      assistantTextLooksLikeMoment4HandoffLead(raw))
+    (looksLikeMoment4GrudgePrompt(ctx.streamSpokeText) ||
+      (isShowScenarioCardCanonicalPlaybackConfirmed(ctx.playbackConfirmedKinds, 'moment_4') &&
+        (ctx.streamAlreadySpokeBefore ||
+          looksLikeMoment4GrudgePrompt(raw) ||
+          assistantTextLooksLikeMoment4HandoffLead(raw))))
   ) {
     return '';
   }

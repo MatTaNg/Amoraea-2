@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './modals/onboardingStepScreenEdges';
 import { theme } from '@/shared/theme/theme';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 type Props = {
   onContinue: () => void;
@@ -34,11 +35,8 @@ export function ProfileOnboardingCompleteModal({ onContinue, continuing = false 
           <View style={styles.card}>
             <View style={styles.cardAccent} pointerEvents="none" />
             <Text style={styles.overline}>Profile complete</Text>
-            <Text style={styles.title}>You&apos;re ready to be matched</Text>
-            <Text style={styles.subtitle}>
-              Your dating profile is set up. We can now match you with other members based on
-              compatibility, values, and what you shared.
-            </Text>
+            <Text style={styles.title}>Your profile is complete</Text>
+            <Text style={styles.subtitle}>Your dating profile is set up.</Text>
             <Text style={styles.body}>
               Review or refine anything on the next screen — you can update photos, preferences,
               and life domains anytime.
@@ -76,7 +74,7 @@ const styles = StyleSheet.create({
   },
   inner: {
     width: '100%',
-    maxWidth: 520,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
     flexGrow: 1,
     justifyContent: 'center',

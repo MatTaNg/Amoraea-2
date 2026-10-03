@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { spacing } from '@ui/theme/spacing';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 /** Matches Amoraea pre-interview (`#05060D`) and post-interview stack (`#0a0a0f`). */
 export const PSYCHOMETRICS_BG = '#05060D';
@@ -25,7 +26,7 @@ export const psychometricsScrollContent = {
   padding: spacing.lg,
   paddingTop: spacing.lg,
   paddingBottom: spacing.xxl * 2,
-  maxWidth: 560,
+  maxWidth: PAGE_CONTENT_MAX_WIDTH,
   width: '100%',
   alignSelf: 'center' as const,
 };

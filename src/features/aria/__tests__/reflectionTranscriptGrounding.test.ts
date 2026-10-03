@@ -64,7 +64,7 @@ describe('reflectionTranscriptGrounding', () => {
       "Yeah, the most recent one was I moved in with a woman, Michelle. She was giving me a lot of advice I didn't ask for. I moved out two weeks ago and sent a text she hasn't responded to.";
     const out = buildMoment4ThresholdProbeWithReflection(michelleGrudge);
     expect(out).toBe(
-      'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+      'At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
     );
     expect(out).not.toMatch(/you named who this was|falling-out/i);
   });

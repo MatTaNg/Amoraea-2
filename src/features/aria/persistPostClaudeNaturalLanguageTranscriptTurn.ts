@@ -30,6 +30,7 @@ import type {
 } from '@features/aria/postClaudeAssistantTurnTypes';
 import { resolveHandoffPriorScenario } from '@features/aria/emotionScenarioTransitionInference';
 import { detectScenarioFromResponse } from '@features/aria/scenarioNumberDetection';
+import { omitRetiredScenarioARepairAsk } from '@features/aria/scenarioARepairQuestionHelpers';
 import { remoteLog } from '@utilities/remoteLog';
 export type PostClaudeNaturalLanguageTranscriptPersistResult = {
   priorScenarioNum: 1 | 2 | 3;
@@ -161,9 +162,11 @@ export function persistPostClaudeNaturalLanguageTranscriptTurn(
     liveTranscriptForAppend.some(
       (m) => m.role === 'assistant' && isInterviewPreambleBriefingMoment(m.content ?? ''),
     );
-  const transcriptContentToPersist = pendingBundledHandoff
-    ? assistantContentToPersist
-    : resolveStagedAssistantPersistContent(liveTranscriptForAppend, params.messagesToUse, displayText);
+  const transcriptContentToPersist = omitRetiredScenarioARepairAsk(
+    pendingBundledHandoff
+      ? assistantContentToPersist
+      : resolveStagedAssistantPersistContent(liveTranscriptForAppend, params.messagesToUse, displayText),
+  );
   const skipRedundantAssistantPersist =
     !skipDuplicatePreambleAppend &&
     shouldSkipRedundantAssistantPersist(liveTranscriptForAppend, transcriptContentToPersist);

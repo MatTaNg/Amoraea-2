@@ -16,12 +16,12 @@ import {
 } from '@/data/services/assessmentService';
 import { exitDatingProfileOnboardingToPostInterview } from '@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview';
 import { theme } from '@/shared/theme/theme';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 const INSTRUMENT_LABELS: Record<(typeof ASSESSMENT_IDS)[number], string> = {
   'ECR-36': 'Attachment style',
   'CONFLICT-30': 'Conflict style',
   'PVQ-21': 'Core values (Schwartz)',
-  SEXUAL_COMMUNICATION: 'Sexual communication',
 };
 
 function formatTypologyDurationMinutes(minutes: number): string {
@@ -68,7 +68,7 @@ export function RelationshipTypologyIntroScreen() {
             <Text style={styles.overline}>Relationship typology</Text>
             <Text style={styles.title}>How we learn how you connect</Text>
             <Text style={styles.subtitle}>
-              You will complete four brief psychometric tests and your profile—about{' '}
+              You will complete three brief psychometric tests and your profile—about{' '}
               {TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL} total, with pauses between each step.
             </Text>
 
@@ -86,7 +86,7 @@ export function RelationshipTypologyIntroScreen() {
             ))}
             <View style={[styles.testRow, styles.testRowLast]}>
               <View style={styles.testNum}>
-                <Text style={styles.testNumText}>5</Text>
+                <Text style={styles.testNumText}>{ASSESSMENT_IDS.length + 1}</Text>
               </View>
               <Text style={styles.testLabel}>Profile setup</Text>
               <Text style={styles.testDuration}>
@@ -99,20 +99,14 @@ export function RelationshipTypologyIntroScreen() {
               help us understand how you connect, communicate, and show up in relationships.
             </Text>
 
-            <View style={styles.tip}>
-              <Text style={styles.tipText}>
-                Answer honestly, there are no right or wrong patterns. You can leave and come back
-                anytime; progress is saved automatically after each test.
-              </Text>
-            </View>
           </View>
 
           <Text style={styles.meta}>
-            Four psychometric assessments + profile · ~{TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL} total
+            Three psychometric assessments + profile · ~{TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL} total
           </Text>
 
           <View style={styles.buttonBlock}>
-            <Button title="Begin Sexual Communication Test →" onPress={handleBegin} variant="solid" />
+            <Button title="Begin Schwartz Values Test →" onPress={handleBegin} variant="solid" />
           </View>
         </View>
       </ScrollView>
@@ -147,7 +141,7 @@ const styles = StyleSheet.create({
   },
   inner: {
     width: '100%',
-    maxWidth: 520,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
     flexGrow: 1,
   },

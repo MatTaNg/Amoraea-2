@@ -96,8 +96,12 @@ export function extractLeadingReflectionFromMoment4ThresholdProbe(text: string):
 export function extractLeadingReflectionFromMoment5HandoffBundle(text: string): string | null {
   const raw = (text ?? '').trim();
   if (!raw) return null;
-  const pivot = "Here's one more question about you";
-  const idx = raw.indexOf(pivot);
+  const pivots = ["Last one, and then we'll wrap up", "Here's one more question about you"];
+  let idx = -1;
+  for (const pivot of pivots) {
+    const at = raw.indexOf(pivot);
+    if (at >= 0 && (idx < 0 || at < idx)) idx = at;
+  }
   if (idx <= 0) return null;
   const lead = raw.slice(0, idx).trim();
   if (!lead || /think of a time you really had a conflict/i.test(lead)) return null;

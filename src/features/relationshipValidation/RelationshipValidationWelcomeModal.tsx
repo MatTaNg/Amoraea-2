@@ -13,6 +13,7 @@ import { FlameOrb } from '@app/screens/FlameOrb';
 import { authStyles } from '@app/screens/authStyles';
 import { loadPsychometricsWebFontsOnce } from '@features/psychometrics/psychometricsTheme';
 import { useAssessmentScrollContent } from '@utilities/assessmentMobileLayout';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 
 type Props = {
   visible: boolean;
@@ -89,7 +90,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     width: '100%',
-    maxWidth: 480,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
   },
   flameWrap: {
@@ -102,6 +103,7 @@ const styles = StyleSheet.create({
   },
   flameScale: {
     transform: [{ scale: 0.42 }],
+    transformOrigin: 'center',
   },
   title: {
     fontFamily: Platform.OS === 'web' ? "'Cormorant Garamond', serif" : undefined,

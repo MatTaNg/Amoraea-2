@@ -12,6 +12,7 @@ import {
   psychometricFloorScoresFromUserRow,
   sd3NarcissismScoreFromUserRow,
 } from './usersPsychometricsSchemaFallback';
+import { sexualCommunicationComfortUncertaintyFields } from '@config/psychometrics/sexualCommunicationSoftModifier';
 import { isPsychometricGateFailFloorCode, mergePsychometricFloorsIntoGateState } from './psychometricFloorBreaches';
 import { normalizeGateFailDetailForPersist } from './gateFailDetailForPersist';
 
@@ -63,11 +64,26 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
     const attempt = row as Record<string, unknown>;
     const userId = attempt.user_id as string;
 
-    const { data: userPsych } = await supabase
+    const comfortColumns =
+      'psychometrics_sexual_communication_comfort_score, psychometrics_sexual_communication_comfort_soft_modifier';
+    let userPsychResult = await supabase
       .from('users')
-      .select(`${buildUsersPsychometricUncertaintyScoresSelect()}, psychometrics_completed_at`)
+      .select(
+        `${buildUsersPsychometricUncertaintyScoresSelect()}, psychometrics_completed_at, ${comfortColumns}`,
+      )
       .eq('id', userId)
       .maybeSingle();
+    if (
+      userPsychResult.error &&
+      String(userPsychResult.error.message ?? '').includes('psychometrics_sexual_communication_comfort')
+    ) {
+      userPsychResult = await supabase
+        .from('users')
+        .select(`${buildUsersPsychometricUncertaintyScoresSelect()}, psychometrics_completed_at`)
+        .eq('id', userId)
+        .maybeSingle();
+    }
+    const userPsych = userPsychResult.data;
 
     const straightLineRaw = (userPsych as { psychometric_straight_line_flags?: unknown } | null)
       ?.psychometric_straight_line_flags;
@@ -104,6 +120,7 @@ export async function backfillMissingUncertaintyScores(limit = 25): Promise<numb
       psychometrics_dweck_score: finiteNumberOrNull(up?.psychometrics_dweck_score),
       psychometrics_sd3_narcissism_score: sd3NarcissismScoreFromUserRow(up ?? {}),
       psychometrics_rfq_score: finiteNumberOrNull(up?.psychometrics_rfq_score),
+      ...sexualCommunicationComfortUncertaintyFields(up ?? {}),
       reasoning_pending: attempt.reasoning_pending === true,
       defenseCrossReference:
         (attempt.defense_cross_reference as import('./crossReferenceDefenseDetection').DefenseCrossReferenceResult | null) ??

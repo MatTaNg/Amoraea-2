@@ -235,6 +235,11 @@ export function isResumeWelcomePlaybackLocked(attemptId: string | null | undefin
   return attemptId != null && resumeWelcomePlaybackLockAttemptId === attemptId;
 }
 
+/** True while resume hydration or a foreground replay owns the welcome playback window. */
+export function isResumeWelcomePlaybackInFlight(): boolean {
+  return resumeWelcomePlaybackLockAttemptId != null;
+}
+
 /**
  * Save interview progress only when there is meaningful progress (avoids resume loop from pre-interview state).
  */

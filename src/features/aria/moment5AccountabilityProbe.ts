@@ -414,7 +414,7 @@ export function moment5ResponseIsAbstract(userText: string): boolean {
     return false;
   }
   if (
-    /\b(with|from)\s+[A-Z][a-z]{1,24}\b/i.test(raw) &&
+    /\b(with|from)\s+[A-Z][a-z]{1,24}\b/.test(raw) &&
     /\b(said|told|would|did|got|felt|when|after|during|because|argu|fight|tense)\b/i.test(raw)
   ) {
     return false;

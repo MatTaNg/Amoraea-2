@@ -18,6 +18,7 @@ import {
 } from "@/data/assessments/insightContent";
 import type { AssessmentInsightSnapshot } from "@/src/types";
 import { AssessmentInsightBody } from "@/shared/components/assessments/AssessmentInsightBody";
+import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
 import { AssessmentPreparingResults } from "@/shared/components/assessments/AssessmentPreparingResults";
 import { useAssessmentInsightPayload } from "@/screens/assessments/useAssessmentInsightPayload";
 import { useNavigateAfterAssessments } from "@/datingProfile/onboarding/useNavigateAfterAssessments";
@@ -137,7 +138,7 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 48,
     width: "100%",
-    maxWidth: 680,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: "center",
   },
   nextCard: {

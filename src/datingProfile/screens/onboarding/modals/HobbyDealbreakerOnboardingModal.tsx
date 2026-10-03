@@ -58,7 +58,7 @@ export const HobbyDealbreakerOnboardingModal: React.FC<HobbyDealbreakerOnboardin
 
   return (
     <SafeAreaView style={styles.screen} edges={ONBOARDING_STEP_SCREEN_EDGES}>
-      <OnboardingHeader title="Hobby dealbreaker" onBack={onBack} />
+      <OnboardingHeader title="Shared hobby" onBack={onBack} />
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.scrollContent}

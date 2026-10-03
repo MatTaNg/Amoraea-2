@@ -30,4 +30,14 @@ export const SCS_PUBLIC_HIGH_SELF_CONSCIOUSNESS_FLOOR_THRESHOLD = 17;
 export const SCS_PRIVATE_LOW_SELF_AWARENESS_FLOOR_THRESHOLD = 10;
 
 export const SD3_NARCISSISM_FLOOR_THRESHOLD = 4.0;
+/**
+ * Historical NPI entitlement count only. `psychometrics_entitlement_score`
+ * (amoraea_entitlement_v1) is an experimental placeholder and must not use this floor.
+ */
 export const NPI_ENTITLEMENT_FLOOR_THRESHOLD = 5;
+
+/**
+ * sexual_communication_comfort, relationship_growth_beliefs, conflict_catastrophizing,
+ * and psychometrics_entitlement_score are intentionally absent from these floors.
+ * Low sexual-communication comfort is a soft uncertainty contribution only.
+ */

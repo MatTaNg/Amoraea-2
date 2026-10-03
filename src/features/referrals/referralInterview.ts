@@ -1,7 +1,7 @@
 import { supabase } from '@data/supabase/client';
 
 export const REFERRAL_BASE_DISCOUNT = 40;
-export const REFERRAL_STEP_DISCOUNT = 20;
+export const REFERRAL_STEP_DISCOUNT = 15;
 export const REFERRAL_MAX_DISCOUNT = 100;
 export const REFERRAL_SIGNUP_BONUS_DISCOUNT = REFERRAL_STEP_DISCOUNT;
 
@@ -47,7 +47,7 @@ export type ReferralDiscountStatus = {
 };
 
 export function buildReferralShareMessage(referralCode: string): string {
-  return `I just completed my relationship assessment on Amoraea. Use my code ${referralCode} when you sign up — when you finish the interview and psychometric assessments, we both get an extra 20% off. amoraea.com`;
+  return `I just completed my relationship assessment on Amoraea. Use my code ${referralCode} when you sign up — when you finish the interview and psychometric assessments, we both get an extra ${REFERRAL_STEP_DISCOUNT}% off. amoraea.com`;
 }
 
 /** Canonical referral status for post-interview discount UI. */

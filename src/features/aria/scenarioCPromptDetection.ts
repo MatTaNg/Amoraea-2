@@ -10,6 +10,7 @@ import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from 
 import { MOMENT_4_PERSONAL_CARD, assistantTextIsPrematureMoment4HandoffDuringScenarioC } from './interviewMomentScenarioConfig';
 import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from './probeAndScoringUtils';
 import { isDecline } from './interviewControlTokens';
+import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
 import { normalizeInterviewTypography } from './interviewTypography';
 import { looksLikeScenarioCCommitmentThresholdAssistantPrompt } from './scenarioCCommitmentThresholdLogic';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from './interviewDisengagementProbeCopy';
@@ -352,7 +353,7 @@ export function coerceScenarioCRepairAsDanielQuestionForTts(text: string): strin
     looksLikeScenarioCRepairAsDanielQuestion(t) ||
     isIncompleteScenarioCRepairAsDanielLeadSentence(t)
   ) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+    return isInterviewCanonicalProbeRetired('s3_repair') ? '' : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   return t;
 }
@@ -549,7 +550,7 @@ export function coerceScenarioCQ1PrescriptiveStripForTts(
     looksLikeScenarioCDanielComeBackMisparaphraseQuestion(t) ||
     isIncompleteScenarioCDanielComeBackLeadSentence(t)
   ) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+    return isInterviewCanonicalProbeRetired('s3_repair') ? t : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   if (!looksLikeScenarioCDanielPrescriptiveBackInRoomQuestion(t)) return t;
   return SHOW_SCENARIO_3_OPENING_EXACT;
@@ -571,21 +572,16 @@ export function isIncompleteScenarioCRepairQuestionTail(text: string): boolean {
 
 export function coerceScenarioCRepairQuestionForTts(text: string): string {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
-  if (!t) return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
-  if (looksLikeScenarioCRepairWithUserAnswerEcho(t)) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
-  }
-  if (isIncompleteScenarioCRepairQuestionTail(t)) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
-  }
-  if (isScenarioCRepairAssistantPrompt(t)) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
-  }
+  const repairRetired = isInterviewCanonicalProbeRetired('s3_repair');
+  if (!t) return repairRetired ? '' : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   if (
+    looksLikeScenarioCRepairWithUserAnswerEcho(t) ||
+    isIncompleteScenarioCRepairQuestionTail(t) ||
+    isScenarioCRepairAssistantPrompt(t) ||
     looksLikeScenarioCRepairAsDanielQuestion(t) ||
     isIncompleteScenarioCRepairAsDanielLeadSentence(t)
   ) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+    return repairRetired ? '' : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   if (
     looksLikeScenarioCSophieReceiveMisparaphraseQuestion(t) ||
@@ -593,7 +589,7 @@ export function coerceScenarioCRepairQuestionForTts(text: string): string {
     looksLikeScenarioCDanielComeBackMisparaphraseQuestion(t) ||
     isIncompleteScenarioCDanielComeBackLeadSentence(t)
   ) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+    return repairRetired ? t : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   return t;
 }
@@ -601,6 +597,9 @@ export function coerceScenarioCRepairQuestionForTts(text: string): string {
 /** Tab-restore / repeat replay — never resume mid-clause repair tails or invalid S3 misparaphrases. */
 export function coerceInterviewReplayTtsText(text: string, fallbacks: string[] = []): string {
   const primary = coerceScenarioCRepairQuestionForTts((text ?? '').replace(/\s+/g, ' ').trim());
+  if (isInterviewCanonicalProbeRetired('s3_repair')) {
+    return primary;
+  }
   if (!isIncompleteScenarioCRepairQuestionTail(primary)) {
     return primary;
   }
@@ -684,9 +683,10 @@ export function userAnswerSatisfiesScenarioCSophiePerspectiveProbe(
   text: string | null | undefined,
 ): boolean {
   const raw = (text ?? '').trim();
-  if (!raw || isDecline(raw)) return false;
-  if (userAnswerHasSophiePerspectiveLanguage(raw)) return true;
+  if (!raw) return false;
   if (looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(raw)) return true;
+  if (isDecline(raw)) return false;
+  if (userAnswerHasSophiePerspectiveLanguage(raw)) return true;
   if (countSpokenWords(raw) < 8) return false;
   const t = normalizeInterviewTypography(raw).replace(/\s+/g, ' ').trim().toLowerCase();
   const emotionalImpact =
@@ -733,13 +733,14 @@ export function looksLikeScenarioCRepairWithUserAnswerEcho(text: string): boolea
 /** Coerce repair paraphrases / user-echo prefaces to canonical Scenario C Q2 for TTS + persist. */
 export function coerceScenarioCRepairAssistantForTts(text: string): string {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
-  if (!t) return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+  const repairRetired = isInterviewCanonicalProbeRetired('s3_repair');
+  if (!t) return repairRetired ? '' : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   if (
     looksLikeScenarioCRepairWithUserAnswerEcho(t) ||
     looksLikeScenarioCRepairAsDanielQuestion(t) ||
     isIncompleteScenarioCRepairAsDanielLeadSentence(t)
   ) {
-    return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
+    return repairRetired ? '' : SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   return t;
 }
@@ -759,6 +760,7 @@ export function shouldSuppressScenarioCRepairReplay(
   ) {
     return false;
   }
+  if (isInterviewCanonicalProbeRetired('s3_repair')) return true;
   if (
     opts?.repairSpokenThisStream ||
     opts?.repairProbeDeliveredRef ||
@@ -774,7 +776,9 @@ export function shouldSuppressScenarioCRepairReplay(
     return true;
   }
   if (!scenarioCRepairConstructStillPending(messages)) {
-    return true;
+    const repairAlreadyAsked = transcriptAlreadyContainsScenarioCRepairQuestion(messages);
+    const personalProgress = transcriptHasPersonalPartProgressAfterIndex(messages, -1);
+    if (repairAlreadyAsked || personalProgress) return true;
   }
   return false;
 }
@@ -795,7 +799,7 @@ export function scenarioCUserAnswerHasSubstantiveRepairContent(text: string | nu
   const danielLeavingPrescription =
     /\b(daniel|he)\s+(?:need|needs|must|should|has)\s+(?:to\s+)?(?:stop|quit)?\s*(?:leaving|leave|walking away|avoiding|withdrawing)\b/.test(
       t,
-    ) || (/\b(?:stop|leaving|leave|walk(?:s|ing)? away)\b/.test(t) && /\b(?:daniel|he)\b/.test(t));
+    );
   const couplesRepairPath =
     /\b(they|both|the couple)\s+(?:need|needs|must|should)\s+(?:to\s+)?(?:figure out|understand|talk|communicat|repair|fix|resolve|work)\b/.test(
       t,
@@ -919,6 +923,7 @@ function transcriptHasPersonalPartProgressAfterIndex(
 export function scenarioCRepairConstructStillPending(
   messages: readonly MessageWithScenario[],
 ): boolean {
+  if (isInterviewCanonicalProbeRetired('s3_repair')) return false;
   if (transcriptHasPersonalPartProgressAfterIndex(messages, -1)) {
     return false;
   }
@@ -957,10 +962,6 @@ export function scenarioCRepairConstructStillPending(
           m.role === 'user' && (m.content ?? '').trim().length > 0 && !isDecline(m.content ?? ''),
       );
     if (userTurnsAfterRepair.length === 0) return true;
-    /** Gameplay advanced past repair Q2 (e.g. grudge answer) even when repair-content heuristics miss. */
-    if (userTurnsAfterRepair.length >= 2) {
-      return false;
-    }
     if (
       userTurnsAfterRepair.some((m) =>
         scenarioCUserAnswerHasSubstantiveRepairContent((m.content ?? '').trim()),
@@ -1051,11 +1052,17 @@ export function shouldForceScenarioCRepairProbe(params: {
   /** Session ref: repair Q2 already passed to TTS this attempt (transcript may lag). */
   repairProbeDelivered?: boolean;
 }): boolean {
+  if (isInterviewCanonicalProbeRetired('s3_repair')) return false;
   const repairStillPending = scenarioCRepairConstructStillPending(params.messages);
   if (params.repairProbeDelivered && !repairStillPending) return false;
   if (params.suppressForcedConstructProbesForMetaFrustration) return false;
   if (params.currentMoment !== 3 || params.currentScenario !== 3) return false;
-  if (isDecline(params.userAnswer)) return false;
+  if (
+    isDecline(params.userAnswer) &&
+    !looksLikeScenarioCSophiePerspectiveAssessableShortAnswer(params.userAnswer)
+  ) {
+    return false;
+  }
   if (scenarioCUserAnswerHasSubstantiveRepairContent(params.userAnswer)) return false;
   const anchor = resolveScenarioCRepairProbeAnchorAssistantContent(
     params.messages,
@@ -1224,6 +1231,7 @@ export function resolveScenarioCNextProbeAfterSatisfiedQ1(
   if (!sophieProbeAsked && !sophieAnswered && !sophieInferred) {
     return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
   }
+  if (isInterviewCanonicalProbeRetired('s3_repair')) return '';
   return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
 }
 
@@ -1232,6 +1240,7 @@ export function coerceScenarioCNextProbeForStreamTts(
   messages: readonly MessageWithScenario[],
 ): string {
   const next = resolveScenarioCNextProbeAfterSatisfiedQ1(messages);
+  if (!next.trim()) return '';
   if (isScenarioCRepairAssistantPrompt(next)) {
     return coerceScenarioCRepairQuestionForTts(next);
   }
@@ -1248,14 +1257,16 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
 
   /** User engaged the quoted prompt line or a clear "what that line means" read — not only prescriptions. */
   const referencesDanielPromptLine =
-    /\b(i |he |she |they )?didn'?t know what to say\b/i.test(t) ||
-    /\b(i |he |she |they )?didn'?t know how\b/i.test(t) ||
+    /\b(?:i |he |she |they |daniel )?(?:didn'?t|did not|doesn'?t|does not) know what to say\b/i.test(t) ||
+    /\b(?:i |he |she |they |daniel )?(?:didn'?t|did not|doesn'?t|does not) know how\b/i.test(t) ||
+    /\bdifficulty knowing what to say\b/i.test(t) ||
     /\bwhat (that |he |daniel )?(line|said|means?|meant)\b/i.test(t) ||
     /\bwhen (daniel |he )(comes back |says|said )\b/i.test(t) ||
     /\b(that|those) words\b/i.test(t);
 
   const danielInternalRead =
     /\b(daniel|he)('?s| is| was| felt| seems| sounds| means| meant)\b/i.test(t) ||
+    (/\bsounds like\b/i.test(t) && /\b(daniel|he)\b/i.test(t)) ||
     /\b(his|him) (own|inner|shame|fear|anxiety|avoidance|struggle|vulnerability|emotion|state|head|heart)\b/i.test(
       t
     ) ||
@@ -1266,9 +1277,13 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
     /\b(overwhelmed|ashamed|embarrassed|stuck|lost|flooded|shut down|shutdown|vulnerable|raw|defensive|avoidant|withdraw|withdrawing)\b/i.test(
       t
     ) ||
-    /\b(didn'?t know what to say|didn'?t know how (to|what)|lack(ed|s)? (the )?(skills|tools|words)|capacity|limitation|learning|growth|trying|effort|intent)\b/i.test(
+    /\b((?:didn'?t|did not|doesn'?t|does not) know what to say|(?:didn'?t|did not|doesn'?t|does not) know how (to|what)|difficulty knowing what to say|lack(ed|s)? (the )?(skills|tools|words)|capacity|limitation|learning|growth|trying|effort|intent)\b/i.test(
       t
     ) ||
+    /\binstead of facing\b/i.test(t) ||
+    /\b(?:tries|tried) to run away\b/i.test(t) ||
+    /\bwalk(?:s|ed)? away and comes? back\b/i.test(t) ||
+    /\b(?:fair and honest|honest response)\b/i.test(t) ||
     /\b(remorse|guilt|shame)\b/i.test(t);
 
   if (danielInternalRead) return false;
@@ -1277,7 +1292,7 @@ export function isMisplacedScenarioCQ1Answer(text: string): boolean {
     /\b(daniel|sophie)\s+(needs? to|has to|must)\b/i.test(t) || /\bdaniel should\b/i.test(t);
 
   const relationshipVerdictOrThreshold =
-    /\b(relationship (is )?(not )?working|whether (this |the )?relationship|walk away|end (the relationship|it)|seriously consider|fourth time|third time|one more time|without real change|deal[- ]?breaker)\b/i.test(
+    /\b(relationship (is )?(not )?working|whether (this |the )?relationship|walk away(?! and come back)|end (the relationship|it)|seriously consider|fourth time|third time|one more time|without real change|deal[- ]?breaker)\b/i.test(
       t
     );
 

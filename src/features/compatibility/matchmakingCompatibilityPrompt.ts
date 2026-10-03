@@ -116,7 +116,6 @@ export function buildMatchmakingPairPayloadExample(): MatchmakingPairPayload {
       },
       postInterviewTypology: {
         assessmentsCompleted: true,
-        sexualCommunicationMean: 4.2,
         attachment: { anxiety: 2.8, avoidance: 2.5, style: 'secure' },
         values: {
           self_transcendence: 0.4,
@@ -168,7 +167,6 @@ export function buildMatchmakingPairPayloadExample(): MatchmakingPairPayload {
       },
       postInterviewTypology: {
         assessmentsCompleted: true,
-        sexualCommunicationMean: 4.0,
         attachment: { anxiety: 3.2, avoidance: 2.2, style: 'secure' },
         values: {
           self_transcendence: 0.35,

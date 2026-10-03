@@ -83,6 +83,33 @@ describe('resolvePreClaudeScenarioConstructProbeFlags', () => {
     expect(deps.pendingScenarioAContemptProbeStreamMuteRef.current).toBe(false);
   });
 
+  it('does not treat a Whisper outro as an answer to the first Scenario 1 question', () => {
+    const opening = "What's going on between these two?";
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 1 },
+      currentScenarioRef: { current: 1 },
+      scenarioAContemptProbeAskedRef: { current: false },
+      pendingScenarioAContemptProbeStreamMuteRef: { current: false },
+      lastQuestionTextRef: { current: opening },
+    });
+    const outro = 'Thanks for watching.';
+
+    const flags = resolvePreClaudeScenarioConstructProbeFlags(
+      deps,
+      outro,
+      [
+        { role: 'assistant', content: opening },
+        { role: 'user', content: outro },
+      ],
+      opening,
+      opening,
+      false,
+    );
+
+    expect(flags.shouldForceScenarioAContemptProbe).toBe(false);
+    expect(flags.muteParallelTtsForScenarioAContemptProbeStream).toBe(false);
+  });
+
   it('forces S2 appreciation probe when BQ1 answer lacks on-topic engagement', () => {
     const scenarioBQ1 =
       'Sarah got a job offer and James reacted oddly. What do you think is going on here?';

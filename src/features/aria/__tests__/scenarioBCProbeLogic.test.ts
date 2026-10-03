@@ -198,6 +198,71 @@ describe('scenarioC repair Q2 skip', () => {
   const repairAnswer =
     "Daniel needs to stop leaving. They need to figure out why he's leaving, otherwise they'll never be repaired.";
 
+  it('does not treat "what I would make of that" as a repair prescription', () => {
+    const interpretation =
+      "What I would make of that is that Daniel doesn't know quite what to say he feels put on the spot and so when he says give me 10 minutes he comes back in 30 time that's what he's trying to buy to figure out how to address the issue.";
+    expect(scenarioCUserAnswerHasSubstantiveRepairContent(interpretation)).toBe(false);
+    expect(scenarioCRepairConstructStillPending([
+      {
+        role: 'assistant',
+        content:
+          "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?",
+      },
+      { role: 'user', content: interpretation },
+      {
+        role: 'assistant',
+        content: 'What do you think this pattern of leaving has been like for Sophie over time?',
+      },
+      { role: 'user', content: 'Probably very frustrating for her.' },
+    ])).toBe(false);
+  });
+
+  it('does not owe the retired repair question after a one-word Sophie answer', () => {
+    const daniel =
+      'Dr. Daniel needed some time to process things or maybe even time to calm down before actually having a calm conversation with Zoe.';
+    const sophie = 'Frustrated.';
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content:
+          "When Daniel comes back and says 'I didn't know what to say' — what do you make of that?",
+      },
+      { role: 'user' as const, content: daniel },
+      {
+        role: 'assistant' as const,
+        content: 'What do you think this pattern of leaving has been like for Sophie over time?',
+      },
+      { role: 'user' as const, content: sophie },
+    ];
+    expect(scenarioCUserAnswerHasSubstantiveRepairContent(daniel)).toBe(false);
+    expect(scenarioCUserAnswerHasSubstantiveRepairContent(sophie)).toBe(false);
+    expect(userAnswerSatisfiesScenarioCSophiePerspectiveProbe(sophie)).toBe(true);
+    expect(scenarioCRepairConstructStillPending(messages)).toBe(false);
+    expect(
+      shouldForceScenarioCRepairProbe({
+        currentMoment: 3,
+        currentScenario: 3,
+        messages,
+        lastAssistantContent: 'What do you think this pattern of leaving has been like for Sophie over time?',
+        userAnswer: sophie,
+        suppressForcedConstructProbesForMetaFrustration: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSuppressScenarioCRepairReplay(
+        messages,
+        'Makes sense. How do you think this situation could be repaired?',
+        { repairProbeDeliveredRef: false },
+      ),
+    ).toBe(true);
+  });
+
+  it('does not treat a Daniel walk-away interpretation as an answer to the repair question', () => {
+    const interpretation =
+      "It sounds like Daniel has difficulty knowing what to say, so instead of facing it he tries to run away, and when he does walk away and come back he realizes he doesn't know what to say.";
+    expect(scenarioCUserAnswerHasSubstantiveRepairContent(interpretation)).toBe(false);
+  });
+
   it('scenarioCUserAnswerHasSubstantiveRepairContent detects repair prescriptions', () => {
     expect(scenarioCUserAnswerHasSubstantiveRepairContent(repairAnswer)).toBe(true);
   });
@@ -307,7 +372,7 @@ describe('scenarioC repair Q2 skip', () => {
         suppressForcedConstructProbesForMetaFrustration: false,
         repairProbeDelivered: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('shouldForceScenarioCRepairProbe fires after Q1 when user already inferred Sophie experience', () => {
@@ -322,11 +387,11 @@ describe('scenarioC repair Q2 skip', () => {
         userAnswer: answerWithSophie,
         suppressForcedConstructProbesForMetaFrustration: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(scenarioCSophiePerspectivePrerequisiteMet([], answerWithSophie)).toBe(true);
   });
 
-  it('scenarioCRepairConstructStillPending blocks advance when repair answered before Sophie probe', () => {
+  it('scenarioCRepairConstructStillPending does not stay open after S3 repair is retired', () => {
     const prematureRepairAnswer =
       'A sit down and honest conversation is the only way the situation can be repaired, or this would just stand as a sticking point forever.';
     expect(
@@ -336,7 +401,7 @@ describe('scenarioC repair Q2 skip', () => {
         { role: 'assistant', content: 'How do you think this situation could be repaired?' },
         { role: 'user', content: prematureRepairAnswer },
       ]),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('scenarioCRepairConstructStillPending is false when a personal grudge answer follows repair Q2', () => {
@@ -402,20 +467,20 @@ describe('scenarioC repair Q2 skip', () => {
         userAnswer: thinAnswer,
         suppressForcedConstructProbesForMetaFrustration: false,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('scenarioCRepairConstructStillPending is true after Sophie answer without repair Q2', () => {
+  it('scenarioCRepairConstructStillPending is false after Sophie once S3 repair is retired', () => {
     const sophieWithAck = `Got it. ${SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE}`;
     expect(
       scenarioCRepairConstructStillPending([
         { role: 'assistant', content: sophieWithAck },
         { role: 'user', content: "She's probably annoyed." },
       ]),
-    ).toBe(true);
+    ).toBe(false);
   });
 
-  it('scenarioCRepairConstructStillPending is true when Sophie probe was delivered but not yet answered', () => {
+  it('scenarioCRepairConstructStillPending is false when S3 repair is retired', () => {
     expect(
       scenarioCRepairConstructStillPending([
         { role: 'assistant', content: scenarioCQ1 },
@@ -425,7 +490,7 @@ describe('scenarioC repair Q2 skip', () => {
           content: 'What do you think this pattern of leaving has been like for Sophie over time?',
         },
       ]),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('userAnswerSatisfiesScenarioCQ1Interpretation accepts tools/EQ read from session logs', () => {
@@ -480,9 +545,7 @@ describe('scenarioC repair Q2 skip', () => {
         scenarioNumber: 3,
       },
     ];
-    expect(resolveScenarioCNextProbeAfterSatisfiedQ1(messages)).toBe(
-      SCENARIO_C_REPAIR_QUESTION_CANONICAL,
-    );
+    expect(resolveScenarioCNextProbeAfterSatisfiedQ1(messages)).toBe('');
   });
 
   it('shouldSuppressScenarioCSophiePerspectiveReplay is true after repair Q2 is satisfied', () => {
@@ -550,6 +613,11 @@ describe('scenarioBProbeLogic', () => {
     expect(
       userAnswerLooksLikeAheadOfScheduleScenarioBOnQ1(
         'Sarah felt unseen because James focused on logistics instead of her emotions.',
+      ),
+    ).toBe(false);
+    expect(
+      userAnswerLooksLikeAheadOfScheduleScenarioBOnQ1(
+        "What I think is happening is that Sarah had an expectation of what he meant by that's amazing let's celebrate tonight and then when he asked questions versus actually celebrating her she felt unappreciated.",
       ),
     ).toBe(false);
   });
@@ -830,22 +898,22 @@ describe('scenarioBProbeLogic', () => {
 });
 
 describe('scenarioC repair-as-Daniel TTS coercion', () => {
-  it('coerces Daniel role-play paraphrases to canonical repair Q2', () => {
+  it('drops Daniel role-play paraphrases while Scenario C repair is retired', () => {
     expect(
       coerceScenarioCRepairAsDanielQuestionForTts(
         'How would you repair if you were Daniel coming back into',
       ),
-    ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+    ).toBe('');
     expect(
       coerceScenarioCRepairAsDanielQuestionForTts(
         "Yet if you were in Daniel's shoes how would you repair things with Sophie",
       ),
-    ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+    ).toBe('');
     expect(
       coerceScenarioCRepairQuestionForTts(
         "Yet if you were in Daniel's shoes how would you repair things with Sophie",
       ),
-    ).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+    ).toBe('');
   });
 
   it('streamMissedScenarioBScriptedProbeDelivery when prior handoff is in spokenCompleteText but Q2 was not spoken', () => {
@@ -999,7 +1067,7 @@ describe('scenarioC repair echo and Sophie replay guards', () => {
 
   it('detects user-answer echo before repair re-ask', () => {
     expect(looksLikeScenarioCRepairWithUserAnswerEcho(echoRepair)).toBe(true);
-    expect(coerceScenarioCRepairQuestionForTts(echoRepair)).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+    expect(coerceScenarioCRepairQuestionForTts(echoRepair)).toBe('');
   });
 
   it('treats hurt/abandonment answer as satisfying Sophie perspective without naming Sophie', () => {
@@ -1027,7 +1095,7 @@ describe('scenarioC repair echo and Sophie replay guards', () => {
       { role: 'user', content: hurtAnswer, scenarioNumber: 3 },
     ];
     expect(scenarioCSophiePerspectiveAnsweredInTranscript(messages)).toBe(true);
-    expect(resolveScenarioCNextProbeAfterSatisfiedQ1(messages)).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+    expect(resolveScenarioCNextProbeAfterSatisfiedQ1(messages)).toBe('');
   });
 
   it('resolveScenarioCNextProbeAfterSatisfiedQ1 returns Sophie probe after Q1 interpretation only', () => {
@@ -1059,7 +1127,7 @@ describe('scenarioC repair echo and Sophie replay guards', () => {
     ).toBe(true);
   });
 
-  it('does not suppress first repair delivery after Sophie answer', () => {
+  it('suppresses repair delivery after Sophie answer while Scenario C repair is retired', () => {
     const messages = [
       { role: 'assistant', content: sophieProbe, scenarioNumber: 3 },
       { role: 'user', content: hurtAnswer, scenarioNumber: 3 },
@@ -1068,6 +1136,6 @@ describe('scenarioC repair echo and Sophie replay guards', () => {
       shouldSuppressScenarioCRepairReplay(messages, echoRepair, {
         repairProbeDeliveredRef: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 });

@@ -146,8 +146,13 @@ export function hasScenarioBoundaryWrapPhrase(text: string): boolean {
     lower.includes('end of this situation') ||
     lower.includes('end of that situation') ||
     lower.includes('end of the three described situations') ||
+    lower.includes('end of the three described scenarios') ||
     lower.includes('end of the three situations') ||
-    /\bend of (?:the )?three (?:described )?situations\b/.test(lower) ||
+    lower.includes('end of the three scenarios') ||
+    lower.includes('finished the three scenarios') ||
+    lower.includes('finished the three situations') ||
+    /\bend of (?:the )?three (?:described )?(?:situations|scenarios)\b/.test(lower) ||
+    /\bfinished the three (?:described )?(?:situations|scenarios)\b/.test(lower) ||
     lower.includes("that's the end of situation three") ||
     lower.includes("that's the end of situation 3") ||
     /\bthat'?s the end of situation (?:one|two|three|[123])\b/.test(lower) ||

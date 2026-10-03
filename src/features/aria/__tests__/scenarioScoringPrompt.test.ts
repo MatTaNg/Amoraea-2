@@ -10,8 +10,10 @@ describe('buildScenarioScoringPrompt', () => {
     ]);
     expect(prompt).toContain('"appreciation"');
     expect(prompt).toContain('SCENARIO A (Emma/Ryan) — APPRECIATION');
-    expect(prompt).toContain('SCENARIO A — REPAIR SCORING AFTER PROBE REMOVAL');
-    expect(prompt).toContain('repair-as-Ryan');
+    expect(prompt).toContain('SCENARIO A — REPAIR (PRIMARY HYPOTHETICAL REPAIR ANCHOR)');
+    expect(prompt).toContain('If you were Ryan, how would you repair this?');
+    expect(prompt).toContain('dinner-interruption');
+    expect(prompt).not.toContain('SCENARIO A — REPAIR SCORING AFTER PROBE REMOVAL');
   });
 
   it('does not add Scenario A appreciation rubric to Scenario B', () => {
@@ -28,6 +30,8 @@ describe('buildScenarioScoringPrompt', () => {
       { role: 'assistant', content: 'What do you make of Daniel saying he did not know what to say?', scenarioNumber: 3 },
       { role: 'user', content: 'He might be overwhelmed at the emotional weight of it.', scenarioNumber: 3 },
     ]);
+    expect(prompt).toContain('dedicated probe retired');
+    expect(prompt).toContain('primary hypothetical-repair rubric is Scenario A');
     expect(prompt).toContain("Do **not** base the level tag on the opening reaction alone");
     expect(prompt).toContain('scoringMetadata.evidence_levels.mentalizing');
     expect(prompt).toContain('scoringMetadata.evidence_level_basis.attunement');

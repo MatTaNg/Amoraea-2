@@ -429,12 +429,20 @@ export function shouldSuppressParallelStreamNonExactShowScenarioCardSpeech(args:
     if (isScenarioBoundaryPositiveAddressReflection(spoken)) return true;
     if (/\bhere'?s the next situation\b/i.test(spoken)) return true;
   }
-  if (handoffMoment4) {
+  const spokenIsS3ToM4Handoff =
+    args.interviewScenario === 3 &&
+    args.interviewMoment === 3 &&
+    (assistantTextLooksLikeMoment4HandoffLead(spoken) ||
+      looksLikeMoment4GrudgePrompt(spoken) ||
+      isPrematureStandaloneM4PersonalTransitionLine(spoken) ||
+      /\bend of the three (?:described )?(?:situations|scenarios)\b/i.test(spoken) ||
+      /\b(?:just )?finished the three (?:described )?(?:situations|scenarios)\b/i.test(spoken));
+  if (handoffMoment4 || spokenIsS3ToM4Handoff) {
     if (looksLikeMoment4GrudgePrompt(spoken)) return true;
     if (assistantTextLooksLikeMoment4HandoffLead(spoken)) return true;
     if (isPrematureStandaloneM4PersonalTransitionLine(spoken)) return true;
-    if (/\bend of the three described situations\b/i.test(spoken)) return true;
-    if (/\bend of the three situations\b/i.test(spoken)) return true;
+    if (/\bend of the three (?:described )?(?:situations|scenarios)\b/i.test(spoken)) return true;
+    if (/\b(?:just )?finished the three (?:described )?(?:situations|scenarios)\b/i.test(spoken)) return true;
     // Standalone "two questions left" (or with personal bridge) — never speak before canonical M4.
     if (/\btwo questions left\b/i.test(spoken)) return true;
   }
@@ -733,13 +741,14 @@ export function streamAlreadySpokeScenarioBoundaryClosingLead(
         (/\bthird situation\b/.test(streamLower) || /\bget personal\b/.test(streamLower)))
     );
   }
+  const endOfThree =
+    /\bend of the three (?:described )?(?:situations|scenarios)\b/.test(streamLower) ||
+    /\b(?:just )?finished the three (?:described )?(?:situations|scenarios)\b/.test(streamLower);
+  const personalPivot = /\b(?:more personal|personal questions)\b/.test(streamLower);
   return (
     (/\btwo questions left\b/.test(streamLower) &&
-      (/\bend of the three (?:described )?situations\b/.test(streamLower) ||
-        /\b(?:nice|good) work\b/.test(streamLower) ||
-        /\b(?:more personal|personal questions)\b/.test(streamLower))) ||
-    (/\bend of the three (?:described )?situations\b/.test(streamLower) &&
-      /\b(?:more personal|personal questions)\b/.test(streamLower))
+      (endOfThree || /\b(?:nice|good) work\b/.test(streamLower) || personalPivot)) ||
+    (endOfThree && personalPivot)
   );
 }
 

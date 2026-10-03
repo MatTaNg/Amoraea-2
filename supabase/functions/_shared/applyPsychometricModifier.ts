@@ -22,6 +22,7 @@ import {
   instrumentComponentsFromModifierResult,
 } from './computeGamingCorrection.ts';
 import { computePsychometricModifier } from './computePsychometricModifier.ts';
+import { sexualCommunicationComfortUncertaintyFields } from '../../../src/config/psychometrics/sexualCommunicationSoftModifier.ts';
 import { psychometricRawResponsesFromUserRow } from '../../../src/features/psychometrics/psychometricStraightLineDetection.ts';
 import {
   computeUncertaintyScore,
@@ -90,6 +91,29 @@ function finiteNumberOrNull(v: unknown): number | null {
   return coercePsychometricScore(v);
 }
 
+function isRecoverablePsychometricsColumnError(error: {
+  code?: string | number;
+  message?: string;
+  details?: string;
+  hint?: string;
+} | null): boolean {
+  if (!error) return false;
+  const msg = [error.message, error.details, error.hint, String(error.code ?? '')].filter(Boolean).join(' ');
+  return (
+    String(error.code) === 'PGRST204' ||
+    String(error.code) === '42703' ||
+    msg.includes('does not exist') ||
+    msg.includes('schema cache')
+  );
+}
+
+function entitlementScoreFromUserRow(user: Record<string, unknown>): number | null {
+  return (
+    coercePsychometricScore(user.psychometrics_entitlement_score) ??
+    coercePsychometricScore(user.psychometrics_amoraea_entitlement_v1_score)
+  );
+}
+
 const PSYCHOMETRIC_USER_SELECT = `
   psychometrics_brs_score,
   psychometrics_brs_responses,
@@ -122,7 +146,13 @@ const PSYCHOMETRIC_USER_SELECT = `
   psychometrics_narq_s_responses,
   psychometrics_rfq_score,
   psychometrics_rfq_responses,
-  psychometrics_completed_at
+  psychometrics_completed_at,
+  psychometrics_relationship_growth_beliefs_score,
+  psychometrics_conflict_catastrophizing_score,
+  psychometrics_entitlement_score,
+  psychometrics_amoraea_entitlement_v1_score,
+  psychometrics_sexual_communication_comfort_score,
+  psychometrics_fully_completed
 `;
 
 const PSYCHOMETRIC_USER_SELECT_LEGACY_SD3 = `
@@ -235,6 +265,7 @@ function buildUncertaintyInput(
     psychometrics_rfq_score: coercePsychometricScore(user.psychometrics_rfq_score),
     psychometrics_scs_public_score: coercePsychometricScore(user.psychometrics_scs_public_score),
     psychometrics_scs_private_score: coercePsychometricScore(user.psychometrics_scs_private_score),
+    ...sexualCommunicationComfortUncertaintyFields(user),
     reasoning_pending: attempt.reasoning_pending === true,
     defenseCrossReference:
       (attempt.defense_cross_reference as DefenseCrossReferenceResult | null) ?? null,
@@ -249,14 +280,21 @@ export async function applyPsychometricModifierToAttempt(
   options?: ApplyPsychometricModifierOptions,
 ): Promise<ApplyPsychometricModifierResult> {
   let userRow: Record<string, unknown> | null = null;
-  /** Prefer SD3 columns first — legacy-only select omits `psychometrics_sd3_narcissism_score` and can hide floor triggers. */
+  /** Prefer the active battery columns. Older selects omit them and must not look like a complete battery. */
   for (const select of [PSYCHOMETRIC_USER_SELECT, PSYCHOMETRIC_USER_SELECT_LEGACY_SD3]) {
     const { data, error } = await supabase.from('users').select(select).eq('id', userId).single();
     if (!error && data) {
       userRow = data as Record<string, unknown>;
       break;
     }
-    if (error && !isMissingUsersPsychometricsSd3ColumnsError(error)) {
+    if (error && isRecoverablePsychometricsColumnError(error)) {
+      console.warn(
+        '[PsychometricModifier] user select missing active battery columns; modifier will flag incomplete inputs',
+        error,
+      );
+      continue;
+    }
+    if (error) {
       console.warn('[PsychometricModifier] user select failed:', error);
       break;
     }
@@ -281,6 +319,17 @@ export async function applyPsychometricModifierToAttempt(
   }
 
   let user = userRow as Record<string, unknown>;
+
+  const comfortRes = await supabase
+    .from('users')
+    .select(
+      'psychometrics_sexual_communication_comfort_score, psychometrics_sexual_communication_comfort_soft_modifier',
+    )
+    .eq('id', userId)
+    .maybeSingle();
+  if (!comfortRes.error && comfortRes.data) {
+    user = { ...user, ...(comfortRes.data as Record<string, unknown>) };
+  }
 
   let attemptRes = await supabase
     .from('interview_attempts')
@@ -334,6 +383,16 @@ export async function applyPsychometricModifierToAttempt(
       sd3NarcissismScore: sd3NarcissismScoreFromUserRow(user),
       npiEntitlementScore: coercePsychometricScore(user.psychometrics_npi_entitlement_score),
       rfqScore: coercePsychometricScore(user.psychometrics_rfq_score),
+      relationshipGrowthBeliefsScore: coercePsychometricScore(
+        user.psychometrics_relationship_growth_beliefs_score,
+      ),
+      conflictCatastrophizingScore: coercePsychometricScore(
+        user.psychometrics_conflict_catastrophizing_score,
+      ),
+      entitlementScore: entitlementScoreFromUserRow(user),
+      sexualCommunicationComfortScore: coercePsychometricScore(
+        user.psychometrics_sexual_communication_comfort_score,
+      ),
     },
     {
       disclosureCalibration: attempt.disclosure_calibration as string | null,
@@ -349,6 +408,7 @@ export async function applyPsychometricModifierToAttempt(
     {
       ...psychometricRawResponsesFromUserRow(user),
     },
+    { enforceActiveBatteryCompleteness: true },
   );
 
   const straightLineFlags = result.straightLineFlags;

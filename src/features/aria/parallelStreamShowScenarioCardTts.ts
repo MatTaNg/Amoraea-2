@@ -22,7 +22,6 @@ import {
   buildCanonicalShowScenarioCardTtsBody,
   buildLockedShowScenarioCardTtsText,
   composeShowScenarioCardTtsWithTransitionPrefix,
-  detectShowScenarioCardKind,
   extractShowScenarioCardTransitionPrefix,
   resolveClientScenarioBoundaryPrefixForCanonicalTtsAsync,
   resolveCanonicalShowScenarioCardTransitionSpeakDecision,
@@ -74,12 +73,11 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
     if (state.showScenarioCardCanonicalSpokenThisStream) return;
 
     const fullStream = stripControlTokens(params.textToParallelStream.full).trim();
-    const kind =
-      resolveShowScenarioCardKindForInterview({
-        fullStream,
-        interviewMoment: deps.currentInterviewMomentRef.current,
-        interviewScenario: deps.currentScenarioRef.current,
-      }) ?? detectShowScenarioCardKind(fullStream);
+    const kind = resolveShowScenarioCardKindForInterview({
+      fullStream,
+      interviewMoment: deps.currentInterviewMomentRef.current,
+      interviewScenario: deps.currentScenarioRef.current,
+    });
     if (!kind) return;
     if (
       !isShowScenarioCardKindAllowedForInterviewProgress({
@@ -346,6 +344,12 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         setTtsPlaybackActive(false);
       }
     }
+    /**
+     * Record what just played before the duration-ratio checkpoint. A fast complete
+     * playback can miss that checkpoint; leaving spoken text empty makes the emotion
+     * modal speak the same S3 closing again.
+     */
+    deps.parallelStreamingTtsRef.current.spokenCompleteText = textToSpeak;
     const playbackConfirmed = isShowScenarioCardCanonicalPlaybackConfirmed(
       deps.showScenarioCardCanonicalPlaybackConfirmedKindsRef?.current,
       kind,
@@ -392,7 +396,6 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
         kind,
       );
     }
-    deps.parallelStreamingTtsRef.current.spokenCompleteText = textToSpeak;
     params.textToParallelStream.full = textToSpeak;
     params.textToParallelStream.spokenStarted = true;
     deps.recordInterviewAssistantDeliveryForMetaExemptionRef?.current?.(textToSpeak);

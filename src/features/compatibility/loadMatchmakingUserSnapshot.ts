@@ -162,7 +162,7 @@ export async function loadMatchmakingUserSnapshot(
       supabase
         .from('users')
         .select(
-          'psychometrics_rfq_score, psychometrics_gasp_score, psychometrics_brs_score, psychometrics_scs_sf_score, psychometrics_dweck_score, psychometrics_anxiety_trait_score, psychometrics_npi_entitlement_score, psychometrics_sexual_communication_score',
+          'psychometrics_rfq_score, psychometrics_gasp_score, psychometrics_brs_score, psychometrics_scs_sf_score, psychometrics_dweck_score, psychometrics_anxiety_trait_score, psychometrics_npi_entitlement_score',
         )
         .eq('id', userId)
         .maybeSingle(),
@@ -264,7 +264,6 @@ export async function loadMatchmakingUserSnapshot(
     },
     postInterviewTypology: {
       ...assessments,
-      sexualCommunicationMean: num(userRow.psychometrics_sexual_communication_score),
     },
     profile,
     preferences: {

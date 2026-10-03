@@ -62,7 +62,7 @@ export function repairAnswerHasConcreteSuggestionActionOrStep(text: string): boo
   return (
     /\b(i|we)\s+(commit|promise|pledge)\b/i.test(t) ||
     /\b(?:i|we)\b[^.]{0,180}\bcommit\b/i.test(t) ||
-    /\b(i|we)\s+(would|will)\s+make\b/i.test(t) ||
+    /\b(i|we)\s+(would|will)\s+make\b(?!\s+of\b)/i.test(t) ||
     /\bvoicemail\b/i.test(t) ||
     /\b(i|we)\s+shouldn'?t have\b/i.test(t) ||
     /\b(i|we)\s+(would|will)\s+(apologiz\w*|say sorry|listen|acknowledg\w*|own)\b/i.test(t) ||

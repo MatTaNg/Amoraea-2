@@ -31,6 +31,7 @@ import {
 import { CLAUDE_SONNET_MODEL } from '@utilities/anthropicMessagesClient';
 import { fetchWithTimeout } from '@utilities/fetchWithTimeout';
 import { parseJsonObjectFromModelText } from '@utilities/parseHolisticModelJson';
+import { resolveCommitmentResponseSource } from '@features/aria/moment4ProbeLogic';
 import {
   persistMoment4ScoresImmediate,
   type AttemptScoringBaseline,
@@ -221,6 +222,7 @@ export async function scoreAndPersistMoment4Slice(
         moment4ForAggregate,
         scoringBaseline,
         moment4SpecificityScoring,
+        resolveCommitmentResponseSource(msgs),
       );
     }
     return { moment4ForAggregate, scoringBaseline, skippedNoUserTurns: false };

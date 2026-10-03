@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
+import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
 import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '@features/aria/scenarioCPromptDetection';
 import { SCENARIO_3_OPENING } from '@features/aria/interviewScenarioOpeningStreamGate';
 import { SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE } from '@features/aria/interviewPromptInstructions';
@@ -18,7 +19,7 @@ const S3_Q1_ANSWER =
   "Yeah, I'll make of it that he needs some time and knowing some tools and techniques to be guided through conversation or some help with emotional intelligence because it sounds like he's just really avoiding it.";
 
 describe('resolveQuestionSkipProgression', () => {
-  it('advances to Scenario C repair Q2 after skipping Sophie/elongating beat when Q1 was answered', () => {
+  it('advances to the Sophie perspective probe after skipping a non-Sophie beat when Q1 was answered', () => {
     const messages = [
       { role: 'assistant', content: SCENARIO_3_OPENING, scenarioNumber: 3 },
       { role: 'user', content: S3_Q1_ANSWER, scenarioNumber: 3 },
@@ -38,14 +39,15 @@ describe('resolveQuestionSkipProgression', () => {
     const result = resolveQuestionSkipProgression(messages, 3, 3);
 
     expect(result.scenarioMomentComplete).toBe(false);
-    expect(result.nextPrompt).toBe(SCENARIO_C_REPAIR_QUESTION_CANONICAL);
+    expect(result.nextPrompt).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
   });
 
-  it('marks Scenario C complete only after repair Q2 was already delivered', () => {
+  it('marks Scenario C complete after Sophie is answered while repair Q2 is retired', () => {
     const messages = [
       { role: 'assistant', content: SCENARIO_3_OPENING, scenarioNumber: 3 },
       { role: 'user', content: S3_Q1_ANSWER, scenarioNumber: 3 },
-      { role: 'assistant', content: SCENARIO_C_REPAIR_QUESTION_CANONICAL, scenarioNumber: 3 },
+      { role: 'assistant', content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE, scenarioNumber: 3 },
+      { role: 'user', content: 'It has been frustrating for her over time.', scenarioNumber: 3 },
       { role: 'user', content: 'I would like to skip this question.', scenarioNumber: 3 },
       { role: 'assistant', content: SCENARIO_SKIP_CONFIRMATION_PROMPT_LINE, scenarioNumber: 3 },
       { role: 'user', content: 'Yes.', scenarioNumber: 3 },

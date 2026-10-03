@@ -122,10 +122,6 @@ export const SexualCompatibilityModal: React.FC<SexualCompatibilityModalProps> =
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <Text style={styles.lead}>
-          Answer honestly — this helps us understand what matters to you in matching.
-        </Text>
-
         <Text style={styles.question}>
           How central is physical and sexual compatibility for you in a relationship?
         </Text>

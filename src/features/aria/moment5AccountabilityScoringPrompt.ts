@@ -73,8 +73,15 @@ Acknowledging a trigger while still apologizing is not the same as blaming. It i
 const MOMENT_META = {
   name: 'Moment 5 (Personal Conflict / Accountability)',
   constructs:
-    'accountability (primary), mentalizing, repair, regulation, contempt_expression — NOT commitment_threshold, NOT appreciation, NOT attunement, NOT contempt_recognition',
-  markerIds: ['accountability', 'mentalizing', 'repair', 'regulation', 'contempt_expression'] as const,
+    'accountability (primary), mentalizing, repair, regulation, contempt_expression, persistence_exit_judgment (only if the user spontaneously states when they would work through a relationship versus walk away — otherwise JSON null; do not ask for it) — NOT appreciation, NOT attunement, NOT contempt_recognition',
+  markerIds: [
+    'accountability',
+    'mentalizing',
+    'repair',
+    'regulation',
+    'contempt_expression',
+    'persistence_exit_judgment',
+  ] as const,
 };
 
 export type Moment5ClientScoringMetadata = {

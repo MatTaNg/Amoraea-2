@@ -25,26 +25,7 @@ export async function fetchCurrentUserEmailForPartnerValidation(
   return null;
 }
 
-async function isSexualCommunicationCompleteForValidation(userId: string): Promise<boolean> {
-  const { data, error } = await supabase
-    .from('user_assessments')
-    .select('instrument')
-    .eq('user_id', userId)
-    .eq('instrument', 'SEXUAL_COMMUNICATION')
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  if (data) return true;
-
-  const { data: userRow, error: userErr } = await supabase
-    .from('users')
-    .select('psychometrics_sexual_communication_skipped_at')
-    .eq('id', userId)
-    .maybeSingle();
-  if (userErr) throw new Error(userErr.message);
-  return userRow?.psychometrics_sexual_communication_skipped_at != null;
-}
-
-/** Skip sexual communication in the validation battery; marks explicit skip state and advances progress. */
+/** Historical skip for an in-progress sexual-communication validation screen. New batteries do not include it. */
 export async function skipValidationSexualCommunication(userId: string): Promise<void> {
   await skipSexualCommunicationAssessment(userId);
   const completedAt = new Date().toISOString();
@@ -74,11 +55,6 @@ export async function validationInstrumentsCompleted(userId: string): Promise<{
   if (error) throw new Error(error.message);
 
   const done = new Set((assessments ?? []).map((row) => String(row.instrument)));
-
-  if (!done.has('SEXUAL_COMMUNICATION')) {
-    const sexualDone = await isSexualCommunicationCompleteForValidation(userId);
-    if (sexualDone) done.add('SEXUAL_COMMUNICATION');
-  }
 
   for (const id of RELATIONSHIP_VALIDATION_INSTRUMENT_IDS) {
     if (!done.has(id)) {

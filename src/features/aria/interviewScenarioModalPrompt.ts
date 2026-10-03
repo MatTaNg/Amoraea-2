@@ -19,10 +19,12 @@ import {
   looksLikeMoment4ThresholdQuestion,
   looksLikeMoment4ThresholdParaphraseInProgress,
   looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportNoSituationHypothetical,
   looksLikeMomentSupportQuestion,
   MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT,
   MOMENT_SUPPORT_QUESTION_CARD_BODY,
 } from '@features/aria/moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from '@features/aria/moment4SpecificityFollowUp';
@@ -143,7 +145,9 @@ export function isScenarioModalPureTransitionTurn(text: string | null | undefine
     lower.includes("now we'll shift to something more personal") ||
     lower.includes('now for the first of two personal questions') ||
     lower.includes("here's one more question about you") ||
-    lower.includes("here's another question about you");
+    lower.includes("here's another question about you") ||
+    lower.includes("last one, and then we'll wrap up") ||
+    lower.includes('still personal');
   if (!hasTransitionPhrase) return false;
   if (raw.includes('?')) {
     const hasSubstantiveQuestionCue =
@@ -337,6 +341,9 @@ export function resolveMoment4ShowScenarioReferenceCard(
     if (looksLikeMomentSupportConditionalProbe(content)) {
       return { active: true, cardBodyText: MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY };
     }
+    if (looksLikeMomentSupportNoSituationHypothetical(content)) {
+      return { active: true, cardBodyText: MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT };
+    }
     if (
       looksLikeMomentSupportQuestion(content) ||
       isIncompleteMomentSupportLeadSentence(content)
@@ -473,6 +480,7 @@ export function isScenarioModalEligibleScenarioQuestionPrompt(text: string | nul
   if (looksLikeScenarioCSophiePerspectiveQuestion(raw)) return true;
   if (looksLikeMoment4OrientationQuestion(raw)) return true;
   if (looksLikeMomentSupportQuestion(raw)) return true;
+  if (looksLikeMomentSupportNoSituationHypothetical(raw)) return true;
   if (looksLikeMomentSupportConditionalProbe(raw)) return true;
   if (isScenarioModalFollowUpProbe(raw)) return false;
   if (isScenarioModalExcludedAssistantPrompt(raw)) return false;
@@ -538,6 +546,16 @@ export function resolveScenarioModalDisplayParts(
   const rawBody = (body ?? '').trim();
   if (!rawBody) {
     return { transcript: '', footerQuestion: null };
+  }
+
+  // Personal support prompts are the whole card. A period before the question must not
+  // split them into a vignette plus a shorter footer than the spoken line.
+  if (
+    looksLikeMomentSupportQuestion(rawBody) ||
+    looksLikeMomentSupportNoSituationHypothetical(rawBody) ||
+    looksLikeMomentSupportConditionalProbe(rawBody)
+  ) {
+    return { transcript: rawBody, footerQuestion: null };
   }
 
   const explicitPrompt = (prompt ?? '').trim();

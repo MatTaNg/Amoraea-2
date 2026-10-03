@@ -23,6 +23,7 @@ import {
   isAnsweringMoment4SpecificityFollowUp,
   looksLikeMoment4SpecificityFollowUpEcho,
   needsMoment4SpecificityFollowUp,
+  shouldAskCommitmentHypotheticalFallback,
 } from '@features/aria/moment4SpecificityFollowUp';
 import { deliverMoment4CommitmentOrientationProbe } from '@features/aria/deliverMoment4CommitmentOrientationProbe';
 import { deliverMoment4CommitmentThresholdProbe } from '@features/aria/deliverMoment4CommitmentThresholdProbe';
@@ -162,6 +163,7 @@ export async function runPreClaudeMoment4SpecificityGate(
     userAnswerText: trimmed,
     orientationInTranscript,
     priorTranscript: messagesToUse.slice(0, -1),
+    commitmentFallbackShouldFire: shouldAskCommitmentHypotheticalFallback(trimmed),
   });
   const moment4UserExplicitPass = isExplicitPassForMoment4CommitmentFollowUp(trimmed);
   const moment4SpecificityProbePending =
@@ -183,7 +185,8 @@ export async function runPreClaudeMoment4SpecificityGate(
     moment4CommitmentFollowUpBaseEligible &&
     !moment4UserExplicitPass &&
     !moment4SpecificityProbePending &&
-    !looksLikeIncompleteCutOffUserAnswer(trimmed);
+    (!looksLikeIncompleteCutOffUserAnswer(trimmed) ||
+      shouldAskCommitmentHypotheticalFallback(trimmed));
   const moment4OrientationFollowUpAlreadyInSession = orientationInTranscript;
   const moment4ThresholdFollowUpAlreadyInSession =
     deps.moment4ThresholdProbeAskedRef.current ||

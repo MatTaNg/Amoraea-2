@@ -47,12 +47,24 @@ export function evaluateMoment4RelationshipType(text: string): {
 export const MOMENT_4_GRUDGE_QUESTION_TEXT =
   "Think of someone you've had a really hard time with — maybe a falling out, a grudge, or just someone who got under your skin. Tell me what happened there, and where things stand now." as const;
 
-/** Client-injected Moment 4 commitment-threshold follow-up (verbatim ack + question). */
+/**
+ * Conditional exit-judgment fallback. Spoken without a "thanks for sharing" lead-in.
+ * Older transcripts may still contain that lead-in; detection accepts both.
+ */
 export const MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT =
-  'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
+  'At what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
 
+/** Spoken when they have no relationship to draw on. The card stays the question alone. */
+export const MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN =
+  'No problem. What about in general, at what point do you decide when a relationship is something to work through versus something you need to walk away from?' as const;
+
+/** Primary autobiographical commitment question — investment reasoning only, no stay-or-leave fork. */
 export const MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT =
-  'Think of a relationship you cared about — when things got difficult, what made you keep working on it rather than walking away?' as const;
+  'Think of a relationship you had in the past. When things got difficult, what made you keep investing in it?' as const;
+
+/** Spoken after the grudge answer. Card stays the question alone. */
+export const MOMENT_4_COMMITMENT_ORIENTATION_FROM_GRUDGE_SPOKEN =
+  'Got it. Think of a relationship you had in the past. When things got difficult, what made you keep investing in it?' as const;
 
 /** Show-scenario card body for the commitment-orientation follow-up (question only). */
 export const MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY =
@@ -62,6 +74,14 @@ export const MOMENT_SUPPORT_QUESTION_TEXT =
   'Think of a time when a partner, or someone you care about, heard some bad news, needed support from you, or was really stressed. What happened, and what did you do?' as const;
 
 export const MOMENT_SUPPORT_QUESTION_CARD_BODY = MOMENT_SUPPORT_QUESTION_TEXT;
+
+/** Asked when the participant has no lived support example to draw on. */
+export const MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT =
+  'If someone close to you was stressed and needed your support, what would you do?' as const;
+
+/** Short receipt, then the same question the scenario modal shows. */
+export const MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_SPOKEN =
+  `No problem. ${MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT}` as const;
 
 export const MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT =
   'How did you know what kind of support they needed from you?' as const;
@@ -75,6 +95,8 @@ function normalizeProbeCompare(text: string): string {
 export function looksLikeMoment4OrientationQuestion(text: string): boolean {
   const t = normalizeProbeCompare(text);
   return (
+    t.includes('what made you keep investing in it') ||
+    (t.includes('relationship you had in the past') && t.includes('keep investing')) ||
     t.includes('what made you keep working on it rather than walking away') ||
     (t.includes('relationship you cared about') && t.includes('keep working on it')) ||
     t.includes('what made you keep investing in the relationship rather than pulling away') ||
@@ -95,6 +117,10 @@ export function isIncompleteMoment4OrientationLeadSentence(text: string): boolea
   ) {
     return true;
   }
+  if (/\bthink of a relationship you had in the past\b/.test(low) && !/\bkeep investing\b/.test(low)) {
+    return true;
+  }
+  if (/\bwhat made you keep investing in it\b/.test(low)) return !/\?\s*$/.test(t);
   if (/\bwhat made you keep investing\b/.test(low)) return !/\?\s*$/.test(t);
   if (
     /\bkeep investing in the relationship\b/.test(low) &&
@@ -143,6 +169,63 @@ export function looksLikeMomentSupportConditionalProbe(text: string): boolean {
   return t.includes('how did you know what kind of support they needed');
 }
 
+export function looksLikeMomentSupportNoSituationHypothetical(text: string): boolean {
+  const t = normalizeProbeCompare(text);
+  if (!t) return false;
+  if (t === normalizeProbeCompare(MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT)) return true;
+  const closeAndStressed =
+    /\bsomeone close to you\b/.test(t) &&
+    /\bstressed\b/.test(t) &&
+    /\b(needed your support|needed their support)\b/.test(t);
+  if (!closeAndStressed) return false;
+  return /\bwhat would you do\b/.test(t) || /\bhow would you respond\b/.test(t);
+}
+
+/**
+ * Participant cannot offer a lived support example ("I don't have a situation").
+ * A longer answer that already describes what they did is a story, not a missing example.
+ */
+export function userLacksLivedSupportSituation(text: string): boolean {
+  const t = normalizeInterviewTypography(text ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  if (!t) return false;
+  const words = t.split(/\s+/).filter(Boolean);
+  const absence =
+    /\b(?:i )?(?:don'?t|do not|dont) have (?:a |any |the )?(?:situation|sitation|example|story|time)\b/.test(
+      t,
+    ) ||
+    (/\b(?:don'?t|do not|dont) have one\b/.test(t) && words.length <= 12) ||
+    /\b(?:no|not a|not any) (?:real |specific |particular )?(?:situation|sitation|example)\b/.test(t) ||
+    /\b(?:never|haven'?t|have not) (?:really )?(?:had|been in) (?:a |that |this )(?:situation|sitation|example)\b/.test(
+      t,
+    ) ||
+    /\b(?:can'?t|cannot|couldn'?t) (?:really )?(?:think of|recall|remember) (?:a |any )?(?:situation|sitation|time|example|one)\b/.test(
+      t,
+    ) ||
+    (words.length <= 12 &&
+      (/\b(?:can'?t|cannot|couldn'?t) (?:really )?(?:think of|recall|remember) (?:anyone|anybody|any one)\b/.test(
+        t,
+      ) ||
+        /\b(?:can'?t|cannot|couldn'?t) (?:really )?(?:think of|recall|remember) any[.!?…]*$/.test(t))) ||
+    /\bnothing comes to mind\b/.test(t) ||
+    /\b(?:don'?t|do not) (?:really )?have anything like that\b/.test(t) ||
+    /\bno one (?:has )?(?:ever )?(?:needed my support|been stressed)\b/.test(t) ||
+    /\b(?:haven'?t|have not|never) had (?:that|this) happen\b/.test(t) ||
+    /\bnot (?:really )?(?:been in|had) (?:that|a|this) situation\b/.test(t) ||
+    /\b(?:i )?haven'?t (?:really )?experienced that\b/.test(t) ||
+    /\bthat hasn'?t (?:really )?happened(?: to me)?\b/.test(t) ||
+    /\bno situation (?:like that|comes to mind)\b/.test(t);
+  if (!absence) return false;
+  const describesResponse =
+    /\b(?:i )?(?:listened|hugged|called|texted|showed up|sat with|talked|comforted|helped|brought|asked them|gave them|checked in)\b/.test(
+      t,
+    );
+  if (describesResponse) return false;
+  return true;
+}
+
 export function transcriptIncludesAssistantMatch(
   msgs: ReadonlyArray<{ role: string; content?: string | null }>,
   matcher: (text: string) => boolean,
@@ -169,7 +252,9 @@ export function looksLikeNeedRecognitionInSupportAnswer(text: string): boolean {
   return (
     /\bi asked\b/.test(t) ||
     /\bjust asked\b/.test(t) ||
-    /\basked (them|her|him|you)\b/.test(t) ||
+    /\b(?:ask|asked|asking)\s+(?:them|her|him|you)\b/.test(t) ||
+    /\b(?:ask|asked|asking)\s+(?:if|whether|how)\s+they\b/.test(t) ||
+    /\b(?:ask|asked|asking)\s+what\s+(?:happened|they\s+needed|was\s+wrong)\b/.test(t) ||
     /\bthey (told|said) me\b/.test(t) ||
     /\bcould tell\b/.test(t) ||
     /\bpicked up on\b/.test(t) ||
@@ -192,7 +277,10 @@ export function shouldAdvanceToMoment5AfterSupportAnswer(params: {
   if (looksLikeMomentSupportConditionalProbe(params.lastAssistantContent)) {
     return looksLikeNeedRecognitionInSupportAnswer(user) || looksLikeAssessableSupportAnswer(user);
   }
-  if (looksLikeMomentSupportQuestion(params.lastAssistantContent)) {
+  if (
+    looksLikeMomentSupportQuestion(params.lastAssistantContent) ||
+    looksLikeMomentSupportNoSituationHypothetical(params.lastAssistantContent)
+  ) {
     return looksLikeNeedRecognitionInSupportAnswer(user);
   }
   return false;
@@ -441,6 +529,9 @@ export function looksLikeMoment4ThresholdParaphraseInProgress(text: string): boo
 export function coerceMoment4ThresholdQuestionForTts(text: string): string {
   const t = (text ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+  if (t.toLowerCase() === MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN.toLowerCase()) {
+    return MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN;
+  }
   if (extractLeadingReflectionFromMoment4ThresholdProbe(t)) {
     return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
   }
@@ -450,10 +541,6 @@ export function coerceMoment4ThresholdQuestionForTts(text: string): string {
     looksLikeMoment4ThresholdParaphraseInProgress(t) ||
     isIncompleteMoment4ThresholdLeadSentence(t)
   ) {
-    const ack = extractBriefAckBeforeMoment4ThresholdProbe(t);
-    if (ack) {
-      return `${ack}. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`;
-    }
     return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
   }
   return t;
@@ -597,8 +684,25 @@ export function shouldForceMoment4OrientationProbe(params: {
   return true;
 }
 
+export type CommitmentResponseSource = 'autobiographical' | 'hypothetical_fallback';
+
 /**
- * After a substantive answer to the keep-investing orientation question, the walk-away threshold follow-up may fire.
+ * Which commitment path produced the scored response.
+ * Fallback wins when the walk-away question was actually asked.
+ */
+export function resolveCommitmentResponseSource(
+  messages: ReadonlyArray<{ role: string; content?: string | null }>,
+): CommitmentResponseSource | null {
+  if (transcriptIncludesMoment4ThresholdAssistant(messages)) return 'hypothetical_fallback';
+  if (transcriptIncludesAssistantMatch(messages, looksLikeMoment4OrientationQuestion)) {
+    return 'autobiographical';
+  }
+  return null;
+}
+
+/**
+ * Walk-away fallback immediately after the keep-investing question.
+ * Fires only when they say they have no relationship to draw on, and not after support has started.
  */
 export function shouldForceMoment4ThresholdProbe(params: {
   probeAlreadyAsked: boolean;
@@ -607,20 +711,29 @@ export function shouldForceMoment4ThresholdProbe(params: {
   userAnswerText: string;
   orientationInTranscript: boolean;
   priorTranscript?: ReadonlyArray<{ role: string; content?: string | null }>;
+  /** From {@link evaluateMoment4SpecificityProbe} with context `commitment_orientation`. */
+  commitmentFallbackShouldFire?: boolean;
 }): boolean {
   if (!params.isMoment4 || params.probeAlreadyAsked) return false;
   if (!params.orientationInTranscript) return false;
+  if (params.commitmentFallbackShouldFire !== true) return false;
   if (looksLikeGoBackToPreviousScenarioRequest(params.userAnswerText)) return false;
-  if (looksLikeIncompleteCutOffUserAnswer(params.userAnswerText)) return false;
   if (looksLikeMoment4ThresholdQuestion(params.lastAssistantContent)) return false;
   const prior = params.priorTranscript ?? [];
+  if (
+    transcriptIncludesAssistantMatch(prior, looksLikeMomentSupportQuestion) ||
+    transcriptIncludesAssistantMatch(prior, looksLikeMomentSupportConditionalProbe) ||
+    looksLikeMomentSupportQuestion(params.lastAssistantContent) ||
+    looksLikeMomentSupportConditionalProbe(params.lastAssistantContent)
+  ) {
+    return false;
+  }
   if (
     !looksLikeMoment4OrientationQuestion(params.lastAssistantContent) &&
     !isAnsweringFirstUserTurnAfterMoment4Orientation(prior)
   ) {
     return false;
   }
-  if (!looksLikeAssessableOrientationAnswer(params.userAnswerText)) return false;
   return true;
 }
 
@@ -643,7 +756,10 @@ function transcriptHasSubstantiveUserAnswerAfterMoment4Grudge(
   });
 }
 
-/** True when `msgs` contains an orientation assistant line and no user message appears after the last such line. */
+/**
+ * True when the orientation question is in the transcript and no assessable user answer
+ * has appeared after it yet. A later substantive answer means this turn is no longer that reply.
+ */
 export function isAnsweringFirstUserTurnAfterMoment4Orientation(
   msgsPriorToCurrentUser: ReadonlyArray<{ role: string; content?: string | null }>,
 ): boolean {
@@ -660,7 +776,7 @@ export function isAnsweringFirstUserTurnAfterMoment4Orientation(
     if (m.role !== 'user') continue;
     const text = (m.content ?? '').trim();
     if (!text) continue;
-    if (!looksLikeAssessableOrientationAnswer(text)) {
+    if (looksLikeAssessableOrientationAnswer(text)) {
       return false;
     }
   }
@@ -707,7 +823,6 @@ export function resolveMoment4ConfusionRepeatReplayFallback(
   }
   if (options.moment4ThresholdProbeAsked) return null;
   if (transcriptIncludesMoment4ThresholdAssistant(messages)) return null;
-  if (!transcriptHasSubstantiveUserAnswerAfterMoment4Orientation(messages)) return null;
-  return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT;
+  return null;
 }
 

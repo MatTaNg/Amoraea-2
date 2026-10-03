@@ -20,13 +20,19 @@ describe('prependBriefAckIfMissingBeforeMove', () => {
     const draft = 'What do you think James could have done differently to help Sarah feel appreciated?';
     const user = 'I think he should have listened before offering solutions.';
     const out = prependBriefAckIfMissingBeforeMove(draft, user, []);
-    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.|I'm with you\.)/);
+    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.)/);
     expect(out).toContain('What do you think James');
   });
 
   it('does not double-ack when the model already opened with a receipt', () => {
     const draft = "Makes sense. What if you were Ryan — how would you repair this situation?";
     const out = prependBriefAckIfMissingBeforeMove(draft, 'I would apologize first.', []);
+    expect(out).toBe(draft);
+  });
+
+  it('does not prepend an affirming ack when the user cannot think of an example', () => {
+    const draft = 'If someone close to you was stressed and needed your support, what would you do?';
+    const out = prependBriefAckIfMissingBeforeMove(draft, "I can't think of one.", []);
     expect(out).toBe(draft);
   });
 
@@ -44,7 +50,7 @@ describe('prependBriefAckIfMissingBeforeMove', () => {
       'I would apologize and listen to how Emma feels.',
       [],
     );
-    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.|I'm with you\.)/);
+    expect(out).toMatch(/^(Got it\.|Makes sense\.|That makes a lot of sense\.)/);
   });
 
   it('does not prepend ack for off-topic non-English replies', () => {

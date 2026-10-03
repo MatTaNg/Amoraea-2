@@ -33,6 +33,11 @@ import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@data/supabase/client';
 import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
 import { PostInterviewLaunchReferralCard } from '@features/referrals/PostInterviewLaunchReferralCard';
+import { finalizeGateResultAfterPsychometrics } from '@features/onboarding/finalizeGateResultAfterPsychometrics';
+import {
+  fetchUserInterviewCompletionStatus,
+  PSYCHOMETRICS_ENABLED,
+} from '@features/psychometrics/interviewCompletionStatus';
 
 const ACCENT = '#3b82f6';
 const GLASS_BG = 'rgba(255,255,255,0.06)';
@@ -98,6 +103,23 @@ export const PostInterviewLaunchScreen: React.FC<{
   useEffect(() => {
     loadWebFontsOnce();
   }, []);
+
+  useEffect(() => {
+    if (!userId || !PSYCHOMETRICS_ENABLED) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const status = await fetchUserInterviewCompletionStatus(userId);
+        if (cancelled || !status.psychometricsCompletedAt || status.gateResultFinalizedAt) return;
+        await finalizeGateResultAfterPsychometrics(userId);
+      } catch (error) {
+        if (__DEV__) console.warn('[PostInterviewLaunch] gate finalization', error);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
 
   useEffect(() => {
     if (!userId) return;
@@ -221,7 +243,7 @@ export const PostInterviewLaunchScreen: React.FC<{
           resizeMode="contain"
         />
       </View>
-      <Text style={styles.h1}>Congratulations on completing your assessment</Text>
+      <Text style={styles.h1}>Congratulations on completing your assessment!</Text>
       <Text style={styles.sub}>
         You&apos;re part of an early cohort helping us refine Amoraea before launch.
       </Text>
@@ -275,11 +297,6 @@ export const PostInterviewLaunchScreen: React.FC<{
                 />
               )}
             </Pressable>
-            {!profileReadyForMatching ? (
-              <Text style={styles.profileOnboardingHint}>
-                Photos, match preferences, and short questionnaires — finish now and be ready when we launch.
-              </Text>
-            ) : null}
           </>
         ) : (
           <View
@@ -310,7 +327,10 @@ export const PostInterviewLaunchScreen: React.FC<{
 
 const styles = StyleSheet.create({
   logoWrap: {
+    width: '100%',
+    alignSelf: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
     marginBottom: 4,
   },
   logoImage: {

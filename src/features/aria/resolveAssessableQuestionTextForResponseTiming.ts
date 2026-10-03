@@ -15,9 +15,8 @@ import {
 } from '@features/aria/moment4ProbeLogic';
 import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/probeAndScoringUtils';
 import {
-  looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
-  SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+  SCENARIO_B_JAMES_REPAIR_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 import {
   isScenarioCRepairAssistantPrompt,
@@ -25,8 +24,12 @@ import {
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
 } from '@features/aria/scenarioCPromptDetection';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
+import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY } from '@features/aria/scenarioAContemptProbeCopy';
+import {
+  looksLikeScenarioARepairQuestion,
+  resolveInterviewQuestionRepeatTtsText,
+} from '@features/aria/scenarioARepairQuestionHelpers';
 import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from '@features/aria/moment5TranscriptHelpers';
-import { resolveInterviewQuestionRepeatTtsText } from '@features/aria/scenarioARepairQuestionHelpers';
 
 /**
  * Narrow bundled assistant TTS (handoffs, reflections + pivot + question) to the assessable
@@ -59,6 +62,9 @@ export function resolveAssessableQuestionTextForResponseTiming(
   ) {
     return MOMENT_4_GRUDGE_QUESTION_TEXT;
   }
+  if (looksLikeScenarioARepairQuestion(t)) {
+    return SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+  }
   if (looksLikeScenarioCSophiePerspectiveQuestion(t)) {
     return SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE;
   }
@@ -66,7 +72,7 @@ export function resolveAssessableQuestionTextForResponseTiming(
     return SCENARIO_C_REPAIR_QUESTION_CANONICAL;
   }
   if (looksLikeScenarioBRepairAsJamesQuestion(t)) {
-    return SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL;
+    return SCENARIO_B_JAMES_REPAIR_CANONICAL;
   }
 
   const extracted = extractScenarioModalQuestionFromAssistantText(t);

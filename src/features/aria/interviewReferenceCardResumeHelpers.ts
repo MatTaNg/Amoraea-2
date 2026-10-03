@@ -31,7 +31,9 @@ import {
   looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
   looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportNoSituationHypothetical,
   looksLikeMomentSupportQuestion,
+  MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT,
   MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
   MOMENT_SUPPORT_QUESTION_CARD_BODY,
 } from '@features/aria/moment4ProbeLogic';
@@ -72,7 +74,7 @@ export type Moment4ThresholdReferenceCardDeps = {
 };
 
 /** Show scenario card: swap grudge body for a Moment 4 personal question in the card body. */
-function applyMoment4PersonalQuestionReferenceCard(
+export function applyMoment4PersonalQuestionReferenceCard(
   deps: Moment4ThresholdReferenceCardDeps,
   cardBody: string,
 ): void {
@@ -175,6 +177,9 @@ export function resolveLastMoment4QuestionCardBodyFromTranscript(
     if (looksLikeMomentSupportConditionalProbe(raw)) {
       return MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY;
     }
+    if (looksLikeMomentSupportNoSituationHypothetical(raw)) {
+      return MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT;
+    }
     if (looksLikeMomentSupportQuestion(raw)) {
       return MOMENT_SUPPORT_QUESTION_CARD_BODY;
     }
@@ -202,6 +207,12 @@ function moment4ReferenceCardRank(text: string): number {
     looksLikeMomentSupportConditionalProbe(t)
   ) {
     return 6;
+  }
+  if (
+    t === MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT ||
+    looksLikeMomentSupportNoSituationHypothetical(t)
+  ) {
+    return 5;
   }
   if (t === MOMENT_SUPPORT_QUESTION_CARD_BODY || looksLikeMomentSupportQuestion(t)) {
     return 5;

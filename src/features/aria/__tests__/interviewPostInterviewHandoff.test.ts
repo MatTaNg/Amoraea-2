@@ -29,12 +29,24 @@ describe('replaceWithStandardApplicantPostInterviewHandoffForUser', () => {
     resetCompletionScoringSession();
   });
 
-  it('navigates to InterviewComplete even when handoff was already marked', () => {
+  it('navigates to InterviewComplete once and skips later handoffs', () => {
+    const replace = jest.fn();
+    replaceWithStandardApplicantPostInterviewHandoffForUser({ replace }, 'user-1', {
+      source: 'test_first_handoff',
+    });
+    replaceWithStandardApplicantPostInterviewHandoffForUser({ replace }, 'user-1', {
+      source: 'test_duplicate_handoff',
+    });
+    expect(replace).toHaveBeenCalledTimes(1);
+    expect(replace).toHaveBeenCalledWith('InterviewComplete', { userId: 'user-1' });
+  });
+
+  it('does not navigate again when a handoff was already marked', () => {
     markPsychometricsInterviewHandoffIssued();
     const replace = jest.fn();
     replaceWithStandardApplicantPostInterviewHandoffForUser({ replace }, 'user-1', {
       source: 'test_duplicate_handoff',
     });
-    expect(replace).toHaveBeenCalledWith('InterviewComplete', { userId: 'user-1' });
+    expect(replace).not.toHaveBeenCalled();
   });
 });

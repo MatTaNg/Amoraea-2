@@ -56,20 +56,29 @@ export function replaceWithStandardApplicantPostInterviewHandoffForUser(
   }
   if (PSYCHOMETRICS_ENABLED) {
     const duplicateHandoff = wasPsychometricsInterviewHandoffIssued();
-    if (!duplicateHandoff) {
-      markPsychometricsInterviewHandoffIssued();
-      const attemptId = meta?.attemptId;
-      if (typeof attemptId === 'string' && attemptId.length > 0) {
-        triggerAsyncAiReasoningPipeline(userId, attemptId);
-      } else {
-        void fetchMostRecentCompletedInterviewAttemptId(userId).then((resolvedId) => {
-          if (resolvedId) triggerAsyncAiReasoningPipeline(userId, resolvedId);
-        });
-      }
+    if (duplicateHandoff) {
+      void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
+        destination: 'InterviewComplete',
+        skipped_duplicate: true,
+        userId,
+        interviewSessionId: meta?.interviewSessionId ?? null,
+        source: meta?.source ?? 'standard_handoff_psychometrics_enabled',
+        attemptId: meta?.attemptId ?? null,
+      });
+      return;
+    }
+    markPsychometricsInterviewHandoffIssued();
+    const attemptId = meta?.attemptId;
+    if (typeof attemptId === 'string' && attemptId.length > 0) {
+      triggerAsyncAiReasoningPipeline(userId, attemptId);
+    } else {
+      void fetchMostRecentCompletedInterviewAttemptId(userId).then((resolvedId) => {
+        if (resolvedId) triggerAsyncAiReasoningPipeline(userId, resolvedId);
+      });
     }
     void remoteLog('[RESULTS_SCREEN_TRANSITION]', {
       destination: 'InterviewComplete',
-      skipped_duplicate: duplicateHandoff,
+      skipped_duplicate: false,
       userId,
       interviewSessionId: meta?.interviewSessionId ?? null,
       source: meta?.source ?? 'standard_handoff_psychometrics_enabled',

@@ -18,6 +18,7 @@ import {
   BackHandler,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Image as ExpoImage } from 'expo-image';
@@ -150,6 +151,7 @@ import {
   EditProfileCompatibilityDeepDiveView,
 } from '@/screens/profile/editProfile/EditProfileCompatibilityDeepDiveView';
 import type { LifeDomainId } from '@/shared/constants/lifeDomainOnboardingQuestions';
+import { EssentialsLifeDomainFields } from '@/screens/profile/editProfile/EssentialsLifeDomainFields';
 import {
   EditProfileTypologyView,
 } from '@/screens/profile/editProfile/EditProfileTypologyView';
@@ -303,7 +305,7 @@ function resolvePhotoUrlsFromProfile(pb: Record<string, unknown>): string[] {
     pb.avatar_url,
     pb.avatarUrl,
   ].find((x): x is string => typeof x === 'string' && isRenderablePhotoUri(x));
-  if (primaryPick) {
+  if (primaryPick && urls.length < 6) {
     const p = primaryPick.trim();
     if (!urls.some((u) => u.trim() === p)) urls = [p, ...urls];
   }
@@ -316,7 +318,7 @@ function resolvePhotoUrlsFromProfile(pb: Record<string, unknown>): string[] {
       seen.add(u);
       return true;
     })
-    .slice(0, 12);
+    .slice(0, 6);
 }
 
 function profileToTypology(p: Record<string, unknown>): TypologyPickerValue {
@@ -1215,9 +1217,11 @@ export const DatingProfileEditScreen: React.FC<{
       <View style={styles.page}>
       <ScrollView
         ref={scrollRef}
+        style={styles.pageScroll}
         contentContainerStyle={[styles.scroll, styles.scrollWithTabBar]}
         keyboardShouldPersistTaps="handled"
       >
+      <View style={styles.scrollColumn}>
         {activeTab === 'essentials' ? (
               <>
                 <EditProfileTabHeader
@@ -1428,6 +1432,16 @@ export const DatingProfileEditScreen: React.FC<{
               value={asStr(draft.educationLevel)}
               options={EDUCATION_LEVEL_CHOICES}
               onValueChange={setScalar('educationLevel')}
+            />
+
+            <EssentialsLifeDomainFields
+              answers={lifeDomainAnswers}
+              onChange={(domainId, questionId, value) => {
+                setLifeDomainAnswers((prev) => ({
+                  ...prev,
+                  [domainId]: { ...(prev[domainId] ?? {}), [questionId]: value },
+                }));
+              }}
             />
 
             <EditProfileSubsectionTitle description={ONBOARDING_PROFILE_PROMPTS_SETUP_LEAD}>
@@ -1695,6 +1709,7 @@ export const DatingProfileEditScreen: React.FC<{
                   lifeDomainsSumOk={lifeDomainsSumOk}
                   openQuestionsDomainId={openLifeDomainQuestionsId}
                   onOpenQuestionsDomainIdChange={setOpenLifeDomainQuestionsId}
+                  userId={effectiveUserId}
                 />
                 <EditProfileTypologyView
                   first={false}
@@ -1708,6 +1723,7 @@ export const DatingProfileEditScreen: React.FC<{
             ) : null}
 
         <Text style={styles.mutedSmall}>Signed in as {user?.email ?? '—'}</Text>
+      </View>
       </ScrollView>
       <EditProfileTabBar active={activeTab} onChange={setActiveTab} />
       </View>
@@ -1754,14 +1770,28 @@ const styles = StyleSheet.create({
   },
   page: {
     flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  pageScroll: {
+    flex: 1,
+    minHeight: 0,
   },
   scroll: {
-    paddingHorizontal: 22,
     paddingTop: 12,
     paddingBottom: 48,
-    maxWidth: 560,
+    ...Platform.select({
+      web: { minHeight: 'auto' },
+    }),
+  },
+  scrollColumn: {
     width: '100%',
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
+    paddingHorizontal: 22,
+    ...Platform.select({
+      web: { minHeight: 'auto' },
+    }),
   },
   scrollWithTabBar: {
     paddingBottom: 24,

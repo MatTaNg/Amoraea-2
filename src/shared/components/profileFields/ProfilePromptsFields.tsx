@@ -16,10 +16,8 @@ import type { ProfilePromptAnswer } from '@domain/models/Profile';
 import {
   PROFILE_PROMPT_CATEGORIES,
   MAX_PROFILE_PROMPTS,
-  PROFILE_PROMPT_ANSWER_MIN_LENGTH,
   getPromptById,
   isRequiredEligibleCategory,
-  promptAnswerHasMinimumLength,
 } from '@/features/profile/profilePromptsLibrary';
 import {
   wouldRemovalBreakRequiredCategoryFloor,
@@ -145,14 +143,8 @@ export const ProfilePromptsFields: React.FC<ProfilePromptsFieldsProps> = ({
 
   const activeCategory = PROFILE_PROMPT_CATEGORIES.find((c) => c.id === activeCategoryId);
   const activePrompt = activePromptId ? getPromptById(activePromptId) : undefined;
-  const trimmedCount = draftAnswer.trim().length;
-  const requiresMinLength = Boolean(
-    activeCategoryId && promptAnswerHasMinimumLength(activeCategoryId),
-  );
-  const answerTooShort =
-    requiresMinLength && trimmedCount < PROFILE_PROMPT_ANSWER_MIN_LENGTH;
   const canSaveAnswer =
-    draftAnswer.trim().length > 0 && !answerTooShort && Boolean(activePromptId && activeCategoryId);
+    draftAnswer.trim().length > 0 && Boolean(activePromptId && activeCategoryId);
 
   return (
     <View style={styles.root}>
@@ -309,11 +301,6 @@ export const ProfilePromptsFields: React.FC<ProfilePromptsFieldsProps> = ({
                       });
                     }}
                   />
-                  {requiresMinLength ? (
-                    <Text style={[styles.counter, answerTooShort && styles.counterError]}>
-                      {trimmedCount}/{PROFILE_PROMPT_ANSWER_MIN_LENGTH} min
-                    </Text>
-                  ) : null}
                   <Pressable
                     onPress={commitAnswer}
                     disabled={!canSaveAnswer}
@@ -448,10 +435,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 22,
   },
-  counter: { fontSize: 12, color: theme.colors.textSecondary, textAlign: 'right' },
-  counterError: { color: '#f87171' },
   saveBtn: {
-    marginTop: 4,
+    marginTop: 8,
     backgroundColor: theme.colors.primary,
     borderRadius: 12,
     paddingVertical: 14,

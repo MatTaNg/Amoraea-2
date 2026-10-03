@@ -4,6 +4,7 @@ import {
   CONFLICT_CATASTROPHIZING_ASSESSMENT_VERSION,
   EXPERIMENTAL_INSTRUMENT_META,
   RELATIONSHIP_GROWTH_BELIEFS_ASSESSMENT_VERSION,
+  SEXUAL_COMMUNICATION_COMFORT_ASSESSMENT_VERSION,
 } from '@config/algorithmVersions';
 
 export type PsychometricQuestion = {
@@ -791,6 +792,56 @@ export const ASSESSMENTS = {
       reverseItems: [],
     },
   },
+
+  /**
+   * Pre-interview sexual communication comfort. Item wording matches the historical
+   * post-interview typology instrument; results persist on distinct columns and
+   * must not be scored from psychometrics_sexual_communication_*.
+   */
+  sexual_communication_comfort: {
+    id: 'sexual_communication_comfort',
+    name: 'Sexual Communication',
+    displayName: 'Sexual Communication',
+    description: 'How comfortable are you communicating about the following topics with a partner?',
+    estimatedMinutes: 1,
+    ...EXPERIMENTAL_INSTRUMENT_META,
+    assessmentVersion: SEXUAL_COMMUNICATION_COMFORT_ASSESSMENT_VERSION,
+    scale: {
+      min: 1,
+      max: 5,
+      labels: {
+        1: 'Very Uncomfortable',
+        2: 'Uncomfortable',
+        3: 'Neutral',
+        4: 'Comfortable',
+        5: 'Very Comfortable',
+      },
+    },
+    questions: [
+      { id: 1, text: 'Telling a partner what you enjoy sexually.', reverse: false },
+      { id: 2, text: 'Asking a partner about their sexual preferences.', reverse: false },
+      { id: 3, text: "Telling a partner when something doesn't feel good.", reverse: false },
+      { id: 4, text: 'Saying no to a sexual request from a partner.', reverse: false },
+      { id: 5, text: 'Bringing up sexual concerns or dissatisfactions.', reverse: false },
+      { id: 6, text: "Discussing what you are and aren't willing to try sexually.", reverse: false },
+      { id: 7, text: 'Expressing what emotional experience you want from sex.', reverse: false },
+      { id: 8, text: 'Discussing sexual health topics with a partner.', reverse: false },
+      {
+        id: 9,
+        text: 'Initiating a conversation about changing something in your sexual relationship.',
+        reverse: false,
+      },
+      {
+        id: 10,
+        text: 'Telling a partner what you need to feel emotionally safe during intimacy.',
+        reverse: false,
+      },
+    ],
+    scoring: {
+      method: 'mean',
+      reverseItems: [] as number[],
+    },
+  },
 } as const satisfies Record<string, AssessmentDef>;
 
 /** Retired pre-interview instruments — preserved for legacy scoring and admin display only. */
@@ -895,13 +946,17 @@ export const RETIRED_ASSESSMENTS = {
 
 export type RetiredAssessmentId = keyof typeof RETIRED_ASSESSMENTS;
 
-/** Post-interview instruments — never included in {@link ASSESSMENT_ORDER}. */
+/**
+ * Historical post-interview typology instrument. Readable for stored
+ * psychometrics_sexual_communication_* rows. New collection is
+ * {@link ASSESSMENTS.sexual_communication_comfort}.
+ */
 export const POST_INTERVIEW_ASSESSMENTS = {
   sexual_communication: {
     id: 'sexual_communication',
     name: 'Sexual Communication',
     description:
-      'How comfortable are you communicating about the following topics with a partner? Your answers are only used to improve your matches and are never shown to other users.',
+      'Historical typology item set. New answers are collected as pre-interview sexual_communication_comfort.',
     estimatedMinutes: 3,
     scale: {
       min: 1,
@@ -972,6 +1027,7 @@ export const ASSESSMENT_ORDER: AssessmentId[] = [
   'conflict_catastrophizing',
   'rses',
   'amoraea_entitlement_v1',
+  'sexual_communication_comfort',
 ];
 
 /** Total question count across all instruments in {@link ASSESSMENT_ORDER}. */
@@ -1061,6 +1117,7 @@ export const ASSESSMENT_HIGHER_SCORE_IS_FAVORABLE: Record<string, boolean> = {
   gasp: true,
   sd3_narcissism: false,
   sexual_communication: true,
+  sexual_communication_comfort: true,
 };
 
 /** True when an item is negatively keyed (reverse-scored): agreement indicates pathology. */
@@ -1272,7 +1329,8 @@ export function scoreAssessment(
     assessmentId === 'rfq' ||
     assessmentId === 'amoraea_entitlement_v1' ||
     assessmentId === 'relationship_growth_beliefs' ||
-    assessmentId === 'conflict_catastrophizing'
+    assessmentId === 'conflict_catastrophizing' ||
+    assessmentId === 'sexual_communication_comfort'
   ) {
     const total = meanOfItems(
       assessment,

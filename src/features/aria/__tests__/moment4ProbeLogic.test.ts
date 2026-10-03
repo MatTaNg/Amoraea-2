@@ -11,10 +11,11 @@ import {
   shouldAdvanceToMoment5AfterSupportAnswer,
   coerceMoment4ThresholdQuestionForTts,
   MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT,
-  MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
+  MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
   MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT,
+  MOMENT_SUPPORT_QUESTION_TEXT,
   shouldForceMoment4OrientationProbe,
   shouldForceMoment4ThresholdProbe,
   transcriptIncludesMoment4ThresholdAssistant,
@@ -79,11 +80,20 @@ describe('moment4ProbeLogic', () => {
     ).toBe(true);
   });
 
+  it('keeps the no-problem lead-in on the general commitment question', () => {
+    expect(coerceMoment4ThresholdQuestionForTts(MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN)).toBe(
+      MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN,
+    );
+    expect(looksLikeMoment4ThresholdQuestion(MOMENT_4_COMMITMENT_THRESHOLD_NO_RELATIONSHIP_SPOKEN)).toBe(
+      true,
+    );
+  });
+
   it('coerces unauthorized care-about work-through/walk-away paraphrase to canonical threshold', () => {
     const unauthorized =
       "Makes sense. If something like that happened with someone you care about — is that more the kind of thing you'd work through, or would you walk away?";
     expect(coerceMoment4ThresholdQuestionForTts(unauthorized)).toBe(
-      `Makes sense. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
     );
   });
 
@@ -100,7 +110,7 @@ describe('moment4ProbeLogic', () => {
     expect(isIncompleteMoment4ThresholdLeadSentence(truncated)).toBe(true);
     expect(looksLikeMoment4ThresholdQuestion(truncated)).toBe(false);
     expect(coerceMoment4ThresholdQuestionForTts(truncated)).toBe(
-      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
     );
   });
 
@@ -109,14 +119,14 @@ describe('moment4ProbeLogic', () => {
     expect(isIncompleteMoment4ThresholdLeadSentence(truncated)).toBe(true);
     expect(looksLikeMoment4ThresholdQuestion(truncated)).toBe(false);
     expect(coerceMoment4ThresholdQuestionForTts(truncated)).toBe(
-      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
     );
   });
 
   it('coerces complete model paraphrase to canonical threshold copy (session log)', () => {
     const paraphrase = "Got it. When do you decide it's worth working through versus walking away?";
     expect(coerceMoment4ThresholdQuestionForTts(paraphrase)).toBe(
-      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
     );
   });
 
@@ -125,7 +135,7 @@ describe('moment4ProbeLogic', () => {
       "Got it. When something like that happens — when someone you care about says something that cuts deep — where's your line between working through it or walking away from it?";
     expect(looksLikeMoment4ThresholdQuestion(paraphrase)).toBe(true);
     expect(coerceMoment4ThresholdQuestionForTts(paraphrase)).toBe(
-      `Got it. Thanks for sharing that. ${MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY}`,
+      MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_TEXT,
     );
   });
 
@@ -305,7 +315,7 @@ describe('moment4ProbeLogic', () => {
     ).toBe(false);
   });
 
-  it('forces threshold after assessable orientation answer', () => {
+  it('forces the walk-away fallback only when the commitment specificity check says so', () => {
     const orientationAnswer =
       'We kept working on it because we had built so much together and still believed we could repair things.';
     expect(
@@ -315,6 +325,17 @@ describe('moment4ProbeLogic', () => {
         lastAssistantContent: M4_ORIENTATION,
         userAnswerText: orientationAnswer,
         orientationInTranscript: true,
+        commitmentFallbackShouldFire: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldForceMoment4ThresholdProbe({
+        isMoment4: true,
+        probeAlreadyAsked: false,
+        lastAssistantContent: M4_ORIENTATION,
+        userAnswerText: "I can't think of one.",
+        orientationInTranscript: true,
+        commitmentFallbackShouldFire: true,
       })
     ).toBe(true);
     expect(
@@ -324,7 +345,37 @@ describe('moment4ProbeLogic', () => {
         lastAssistantContent: M4_ORIENTATION,
         userAnswerText: orientationAnswer,
         orientationInTranscript: true,
+        commitmentFallbackShouldFire: true,
       })
+    ).toBe(false);
+  });
+
+  it('does not ask the walk-away question after support has already started', () => {
+    const prior = [
+      { role: 'assistant', content: M4_ORIENTATION },
+      {
+        role: 'user',
+        content:
+          'We kept going because we had built so much together and I still believed we could repair things.',
+      },
+      { role: 'assistant', content: MOMENT_SUPPORT_QUESTION_TEXT },
+      {
+        role: 'user',
+        content:
+          "I'd like to know that I'm here for them, that I could support them if they'd like but try not to force it.",
+      },
+      { role: 'assistant', content: MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT },
+    ];
+    expect(
+      shouldForceMoment4ThresholdProbe({
+        isMoment4: true,
+        probeAlreadyAsked: false,
+        lastAssistantContent: MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT,
+        userAnswerText: 'I asked her.',
+        orientationInTranscript: true,
+        priorTranscript: prior,
+        commitmentFallbackShouldFire: true,
+      }),
     ).toBe(false);
   });
 
@@ -399,6 +450,11 @@ describe('moment4ProbeLogic', () => {
       expect(looksLikeNeedRecognitionInSupportAnswer('I asked her.')).toBe(true);
       expect(looksLikeNeedRecognitionInSupportAnswer('i asked her')).toBe(true);
       expect(looksLikeNeedRecognitionInSupportAnswer('I asked.')).toBe(true);
+      expect(
+        looksLikeNeedRecognitionInSupportAnswer(
+          'I think I would try to talk to them and maybe give them a hug and ask them how they feel and ask if they needed support from me and that support would look like listening and being present with them asking what happened.',
+        ),
+      ).toBe(true);
       expect(
         shouldAdvanceToMoment5AfterSupportAnswer({
           lastAssistantContent: MOMENT_SUPPORT_CONDITIONAL_PROBE_TEXT,

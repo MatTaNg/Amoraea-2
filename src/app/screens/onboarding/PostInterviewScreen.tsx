@@ -813,7 +813,6 @@ const styles = StyleSheet.create({
   },
   retakeSection: {
     width: '100%',
-    maxWidth: 440,
     alignSelf: 'center',
     marginTop: 28,
     paddingHorizontal: 4,

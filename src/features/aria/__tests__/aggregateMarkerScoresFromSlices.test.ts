@@ -247,23 +247,36 @@ describe('extractRepairSourceSignals', () => {
     const { scores } = aggregateMarkerScoresFromLabeledSlices(rows);
     expect(scores.repair).toBe(7);
     const sources = extractRepairSourceSignals(rows);
-    expect(sources.hypothetical_repair).toBe(9);
+    expect(sources.hypothetical_repair).toBe(8);
     expect(sources.autobiographical_repair).toBe(4);
-    expect(sources.spontaneous_repair).toBe(7);
+    expect(sources.spontaneous_repair).toBe(8);
     expect(sources.spontaneous_scenario_1).toBe(8);
     expect(sources.spontaneous_scenario_2).toBe(6);
+    expect(sources.contributor_moments.hypothetical_repair).toEqual(['scenario_1']);
     expect(sources.no_divergence_penalty).toBe(true);
-    expect(sources.hypothetical_minus_autobiographical).toBe(5);
+    expect(sources.hypothetical_minus_autobiographical).toBe(4);
     const detailed = aggregatePillarScoresWithCommitmentMergeDetailed(
       rows.map((r) => ({ pillarScores: r.pillarScores, keyEvidence: r.keyEvidence })),
     );
     expect(detailed.scores.repair).toBe(7);
-    expect(detailed.repairSourceSignals.hypothetical_minus_autobiographical).toBe(5);
+    expect(detailed.repairSourceSignals.hypothetical_minus_autobiographical).toBe(4);
+  });
+
+  it('does not reinterpret a stored v2 repair-source version as Scenario 1', () => {
+    const rows = [
+      labeled('scenario_1', { repair: 8 }, { repair: 'old spontaneous' }),
+      labeled('scenario_3', { repair: 9 }, { repair: 'old hypothetical' }),
+    ];
+    const historical = extractRepairSourceSignals(rows, 'repair_sources_v2_2026_08');
+    expect(historical.version).toBe('repair_sources_v2_2026_08');
+    expect(historical.hypothetical_repair).toBe(9);
+    expect(historical.contributor_moments.hypothetical_repair).toEqual(['scenario_3']);
+    expect(historical.spontaneous_scenario_1).toBe(8);
   });
 
   it('does not treat missing autobiographical as a zero gap', () => {
     const sources = extractRepairSourceSignals([
-      labeled('scenario_3', { repair: 8 }, { repair: 's3' }),
+      labeled('scenario_1', { repair: 8 }, { repair: 's1' }),
     ]);
     expect(sources.hypothetical_repair).toBe(8);
     expect(sources.autobiographical_repair).toBeNull();

@@ -10,6 +10,7 @@ import {
   resolveCheckingInBriefAckForInterview,
 } from '@features/aria/interviewCheckingInAck';
 import { looksLikeCheckingInSufficiencyAsk } from '@features/aria/metaCommentPatternScoring';
+import { userLacksLivedSupportSituation } from '@features/aria/moment4ProbeLogic';
 import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
 import {
@@ -74,6 +75,7 @@ export async function withOptionalBriefScenarioAckAsync(args: {
     return prefixProbeWithCheckingInAck(ack, args.probe);
   }
   if (!args.withBriefAck) return args.probe;
+  if (userLacksLivedSupportSituation(args.userText)) return args.probe;
   const { ack } = await resolveWithinScenarioBriefAckForInterview({
     messages: args.messages,
     userText: args.userText,

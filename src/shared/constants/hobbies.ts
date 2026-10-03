@@ -20,7 +20,7 @@ export const HOBBY_DEFINITION = `${HOBBY_DEFINITION_LEAD}\n\n${HOBBY_DEFINITION_
 export const HOBBY_SELECTION_HINT = `Choose ${MIN_HOBBY_SELECTIONS}–${MAX_HOBBY_SELECTIONS} hobbies.`;
 
 export const HOBBY_PROFESSIONAL_LABEL =
-  'If you met someone amazing who didn\'t share your most important hobby with you, how much of a dealbreaker would that be? If so, which one would that be?';
+  'How important is it that your match shares your most important hobby? If so, which one would that be?';
 
 export const HOBBY_CATEGORIES = [
   'Fitness & Movement',

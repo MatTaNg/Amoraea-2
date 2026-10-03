@@ -194,7 +194,7 @@ describe('Moment 4 handoff reflections', () => {
       'My ex and I had a falling out over money and I still hold a grudge because he never apologized.';
     const out = buildMoment4ThresholdProbeWithReflection(grudge);
     expect(out).toBe(
-      'Thanks for sharing that. At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
+      'At what point do you decide when a relationship is something to work through versus something you need to walk away from?',
     );
     expect(out).not.toMatch(/you named|what i heard|falling-out\./i);
   });
@@ -206,7 +206,8 @@ describe('Moment 4 handoff reflections', () => {
       'I would keep trying unless there is no path forward then I walk away.',
     );
     expect(out).not.toMatch(REFLECTION_ANCHOR);
-    expect(out).toContain('one more question about you');
+    expect(out).toContain("Last one, and then we'll wrap up.");
+    expect(out.toLowerCase()).not.toMatch(/personal question|still personal/);
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
@@ -217,7 +218,8 @@ describe('Moment 4 handoff reflections', () => {
       'To me, the point that happens is when I switch from looking forward to meeting my partner every day to dreading the next time that I will have to see them.',
     );
     expect(out).not.toMatch(REFLECTION_ANCHOR);
-    expect(out).toContain('one more question about you');
+    expect(out).toContain("Last one, and then we'll wrap up.");
+    expect(out.toLowerCase()).not.toMatch(/personal question|still personal/);
     expect(out).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 });

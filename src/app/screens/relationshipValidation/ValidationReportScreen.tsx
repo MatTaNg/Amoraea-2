@@ -15,6 +15,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 import { authStyles } from '@app/screens/authStyles';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { showConfirmDialog } from '@utilities/alerts/confirmDialog';
@@ -681,7 +682,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  scroll: { padding: 24, paddingBottom: 48, maxWidth: 600, alignSelf: 'center', width: '100%' },
+  scroll: { padding: 24, paddingBottom: 48, maxWidth: PAGE_CONTENT_MAX_WIDTH, alignSelf: 'center', width: '100%' },
   logoWrap: { alignItems: 'center', marginBottom: 20 },
   logoImage: { width: 240, height: 72 },
   title: { fontSize: 26, color: '#E8F0F8', textAlign: 'center', marginBottom: 10 },

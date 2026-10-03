@@ -78,7 +78,6 @@ import {
   spokenTextStartsMoment5PrimaryConflictQuestion,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
   looksLikeScenarioAContemptProbeQuestion,
-  SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
   MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
   MOMENT_5_SPECIFICITY_REDIRECT_TEXT,
@@ -90,6 +89,8 @@ import {
 import { reconcileMoment5DeliveryFromAssistantText } from '@features/aria/moment5DeliveryReconcile';
 
 import { SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '@features/aria/scenarioAContemptProbeTtsStrip';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
+import { situation1ModalPromptForRepairBleed } from '@features/aria/situation1ExactModalPrompt';
 
 import {
   looksLikeScenarioARepairQuestion,
@@ -293,7 +294,7 @@ export function restoreReferenceCardPromptFromAssessableQuestion(
     return;
   }
   if (looksLikeScenarioARepairQuestion(q) || looksLikeScenarioARepairStreamFragment(q)) {
-    deps.setReferenceCardPrompt(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    deps.setReferenceCardPrompt(situation1ModalPromptForRepairBleed());
     restoreLastQuestion();
     return;
   }
@@ -529,15 +530,19 @@ export function runApplyReferenceCardFromAssistantSpeech(
     (looksLikeScenarioARepairQuestion(cleaned) || looksLikeScenarioARepairStreamFragment(cleaned))
   ) {
 
-    deps.setReferenceCardPrompt(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
+    const repairFooter = situation1ModalPromptForRepairBleed();
+    deps.setReferenceCardPrompt(repairFooter);
 
     if (deps.lastQuestionTextRef) {
 
-      deps.lastQuestionTextRef.current = SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY;
+      deps.lastQuestionTextRef.current = repairFooter;
 
     }
 
-    if (deps.scenarioARepairQuestionAskedRef) {
+    if (
+      deps.scenarioARepairQuestionAskedRef &&
+      !isInterviewCanonicalProbeRetired('s1_repair')
+    ) {
 
       deps.scenarioARepairQuestionAskedRef.current = true;
 

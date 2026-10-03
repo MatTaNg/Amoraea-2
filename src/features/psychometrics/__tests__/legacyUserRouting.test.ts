@@ -25,13 +25,13 @@ describe('resolveInterviewStackScreenFromStatus', () => {
       expect(result.interviewAlreadyCompleted).toBe(false);
     });
 
-    it('both complete but gate not finalized → PsychometricsComplete', () => {
+    it('both complete but gate not finalized → post-interview congratulations path', () => {
       const result = resolveInterviewStackScreenFromStatus({
         psychometricsCompletedAt: '2026-01-01T00:00:00Z',
         interviewCompleted: true,
         postInterviewScreen: 'PostInterviewPassed',
       });
-      expect(result.screen).toBe('PsychometricsComplete');
+      expect(result.screen).toBe('PostInterviewPassed');
       expect(result.legacyPsychometricsMode).toBe(false);
       expect(result.interviewAlreadyCompleted).toBe(true);
     });
@@ -102,7 +102,7 @@ describe('resolveInterviewStackScreenFromStatus', () => {
       interviewCompleted: true,
       postInterviewScreen: 'PostInterviewFailed',
     });
-    expect(result.screen).toBe('PsychometricsComplete');
+    expect(result.screen).toBe('PostInterviewFailed');
     expect(result.legacyPsychometricsMode).toBe(false);
   });
 });

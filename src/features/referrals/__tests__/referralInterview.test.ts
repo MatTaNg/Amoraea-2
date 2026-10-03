@@ -9,7 +9,7 @@ describe('resolveProspectiveCompletionDiscount', () => {
     expect(resolveProspectiveCompletionDiscount(false)).toBe(REFERRAL_BASE_DISCOUNT);
   });
 
-  it('returns 60% for users who signed up with a valid referral code', () => {
+  it('returns 55% for users who signed up with a valid referral code', () => {
     expect(resolveProspectiveCompletionDiscount(true)).toBe(
       REFERRAL_BASE_DISCOUNT + REFERRAL_SIGNUP_BONUS_DISCOUNT,
     );

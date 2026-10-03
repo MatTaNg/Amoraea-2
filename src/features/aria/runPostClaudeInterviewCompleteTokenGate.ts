@@ -62,6 +62,8 @@ export async function runPostClaudeInterviewCompleteTokenGate(
       telemetrySource: 'turn',
       interviewSpeechRole: 'assistant_response',
       forceSpeakDespiteParallelStream: !closingAlreadyAudible,
+      allowDuplicateConsecutiveTts: !closingAlreadyAudible,
+      skipClosingSessionDedup: !closingAlreadyAudible,
     });
   } catch {
     /* proceed to scoring even if TTS fails */

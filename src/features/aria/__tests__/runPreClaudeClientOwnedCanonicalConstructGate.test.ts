@@ -9,6 +9,7 @@ import {
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
 } from '@features/aria/scenarioBProbeLogic';
 import { SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE } from '@features/aria/interviewDisengagementProbeCopy';
+import { SCENARIO_C_REPAIR_QUESTION_CANONICAL } from '@features/aria/scenarioCPromptDetection';
 
 function baseFlags(
   overrides: Partial<PreClaudeScenarioConstructProbeFlags> = {},
@@ -286,9 +287,9 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
       }),
     );
 
-    expect(result.handled).toBe(false);
-    expect(deps.speakTextSafe).not.toHaveBeenCalledWith(
-      SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+    expect(result.handled).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
       expect.anything(),
     );
     expect(deps.speakTextSafe).not.toHaveBeenCalledWith(
@@ -337,7 +338,7 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
     );
   });
 
-  it('does not deliver retired S1 repair after contempt answer', async () => {
+  it('delivers the Scenario 1 repair question after a contempt answer', async () => {
     const messages = [
       {
         role: 'assistant' as const,
@@ -365,8 +366,44 @@ describe('runPreClaudeClientOwnedCanonicalConstructGate', () => {
       baseFlags({ allowScenarioARepairAfterContemptAnswer: true }),
     );
 
+    expect(result.handled).toBe(true);
+    expect(deps.scenarioARepairQuestionAskedRef.current).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.stringContaining(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
+      expect.anything(),
+    );
+  });
+
+  it('does not deliver a Scenario 3 repair question after a Sophie answer', async () => {
+    const sophieAnswer =
+      'It sounds like Sophie has been carrying this pattern for a long time and feels left alone when he walks out.';
+    const messages = [
+      {
+        role: 'assistant' as const,
+        content: SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
+        scenarioNumber: 3 as const,
+      },
+      { role: 'user' as const, content: sophieAnswer, scenarioNumber: 3 as const },
+    ];
+    const deps = buildDeps({
+      currentScenarioRef: { current: 3 },
+      currentInterviewMomentRef: { current: 3 },
+      messages,
+      currentMessagesRef: { current: messages },
+    });
+
+    const result = await runPreClaudeClientOwnedCanonicalConstructGate(
+      deps,
+      sophieAnswer,
+      messages,
+      SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE,
+      baseFlags({ shouldForceScenarioCRepairProbe: true }),
+    );
+
     expect(result.handled).toBe(false);
-    expect(deps.scenarioARepairQuestionAskedRef.current).toBe(false);
-    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+    expect(deps.speakTextSafe).not.toHaveBeenCalledWith(
+      expect.stringContaining(SCENARIO_C_REPAIR_QUESTION_CANONICAL),
+      expect.anything(),
+    );
   });
 });

@@ -19,17 +19,23 @@ describe('SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY', () => {
     expect(() => assertScenarioARepairQuestionCompleteness()).not.toThrow();
   });
 
-  it('strips truncated transcript fragments when S1 repair probe is retired', () => {
-    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. this with Emma?')).toBe('');
+  it('restores truncated transcript fragments to the live Ryan repair question', () => {
+    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. this with Emma?')).toBe(
+      'If you were Ryan, how would you repair this?',
+    );
   });
 
-  it('strips orphan Emma tails left after incomplete repair stem strip when retired', () => {
+  it('restores orphan Emma tails to the live Ryan repair question', () => {
     expect(
       normalizeScenarioARepairQuestionInAssistantDraft(
         'Got it. If you were Ryan, how would you repair this with Emma?',
       ),
-    ).toBe('Got it.');
-    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. with Emma?')).toBe('');
-    expect(normalizeScenarioARepairQuestionInAssistantDraft('with Emma?')).toBe('');
+    ).toBe('If you were Ryan, how would you repair this?');
+    expect(normalizeScenarioARepairQuestionInAssistantDraft('Got it. with Emma?')).toBe(
+      'If you were Ryan, how would you repair this?',
+    );
+    expect(normalizeScenarioARepairQuestionInAssistantDraft('with Emma?')).toBe(
+      'If you were Ryan, how would you repair this?',
+    );
   });
 });

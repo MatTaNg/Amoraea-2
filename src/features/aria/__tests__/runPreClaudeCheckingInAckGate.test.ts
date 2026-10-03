@@ -47,6 +47,43 @@ describe('runPreClaudeCheckingInAckGate', () => {
     mockDeliverProbe.mockResolvedValue(undefined);
   });
 
+  it('re-asks the open question when the user asks if that is it', async () => {
+    const speakTextSafe = jest.fn().mockResolvedValue(undefined);
+    const setMessages = jest.fn();
+    const resolution = 'How did it get resolved between you two?';
+    const deps = createMockPreClaudeDeps({
+      currentInterviewMomentRef: { current: 5 },
+      currentScenarioRef: { current: 3 },
+      speakTextSafe,
+      setMessages,
+      lastQuestionTextRef: { current: resolution },
+    });
+    mockResolvePendingProbe.mockReturnValue('m5_conflict');
+
+    const result = await runPreClaudeCheckingInAckGate(
+      deps,
+      'Is that it?',
+      [
+        { role: 'assistant', content: resolution, scenarioNumber: 3, interviewMoment: 5 },
+        {
+          role: 'user',
+          content: 'When my brother died I was mad at my best friend for not answering.',
+          scenarioNumber: 3,
+          interviewMoment: 5,
+        },
+      ],
+      { type: 'ambiguous_short', confidence: 0.35 },
+      false,
+    );
+
+    expect(result).toEqual({ handled: true });
+    expect(mockDeliverProbe).not.toHaveBeenCalled();
+    expect(speakTextSafe).toHaveBeenCalledWith(
+      `Not yet. ${resolution}`,
+      expect.any(Object),
+    );
+  });
+
   it('returns handled false for non-checking-in turns', async () => {
     const deps = createMockPreClaudeDeps();
 

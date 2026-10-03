@@ -16,8 +16,8 @@ describe('postInterviewLaunchMode', () => {
     expect(mapInterviewStackRouteForLaunchMode('Amoraea')).toBe('Amoraea');
   });
 
-  it('uses 500 as the launch waitlist goal', () => {
-    expect(LAUNCH_WAITLIST_USER_GOAL).toBe(500);
+  it('uses 600 as the launch waitlist goal', () => {
+    expect(LAUNCH_WAITLIST_USER_GOAL).toBe(600);
   });
 
   it('exposes three launch value props for the waitlist counter card', () => {

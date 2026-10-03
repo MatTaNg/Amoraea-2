@@ -161,8 +161,7 @@ describe('shouldDeliverClientOwnedScenario3Opening', () => {
       { role: 'user' as const, content: 'No.', scenarioNumber: 2, interviewMoment: 2 },
       {
         role: 'assistant' as const,
-        content:
-          "Great, let's stay on this one then. Just try your best. You've got this. And if you were James, how would you repair?",
+        content: "Great, let's stay on this one then. Just try your best. You've got this.",
         scenarioNumber: 2,
         interviewMoment: 2,
       },

@@ -15,8 +15,6 @@ export interface PromptCategory {
 }
 
 export const MAX_PROFILE_PROMPTS = 3;
-/** Generous floor for the required-category prompt (What Matters / How I Show Up). Optional prompts have no min. */
-export const PROFILE_PROMPT_ANSWER_MIN_LENGTH = 30;
 
 /** At least one answered prompt must come from one of these categories. */
 export const REQUIRED_PROFILE_PROMPT_CATEGORY_IDS = [
@@ -193,11 +191,6 @@ export function getPromptCategoryById(id: string): PromptCategory | undefined {
 
 export function isRequiredEligibleCategory(categoryId: string): boolean {
   return (REQUIRED_PROFILE_PROMPT_CATEGORY_IDS as readonly string[]).includes(categoryId);
-}
-
-/** Minimum length applies only to the required-category prompt the user chose. */
-export function promptAnswerHasMinimumLength(categoryId: string): boolean {
-  return isRequiredEligibleCategory(categoryId);
 }
 
 /** @deprecated Use PROFILE_PROMPT_CATEGORIES */

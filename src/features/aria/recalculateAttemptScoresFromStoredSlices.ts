@@ -4,6 +4,10 @@ import {
 } from './defensePatternsDetection';
 import { PILLAR_ROLLUP_ALGORITHM_VERSION } from './aggregateMarkerScoresFromSlices';
 import {
+  REPAIR_SOURCE_SIGNALS_VERSION,
+  REPAIR_SOURCE_SIGNALS_VERSION_V2,
+} from '@config/algorithmVersions';
+import {
   aggregatePillarScoresWithCommitmentMergeDetailed,
   extractEgoDevelopmentLevel,
   markerSliceFromStoredScenarioMoment,
@@ -223,11 +227,21 @@ export function recalculateAttemptScoresFromStoredSlices(
   ];
   const egoFromRow = extractEgoDevelopmentLevel({ ego_development_level: input.ego_development_level });
   const moment4UserTextForGate = resolveMoment4UserTextForGate(txArr);
+  const storedRepairVersion =
+    input.repair_source_signals &&
+    typeof input.repair_source_signals === 'object' &&
+    typeof input.repair_source_signals.version === 'string'
+      ? input.repair_source_signals.version
+      : null;
   const agg = aggregatePillarScoresWithCommitmentMergeDetailed(slices, {
     egoDevelopmentLevel: egoFromRow,
     defensePatternTranscript: txArr,
     disclosureCalibrationTranscript: txArr as Array<{ role?: string; content?: string; interviewMoment?: number }>,
     moment4UserText: moment4UserTextForGate,
+    storedRepairSourceSignalsVersion:
+      storedRepairVersion === REPAIR_SOURCE_SIGNALS_VERSION
+        ? REPAIR_SOURCE_SIGNALS_VERSION
+        : REPAIR_SOURCE_SIGNALS_VERSION_V2,
   });
   const { scores: pillar_scores, mentalizingOvercertaintyCount, defensePatterns, repairSourceSignals, regulationSourceSignals } = agg;
 

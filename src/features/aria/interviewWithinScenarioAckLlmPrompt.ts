@@ -17,6 +17,7 @@ Requirements:
 - Do **not** repeat or closely paraphrase recent acknowledgements: ${recentBlock}
 - Do **not** start with "Sure", "Okay", "Absolutely", "That makes sense", or "Got it".
 - Do **not** use clinical jargon or evaluative praise ("great job", "very insightful").
+- Do **not** say "that comes through clearly" or restate their answer as a reflection.
 - Output plain text only — no quotes or preamble.
 
 They were answering: "${args.activeQuestionPreview.slice(0, 240)}"

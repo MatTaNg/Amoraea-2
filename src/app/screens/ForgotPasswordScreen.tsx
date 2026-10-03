@@ -293,8 +293,14 @@ const styles = StyleSheet.create({
   },
   wordmarkTight: { marginBottom: 18 },
   taglineTight: { marginBottom: 20 },
-  flameWrap: { marginBottom: 16, alignItems: 'center', justifyContent: 'center' },
-  flameScale: { transform: [{ scale: 0.78 }] },
+  flameWrap: {
+    marginBottom: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    width: '100%',
+  },
+  flameScale: { transform: [{ scale: 0.78 }], transformOrigin: 'center' },
   button: { marginTop: 16, marginBottom: 12 },
   sentBodySpacing: { marginBottom: 28 },
   successText: {

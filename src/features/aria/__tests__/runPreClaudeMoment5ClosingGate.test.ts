@@ -71,5 +71,77 @@ describe('runPreClaudeMoment5ClosingGate', () => {
     expect(deps.speakTextSafe).toHaveBeenCalled();
     expect(deps.kickCompletionScoring).toHaveBeenCalledWith('m5_substantive_close', expect.any(Array));
     expect(deps.isInterviewCompleteRef.current).toBe(true);
+    const speakOrder = (deps.speakTextSafe as jest.Mock).mock.invocationCallOrder[0] ?? 0;
+    const statusOrder = (deps.setInterviewStatus as jest.Mock).mock.invocationCallOrder[0] ?? 0;
+    expect(speakOrder).toBeLessThan(statusOrder);
+  });
+
+  it('does not close when the latest turn is only asking if that is it', async () => {
+    const messages: MessageWithScenario[] = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: DEVANSHU_ANSWER, interviewMoment: 5 },
+      {
+        role: 'assistant',
+        content: 'What do you think you did or said that contributed to the conflict?',
+        interviewMoment: 5,
+      },
+      { role: 'user', content: 'Is that it?', interviewMoment: 5 },
+    ];
+    const decision: InterviewTurnOrchestratorDecision = {
+      source: 'heuristic_v1',
+      userIntent: 'unclear',
+      activeQuestionPreview: 'What do you think you did or said that contributed to the conflict?',
+      satisfiedProbeIds: ['m5_conflict'],
+      pendingProbeId: null,
+      activeConstructEngaged: false,
+      action: { kind: 'delegate_claude', hint: 'check_before_ask' },
+      reason: 'test',
+    };
+    const deps = buildDeps({
+      moment5AccountabilityProbeFiredRef: { current: true },
+      moment5PostPromptUserTurnCountRef: { current: 2 },
+      moment5ResolutionDeliveredRef: { current: true },
+    });
+    const result = await runPreClaudeMoment5ClosingGate({
+      deps,
+      messagesToUse: messages,
+      moment5CombinedUserText: `${DEVANSHU_ANSWER} Is that it?`,
+      decision,
+    });
+    expect(result.handled).toBe(false);
+    expect(deps.speakTextSafe).not.toHaveBeenCalled();
+    expect(deps.isInterviewCompleteRef.current).toBe(false);
+  });
+
+  it('still speaks the closing when the last answer is classified unclear', async () => {
+    const messages: MessageWithScenario[] = [
+      { role: 'assistant', content: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, interviewMoment: 5 },
+      { role: 'user', content: DEVANSHU_ANSWER, interviewMoment: 5 },
+    ];
+    const decision: InterviewTurnOrchestratorDecision = {
+      source: 'heuristic_v1',
+      userIntent: 'unclear',
+      activeQuestionPreview: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT.slice(0, 160),
+      satisfiedProbeIds: ['m5_conflict'],
+      pendingProbeId: null,
+      activeConstructEngaged: true,
+      action: { kind: 'delegate_claude', hint: 'check_before_ask' },
+      reason: 'test',
+    };
+    const deps = buildDeps();
+    const result = await runPreClaudeMoment5ClosingGate({
+      deps,
+      messagesToUse: messages,
+      moment5CombinedUserText: DEVANSHU_ANSWER,
+      decision,
+    });
+    expect(result.handled).toBe(true);
+    expect(deps.speakTextSafe).toHaveBeenCalledWith(
+      expect.stringMatching(/your interview is complete/i),
+      expect.objectContaining({
+        allowDuplicateConsecutiveTts: true,
+        skipClosingSessionDedup: true,
+      }),
+    );
   });
 });

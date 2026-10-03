@@ -1,4 +1,5 @@
 import { deliverPostClaudeForcedCanonicalProbe } from '@features/aria/deliverPostClaudeForcedCanonicalProbe';
+import { isInterviewCanonicalProbeRetired } from '@features/aria/interviewCanonicalProbeRegistry';
 import type { PostClaudeSpeakAssistantTurn } from '@features/aria/createPostClaudeSpeakAssistantTurn';
 import type {
   PostClaudeAssistantTurnDeps,
@@ -55,6 +56,7 @@ export async function runPostClaudeScenarioCRepairForcedProbeGate(
     'scenarioBSkippedJamesIntermediate' | 'needsScenarioBJamesDifferentlyInsert'
   >,
 ): Promise<PostClaudeForcedConstructProbeGatesResult | null> {
+  if (isInterviewCanonicalProbeRetired('s3_repair')) return null;
   const strippedText = draft.strippedText;
   const { assistantTurnIsElongatingProbeOnly } = draft;
   const repairStillPending = scenarioCRepairConstructStillPending(params.messagesToUse);

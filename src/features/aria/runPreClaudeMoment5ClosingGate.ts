@@ -1,4 +1,5 @@
 import { deliverClientOwnedMoment5InterviewComplete } from '@features/aria/deliverClientOwnedMoment5InterviewComplete';
+import { looksLikeInterviewStillOpenCheck } from '@features/aria/interviewPriorAnswerMetaDetection';
 import { computeMoment5InterviewCloseGate } from '@features/aria/interviewProgressSync';
 import type { InterviewTurnOrchestratorDecision } from '@features/aria/interviewTurnOrchestratorTypes';
 import type { MessageWithScenario } from '@features/aria/interviewScenarioScoringSlice';
@@ -23,6 +24,11 @@ export async function runPreClaudeMoment5ClosingGate(args: {
   if (deps.currentInterviewMomentRef.current !== 5) {
     return { handled: false };
   }
+  const lastUserText =
+    [...messagesToUse].reverse().find((m) => m.role === 'user')?.content ?? '';
+  if (looksLikeInterviewStillOpenCheck(lastUserText)) {
+    return { handled: false };
+  }
   if (decision.pendingProbeId != null) {
     return { handled: false };
   }
@@ -32,7 +38,7 @@ export async function runPreClaudeMoment5ClosingGate(args: {
   if (decision.action.kind !== 'delegate_claude') {
     return { handled: false };
   }
-  if (decision.userIntent !== 'substantive_answer') {
+  if (decision.userIntent !== 'substantive_answer' && decision.userIntent !== 'unclear') {
     return { handled: false };
   }
 

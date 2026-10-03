@@ -2,6 +2,7 @@ import React from 'react';
 import { View, Text, ScrollView, StyleSheet, Platform } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import { sexualCommunicationBand, formatSexualCommunicationCompletedAt } from '@features/psychometrics/postInterviewSexualCommunicationService';
+import { hasHistoricalSexualCommunicationTypology } from '@config/psychometrics/sexualCommunicationSoftModifier';
 import {
   GamingCorrectionBanner,
   GamingCorrectionCard,
@@ -73,9 +74,11 @@ export type AdminUserProfileRecord = {
   psychometrics_gasp_score: number | null;
   psychometrics_gasp_guilt_repair_score: number | null;
   psychometrics_gasp_shame_withdraw_score: number | null;
+  /** @deprecated Historical combined Dweck score. Active battery uses the subscale columns. */
   psychometrics_dweck_score: number | null;
   psychometrics_dweck_growth_score: number | null;
   psychometrics_dweck_rbi_disagreement_score: number | null;
+  /** @deprecated AAQ-II was removed from the pre-interview battery. */
   psychometrics_aaq2_score: number | null;
   psychometrics_rses_score: number | null;
   psychometrics_scs_public_score: number | null;
@@ -85,7 +88,15 @@ export type AdminUserProfileRecord = {
   psychometrics_mspss_friends_score: number | null;
   psychometrics_sd3_narcissism_score: number | null;
   psychometrics_npi_entitlement_score?: number | null;
+  /** @deprecated RFQ-8 was removed from the pre-interview battery. */
   psychometrics_rfq_score: number | null;
+  psychometrics_relationship_growth_beliefs_score: number | null;
+  psychometrics_conflict_catastrophizing_score: number | null;
+  /** Experimental PES placeholder. Null until taken; never omitted from the record. */
+  psychometrics_entitlement_score: number | null;
+  psychometrics_amoraea_entitlement_v1_score: number | null;
+  psychometrics_sexual_communication_comfort_score: number | null;
+  psychometrics_fully_completed: boolean | null;
   psychometric_modifier: number | null;
   psychometric_consistency_flags: unknown;
   psychometric_straight_line_flags: unknown;
@@ -129,6 +140,12 @@ const ADMIN_USER_PROFILE_SELECT = `
   psychometrics_mspss_friends_score,
   psychometrics_sd3_narcissism_score,
   psychometrics_rfq_score,
+  psychometrics_relationship_growth_beliefs_score,
+  psychometrics_conflict_catastrophizing_score,
+  psychometrics_entitlement_score,
+  psychometrics_amoraea_entitlement_v1_score,
+  psychometrics_sexual_communication_comfort_score,
+  psychometrics_fully_completed,
   psychometric_modifier,
   psychometric_consistency_flags,
   psychometric_straight_line_flags
@@ -286,6 +303,12 @@ function emptyAdminUserProfileFields(userId: string): AdminUserProfileRecord {
     psychometrics_mspss_friends_score: null,
     psychometrics_sd3_narcissism_score: null,
     psychometrics_rfq_score: null,
+    psychometrics_relationship_growth_beliefs_score: null,
+    psychometrics_conflict_catastrophizing_score: null,
+    psychometrics_entitlement_score: null,
+    psychometrics_amoraea_entitlement_v1_score: null,
+    psychometrics_sexual_communication_comfort_score: null,
+    psychometrics_fully_completed: null,
     psychometric_modifier: null,
     psychometric_consistency_flags: null,
     psychometric_straight_line_flags: null,
@@ -317,7 +340,11 @@ function userHasStoredPsychometricScores(user: AdminUserProfileRecord): boolean 
     user.psychometrics_scs_private_score != null ||
     user.psychometrics_mspss_friends_score != null ||
     user.psychometrics_sd3_narcissism_score != null ||
-    user.psychometrics_rfq_score != null
+    user.psychometrics_rfq_score != null ||
+    user.psychometrics_relationship_growth_beliefs_score != null ||
+    user.psychometrics_conflict_catastrophizing_score != null ||
+    user.psychometrics_entitlement_score != null ||
+    user.psychometrics_sexual_communication_comfort_score != null
   );
 }
 
@@ -344,9 +371,15 @@ export async function fetchAdminUserProfile(
 
   let lastError: { message?: string; code?: string } | null = null;
 
-  for (const select of selectVariants) {
+  for (const [index, select] of selectVariants.entries()) {
     const result = await supabase.from('users').select(select).eq('id', userId).maybeSingle();
     if (!result.error && result.data) {
+      if (index > 0) {
+        console.warn(
+          '[Admin] psychometric profile select fell back; active battery columns may be missing from schema',
+          lastError,
+        );
+      }
       return normalizeAdminUserProfileRow(userId, result.data as Record<string, unknown>);
     }
     lastError = result.error;
@@ -873,7 +906,8 @@ export function ProfileIntentTab({ user }: { user: AdminUserProfileRecord }) {
                 label: 'Referral source',
                 value: user.market_research_referral_source,
                 sub:
-                  user.market_research_referral_source === 'Other'
+                  user.market_research_referral_source === 'Other' ||
+                  user.market_research_referral_source === 'Event'
                     ? user.market_research_referral_other
                     : null,
               },
@@ -1049,6 +1083,7 @@ export function buildPsychometricInstrumentImpacts(
     scoring?.rfq,
   );
   const sexualCommInfo = sexualCommunicationBand(user.psychometrics_sexual_communication_score ?? null);
+  const comfortInfo = sexualCommunicationBand(user.psychometrics_sexual_communication_comfort_score ?? null);
   const npiScore = user.psychometrics_npi_entitlement_score ?? null;
   const npiInfo = mergeAdminBandWithAuthoritativeScoring(
     getNpiEntitlementBand(npiScore),
@@ -1148,6 +1183,18 @@ export function buildPsychometricInstrumentImpacts(
         ? formatPsychometricGateFailDescription(RFQ_LOW_REFLECTIVE_FUNCTIONING_FLOOR_CODE, rfqScore)
         : null,
       RFQ_STRAIGHT_LINE_FLAG,
+      straightLineFlags,
+    ),
+    sexual_communication_comfort: makeInstrumentImpact(
+      `Mean: ${user.psychometrics_sexual_communication_comfort_score ?? '—'}/5.0 — ${comfortInfo.band}`,
+      {
+        band: comfortInfo.band,
+        modifier: 0,
+      },
+      false,
+      null,
+      null,
+      null,
       straightLineFlags,
     ),
     sexual_communication: makeInstrumentImpact(
@@ -1263,7 +1310,7 @@ export function FullAssessmentTab({
     scoring?.rfq,
   );
   const sexualCommInfo = sexualCommunicationBand(user.psychometrics_sexual_communication_score ?? null);
-  const sexualCommComplete = !!user.psychometrics_sexual_communication_completed_at;
+  const sexualCommHistoricalComplete = hasHistoricalSexualCommunicationTypology(user);
 
   const consistencyFlags = asStringArray(user.psychometric_consistency_flags);
   const straightLineFlags = asStringArray(user.psychometric_straight_line_flags);
@@ -1351,6 +1398,28 @@ export function FullAssessmentTab({
       {hasScoreBreakdown ? (
         <>
           <Text style={tabStyles.sectionHeader}>Psychometric Scores</Text>
+          {user.psychometrics_completed_at && user.psychometrics_fully_completed !== true ? (
+            <View style={tabStyles.pendingBanner}>
+              <Text style={tabStyles.pendingBannerText}>
+                psychometrics_completed_at is set, but psychometrics_fully_completed is not.
+                Active battery scores below may still be null.
+              </Text>
+            </View>
+          ) : null}
+          <View style={tabStyles.instrumentCard}>
+            <Text style={tabStyles.instrumentScore}>
+              Relationship growth beliefs: {user.psychometrics_relationship_growth_beliefs_score ?? 'null'}
+            </Text>
+            <Text style={tabStyles.instrumentScore}>
+              Conflict catastrophizing: {user.psychometrics_conflict_catastrophizing_score ?? 'null'}
+            </Text>
+            <Text style={tabStyles.instrumentScore}>
+              Entitlement (experimental, no auto-fail): {user.psychometrics_entitlement_score ?? 'null'}
+            </Text>
+            <Text style={tabStyles.instrumentScore}>
+              Sexual communication comfort: {user.psychometrics_sexual_communication_comfort_score ?? 'null'}
+            </Text>
+          </View>
 
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
@@ -1512,7 +1581,7 @@ export function FullAssessmentTab({
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
               <PsychInstrumentTitle
-                name="Relationship Beliefs Assessment"
+                name="Relationship Beliefs Assessment (deprecated historical Dweck)"
                 abbr="Dweck"
                 nameStyle={tabStyles.instrumentName}
                 abbrStyle={tabStyles.instrumentAbbr}
@@ -1545,7 +1614,7 @@ export function FullAssessmentTab({
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
               <PsychInstrumentTitle
-                name="Emotional Flexibility Assessment"
+                name="Emotional Flexibility Assessment (deprecated — removed from battery)"
                 abbr="AAQ-2"
                 nameStyle={tabStyles.instrumentName}
                 abbrStyle={tabStyles.instrumentAbbr}
@@ -1720,7 +1789,7 @@ export function FullAssessmentTab({
           <View style={tabStyles.instrumentCard}>
             <View style={tabStyles.instrumentHeader}>
               <PsychInstrumentTitle
-                name="Self-Reflection Assessment"
+                name="Self-Reflection Assessment (deprecated — removed from battery)"
                 abbr="RFQ"
                 nameStyle={tabStyles.instrumentName}
                 abbrStyle={tabStyles.instrumentAbbr}
@@ -1777,18 +1846,13 @@ export function FullAssessmentTab({
         />
       ) : null}
 
-      <View style={tabStyles.sectionSpacer} />
-      <Text style={tabStyles.sectionHeader}>Post-Interview Assessments</Text>
-
-      {!sexualCommComplete ? (
-        <View style={tabStyles.emptyState}>
-          <Text style={tabStyles.emptyStateText}>Sexual Communication not yet completed.</Text>
-        </View>
-      ) : (
+      {sexualCommHistoricalComplete ? (
         <View style={tabStyles.instrumentCard}>
+          <View style={tabStyles.sectionSpacer} />
+          <Text style={tabStyles.sectionHeader}>Post-Interview Assessments</Text>
           <View style={tabStyles.instrumentHeader}>
             <PsychInstrumentTitle
-              name="Sexual Communication"
+              name="Sexual Communication (historical typology)"
               abbr="Sexual Communication"
               nameStyle={tabStyles.instrumentName}
               abbrStyle={tabStyles.instrumentAbbr}
@@ -1808,7 +1872,7 @@ export function FullAssessmentTab({
             penalty.
           </Text>
         </View>
-      )}
+      ) : null}
 
       <View style={tabStyles.sectionSpacer} />
 

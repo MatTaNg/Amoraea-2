@@ -11,7 +11,10 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import type { ReferralDiscountStatus } from '@features/referrals/referralInterview';
+import {
+  REFERRAL_STEP_DISCOUNT,
+  type ReferralDiscountStatus,
+} from '@features/referrals/referralInterview';
 
 export const POST_INTERVIEW_LAUNCH_REFERRAL_EYEBROW = 'Referral Discount';
 export const POST_INTERVIEW_LAUNCH_REFERRAL_PROSPECTIVE_EYEBROW = 'Complete to unlock';
@@ -26,7 +29,7 @@ export const POST_INTERVIEW_LAUNCH_REFERRAL_STEP_1 =
 export const POST_INTERVIEW_LAUNCH_REFERRAL_STEP_2 =
   '2) Your friend completes the AI interview and psychometric assessments';
 export const POST_INTERVIEW_LAUNCH_REFERRAL_STEP_3_HIGHLIGHT =
-  '20% off future subscription for LIFE!';
+  `${REFERRAL_STEP_DISCOUNT}% off future subscription for LIFE!`;
 export const POST_INTERVIEW_LAUNCH_REFERRAL_CODE_LABEL = 'Your referral code';
 export const POST_INTERVIEW_LAUNCH_REFERRAL_LOAD_ERROR =
   "We couldn't load your referral discount right now. Try reopening this screen in a moment.";

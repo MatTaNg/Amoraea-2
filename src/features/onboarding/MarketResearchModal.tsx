@@ -158,7 +158,7 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
     if (currentQuestion === 'referral') {
       // Use the incoming choice when auto-advancing — referralSource state is still stale here.
       const effective = selectedValue ?? referralSource;
-      return effective === 'Other';
+      return effective === 'Other' || effective === 'Event';
     }
     return false;
   }
@@ -188,7 +188,10 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
         .update({
           market_research_completed_at: new Date().toISOString(),
           market_research_referral_source: referralSource,
-          market_research_referral_other: referralSource === 'Other' ? referralOther.trim() : null,
+          market_research_referral_other:
+            referralSource === 'Other' || referralSource === 'Event'
+              ? referralOther.trim() || null
+              : null,
           market_research_relationship_seriousness: seriousness,
           market_research_search_duration: duration,
           market_research_dating_status: datingStatus,
@@ -244,7 +247,7 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                     { value: 'Friend', label: 'Friend' },
                     { value: 'Instagram', label: 'Instagram' },
                     { value: 'Tiktok', label: 'Tiktok' },
-                    { value: 'Facebook', label: 'Facebook' },
+                    { value: 'Event', label: 'Event' },
                     { value: 'Podcast', label: 'Podcast' },
                     { value: 'Other', label: 'Other' },
                   ] as const
@@ -267,6 +270,18 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                     </Text>
                   </TouchableOpacity>
                 ))}
+                {referralSource === 'Event' ? (
+                  <View>
+                    <Text style={styles.followUpLabel}>Which event?</Text>
+                    <MarketResearchTextField
+                      key="referral-event"
+                      placeholder="Optional"
+                      value={referralOther}
+                      onChangeText={setReferralOther}
+                      autoFocus
+                    />
+                  </View>
+                ) : null}
                 {referralSource === 'Other' ? (
                   <MarketResearchTextField
                     key="referral-other"
@@ -645,6 +660,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     marginTop: 2,
+  },
+  followUpLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#111',
+    marginTop: 12,
+    marginBottom: 4,
   },
   textInputShell: {
     borderWidth: 1,

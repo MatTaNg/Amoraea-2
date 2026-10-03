@@ -11,6 +11,7 @@ import {
 } from '@/shared/components/ModeratedPhotoUpload';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { profilesRepo } from '@/data/repos/profilesRepo';
+import { capProfilePhotoList, MAX_PROFILE_PHOTOS } from '@/shared/profilePhotoLimit';
 import { OnboardingHeader } from './components/OnboardingHeader';
 import { styles } from './PhotosVideoModal.styled';
 import { ONBOARDING_PHOTOS_DESCRIPTION } from './onboardingStepCopy';
@@ -36,18 +37,22 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
   
   // Use ref to track latest photos array for concurrent uploads
   const photosRef = useRef(photos);
+  const savedPhotoCountRef = useRef(0);
   const existingAssetIdsRef = useRef<Set<string>>(new Set());
   const assetIdByUrlRef = useRef<Map<string, string>>(new Map());
   const existingFileNameKeysRef = useRef<Set<string>>(new Set());
   const fileNameKeyByUrlRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
-    const validPhotos = photos.filter(p => p && p.trim() !== '');
-    if (validPhotos.length !== photos.length) {
-      console.log('Filtered out invalid photos. Original:', photos, 'Filtered:', validPhotos);
+    const validPhotos = capProfilePhotoList(photos.filter((p) => p && p.trim() !== ''));
+    if (
+      validPhotos.length !== photos.length ||
+      validPhotos.some((p, i) => p !== photos[i])
+    ) {
       onPhotosChange(validPhotos);
     }
     photosRef.current = validPhotos;
+    savedPhotoCountRef.current = validPhotos.length;
     const allowed = new Set(validPhotos.map((p) => p.trim()));
     for (const u of [...fileNameKeyByUrlRef.current.keys()]) {
       if (!allowed.has(u)) {
@@ -98,9 +103,13 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
       Alert.alert('Already added', 'This photo has already been added.');
       return;
     }
+    if (currentPhotos.length >= MAX_PROFILE_PHOTOS) {
+      return;
+    }
 
-    const newPhotos = [...currentPhotos, url];
+    const newPhotos = capProfilePhotoList([...currentPhotos, normalized]);
     photosRef.current = newPhotos;
+    savedPhotoCountRef.current = newPhotos.length;
     if (assetId) {
       existingAssetIdsRef.current.add(assetId);
       assetIdByUrlRef.current.set(normalized, assetId);
@@ -131,8 +140,9 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
       existingFileNameKeysRef.current.delete(fileKey);
       fileNameKeyByUrlRef.current.delete(norm);
     }
-    const newPhotos = photos.filter((p) => p !== uri);
-    photosRef.current = newPhotos.filter((p) => p && p.trim() !== '');
+    const newPhotos = capProfilePhotoList(photos.filter((p) => p !== uri && p.trim() !== norm));
+    photosRef.current = newPhotos;
+    savedPhotoCountRef.current = newPhotos.length;
     onPhotosChange(newPhotos);
     if (userId) {
       void profilesRepo.updateProfile(userId, { photos: photosRef.current }).catch((error) => {
@@ -187,7 +197,8 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
                 </Text>
               </View>
             ))}
-            {photos.filter((p) => p && p.trim() !== '').length + uploadingPhotosCount < 6 && (
+            {photos.filter((p) => p && p.trim() !== '').length + uploadingPhotosCount <
+              MAX_PROFILE_PHOTOS && (
               <ModeratedPhotoUpload
                 userId={userId}
                 onPhotoUploaded={handlePhotoUploaded}
@@ -195,10 +206,9 @@ export const PhotosVideoModal: React.FC<PhotosVideoModalProps> = ({
                 existingFileNameKeysRef={existingFileNameKeysRef}
                 onUploadStart={() => setUploadingPhotosCount((prev) => prev + 1)}
                 onUploadEnd={() => setUploadingPhotosCount((prev) => Math.max(0, prev - 1))}
-                maxPhotos={6}
-                currentPhotoCount={
-                  photos.filter((p) => p && p.trim() !== '').length + uploadingPhotosCount
-                }
+                maxPhotos={MAX_PROFILE_PHOTOS}
+                savedPhotoCountRef={savedPhotoCountRef}
+                currentPhotoCount={photos.filter((p) => p && p.trim() !== '').length}
               >
                 <View style={styles.addPhotoButton}>
                   <Text style={styles.addPhotoText}>+</Text>

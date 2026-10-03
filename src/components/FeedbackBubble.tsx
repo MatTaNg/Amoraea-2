@@ -4,9 +4,11 @@ import {
   Text,
   TextInput,
   Pressable,
+  ScrollView,
   StyleSheet,
   Platform,
   Modal,
+  Keyboard,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
@@ -44,6 +46,7 @@ export function FeedbackBubble({ attemptId, userId }: Props) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const displayStars = hoverRating ?? rating;
   const canSubmit = message.trim().length > 0;
@@ -61,6 +64,23 @@ export function FeedbackBubble({ attemptId, userId }: Props) {
     setOpen(false);
     reset();
   }, [reset]);
+
+  useEffect(() => {
+    if (!open) {
+      setKeyboardHeight(0);
+      return;
+    }
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates.height);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [open]);
 
   useEffect(() => {
     if (Platform.OS !== 'web' || !open || typeof window === 'undefined') return;
@@ -128,11 +148,21 @@ export function FeedbackBubble({ attemptId, userId }: Props) {
       <Modal visible={open} transparent animationType="fade" onRequestClose={close} statusBarTranslucent>
         <View style={styles.modalRoot}>
           <Pressable style={styles.backdrop} onPress={close} accessibilityRole="button" accessibilityLabel="Close" />
-          <View style={styles.sheet}>
+          <View
+            style={[
+              styles.sheet,
+              keyboardHeight > 0 && { bottom: keyboardHeight + 12, maxHeight: '55%' },
+            ]}
+          >
             {success ? (
               <Text style={styles.successText}>Thanks — your feedback was sent.</Text>
             ) : (
-              <>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                contentContainerStyle={styles.sheetScroll}
+              >
+                <Pressable accessible={false} onPress={Keyboard.dismiss}>
                 <Text style={styles.sheetTitle}>Feedback</Text>
                 <Text style={styles.label}>Category</Text>
                 <View style={styles.pillRow}>
@@ -180,6 +210,9 @@ export function FeedbackBubble({ attemptId, userId }: Props) {
                   placeholder="Tell us what happened or what you’d like…"
                   placeholderTextColor="rgba(148,163,184,0.6)"
                   multiline
+                  blurOnSubmit
+                  returnKeyType="done"
+                  onSubmitEditing={Keyboard.dismiss}
                   style={styles.textarea}
                   textAlignVertical="top"
                 />
@@ -200,7 +233,8 @@ export function FeedbackBubble({ attemptId, userId }: Props) {
                     <Text style={styles.btnPrimaryText}>{sending ? 'Sending…' : 'Submit'}</Text>
                   </Pressable>
                 </View>
-              </>
+                </Pressable>
+              </ScrollView>
             )}
           </View>
         </View>
@@ -254,6 +288,8 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(37, 99, 235, 0.35)',
     borderRadius: 12,
+  },
+  sheetScroll: {
     padding: 16,
   },
   sheetTitle: {
@@ -319,7 +355,8 @@ const styles = StyleSheet.create({
     color: '#A7F3D0',
     fontSize: 16,
     textAlign: 'center' as const,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
   },
   rowActions: {
     flexDirection: 'row',

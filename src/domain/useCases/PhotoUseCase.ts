@@ -1,4 +1,5 @@
 import { saveEditProfilePrimaryPhoto } from '@data/repos/editProfileRepo';
+import { MAX_PROFILE_PHOTOS } from '@/shared/profilePhotoLimit';
 import { ProfileRepository } from '@data/repositories/ProfileRepository';
 import { ProfilePhoto } from '@domain/models/Profile';
 import * as ImagePicker from 'expo-image-picker';
@@ -57,14 +58,16 @@ export class PhotoUseCase {
   ): Promise<ProfilePhoto[]> {
     const uploadedPhotos: ProfilePhoto[] = [];
     const existingPhotos = await this.profileRepository.getProfilePhotos(userId);
+    const room = Math.max(0, MAX_PROFILE_PHOTOS - existingPhotos.length);
+    const limitedUris = photoUris.slice(0, room);
 
-    if (atTop && existingPhotos.length > 0 && photoUris.length > 0) {
-      await this.profileRepository.incrementPhotoDisplayOrders(userId, photoUris.length);
+    if (atTop && existingPhotos.length > 0 && limitedUris.length > 0) {
+      await this.profileRepository.incrementPhotoDisplayOrders(userId, limitedUris.length);
     }
 
     const startOrder = atTop ? 0 : existingPhotos.length;
-    for (let i = 0; i < photoUris.length; i++) {
-      const uri = photoUris[i];
+    for (let i = 0; i < limitedUris.length; i++) {
+      const uri = limitedUris[i];
       const fileName = uri.split('/').pop() || `photo_${Date.now()}_${i}.jpg`;
       const { publicUrl, storagePath } = await this.profileRepository.uploadPhoto(userId, uri, fileName);
 

@@ -730,6 +730,28 @@ describe('showScenarioCardCanonicalTts', () => {
     expect(m4Decision.spokenSoFarForCompose).toContain('Sarah');
   });
 
+  it('streamAlreadySpokeScenarioBoundaryClosingLead recognizes the scenarios personal-questions close', () => {
+    expect(
+      streamAlreadySpokeScenarioBoundaryClosingLead(
+        "Makes sense. That's the end of the three described scenarios. Next are three personal questions. Now I want to ask you about something a bit more personal.",
+        3,
+      ),
+    ).toBe(true);
+  });
+
+  it('shouldSuppressParallelStreamNonExactShowScenarioCardSpeech mutes the scenarios close even when full stream is empty', () => {
+    expect(
+      shouldSuppressParallelStreamNonExactShowScenarioCardSpeech({
+        spokenForTts:
+          "Makes sense. That's the end of the three described scenarios. Next are three personal questions. Now I want to ask you about something a bit more personal.",
+        interviewMoment: 3,
+        interviewScenario: 3,
+        showScenarioCardCanonicalSpokenThisStream: false,
+        fullStream: '',
+      }),
+    ).toBe(true);
+  });
+
   it('streamAlreadySpokeScenarioBoundaryClosingLead recognizes model S3 close without described wording', () => {
     expect(
       streamAlreadySpokeScenarioBoundaryClosingLead(

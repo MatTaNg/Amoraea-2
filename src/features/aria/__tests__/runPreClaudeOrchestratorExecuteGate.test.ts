@@ -88,6 +88,27 @@ describe('runPreClaudeOrchestratorExecuteGate', () => {
     );
   });
 
+  it('asks the support need-recognition question without a reflection prefix', async () => {
+    const result = await runPreClaudeOrchestratorExecuteGate({
+      deps: baseDeps(),
+      trimmed: "I'd like to know that I'm here for them.",
+      messagesToUse: [],
+      participantFirstNameForSpoken: 'Alex',
+      suppressForcedConstructProbesForMetaFrustration: false,
+      decision: baseDecision({
+        pendingProbeId: 'm_support_need_recognition',
+        action: { kind: 'speak_canonical', probeId: 'm_support_need_recognition' },
+      }),
+    });
+    expect(result.handled).toBe(true);
+    expect(deliverMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        probeId: 'm_support_need_recognition',
+        withBriefAck: false,
+      }),
+    );
+  });
+
   it('returns skipped probe id without halting turn', async () => {
     const result = await runPreClaudeOrchestratorExecuteGate({
       deps: baseDeps(),

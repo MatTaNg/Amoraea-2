@@ -1,5 +1,6 @@
 import { shouldRecordInterviewResponseTiming } from '@features/aria/interviewLanguageGate';
 import type { PreClaudeTurnGateDeps } from '@features/aria/preClaudeTurnGateTypes';
+import { INTERVIEW_CANONICAL_PROBES } from '@features/aria/interviewCanonicalProbeRegistry';
 import { resolveAssessableQuestionTextForResponseTiming } from '@features/aria/resolveAssessableQuestionTextForResponseTiming';
 import type { InterviewResponseTimingEntry } from '@utilities/persistResponseTimingsIncremental';
 import { getSessionLogRuntime } from '@utilities/sessionLogging';
@@ -58,8 +59,12 @@ export function buildInterviewResponseTimingEntry(
         getCurrentScenario(deps.scoredScenariosRef.current) ??
         null);
 
+  const matchedProbe = Object.values(INTERVIEW_CANONICAL_PROBES).find(
+    (entry) => entry.verbatimText.trim() === assessableQuestionText.trim(),
+  );
+
   return {
-    question_id: `q_${deps.responseTimingsRef.current.length + 1}`,
+    question_id: matchedProbe?.id ?? `q_${deps.responseTimingsRef.current.length + 1}`,
     scenario: scenario ?? null,
     question_text: assessableQuestionText,
     latency_ms: latencyMs,

@@ -10,6 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
+import { PAGE_CONTENT_MAX_WIDTH } from '@utilities/pageContentWidth';
 import { getPostInterviewAssessment } from '@features/psychometrics/assessmentContent';
 import { getInsightContent } from '@/data/assessments/insightContent';
 import { contentToSnapshot } from '@/screens/assessments/useAssessmentInsightPayload';
@@ -188,7 +189,7 @@ const styles = StyleSheet.create({
   scroll: {
     flexGrow: 1,
     padding: 24,
-    maxWidth: 480,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     width: '100%',
     alignSelf: 'center',
   },
@@ -311,7 +312,7 @@ const styles = StyleSheet.create({
   },
   resultsScroll: {
     width: '100%',
-    maxWidth: 520,
+    maxWidth: PAGE_CONTENT_MAX_WIDTH,
     alignSelf: 'center',
     paddingBottom: 16,
   },

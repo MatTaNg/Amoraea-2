@@ -15,8 +15,9 @@ export const COMPAT_INTERVIEW_PROCESS_WEIGHT = 0.05;
 export const COMPAT_BASELINE_WEIGHT = 0.05;
 
 /**
- * Production ranking core (compat_v5). Weights are priority-chosen, not a
- * proportional leftover of the old Life-Vision / Narrative mix. They sum to 1.00.
+ * Production ranking core (compat_v5, unchanged in compat_v6). Weights are
+ * priority-chosen, not a proportional leftover of the old Life-Vision / Narrative
+ * mix. They sum to 1.00. Sexual-communication pair similarity is not in this sum.
  *
  * 1. concreteLifeFit — largest; pairwise desired-life fields already collected
  * 2. finance — distinct structured pooling / risk / income

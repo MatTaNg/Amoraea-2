@@ -1,4 +1,5 @@
 import {
+  isAckOnlySentenceBeforeScenarioBoundary,
   isUnauthorizedS1FollowUp,
   looksLikeScenarioHandoffOrVignetteBundle,
   looksLikeShortProbeFallback,
@@ -15,6 +16,22 @@ describe('interviewSpokenTextHeuristics', () => {
     const unauthorized =
       'Makes sense. What could Ryan have done differently in that moment at dinner to prevent the situation from escalating?';
     expect(isUnauthorizedS1FollowUp(unauthorized)).toBe(true);
+  });
+
+  it('treats a standalone Makes sense as an ack that should not precede the scenario-complete line', () => {
+    expect(isAckOnlySentenceBeforeScenarioBoundary('Makes sense.')).toBe(true);
+    expect(isAckOnlySentenceBeforeScenarioBoundary('That makes a lot of sense.')).toBe(true);
+    expect(isAckOnlySentenceBeforeScenarioBoundary('Nice work.')).toBe(false);
+    expect(
+      isAckOnlySentenceBeforeScenarioBoundary(
+        'Good work — you just finished the three scenarios. Next are three personal questions.',
+      ),
+    ).toBe(false);
+    expect(
+      isAckOnlySentenceBeforeScenarioBoundary(
+        'Makes sense. How do you think this situation could be repaired?',
+      ),
+    ).toBe(false);
   });
 
   it('recognizes short in-scenario probes', () => {

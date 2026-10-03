@@ -9,9 +9,8 @@ export function isRelationshipValidationReferralCode(raw: string | null | undefi
     .toUpperCase() === RELATIONSHIP_VALIDATION_REFERRAL_CODE;
 }
 
-/** Post-interview-style instruments used in the validation study (same battery as profile typologies). */
+/** Post-interview instruments used in the validation study (same battery as profile typologies). */
 export const RELATIONSHIP_VALIDATION_INSTRUMENT_IDS = [
-  'SEXUAL_COMMUNICATION',
   'PVQ-21',
   'CONFLICT-30',
   'ECR-36',

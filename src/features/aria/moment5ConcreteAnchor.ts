@@ -95,6 +95,19 @@ export function moment5PersonalNarrativeHasConcreteAnchor(userText: string): boo
   const strongNarrativeOverride =
     wc >= 35 && explicitNarrativeLead && relationalAnchor && conflictEpisodeLexicon;
 
+  /**
+   * A preferred method ("when I think about conflict, I just like to listen") is not an episode,
+   * even when it is long and the word "conflict" is present.
+   */
+  const generalConflictApproach =
+    /\bwhen i think about\b/.test(lower) &&
+    /\b(i just like to|preferably|would be my answer|i (?:usually|generally|typically|always) (?:like to|try to|prefer to))\b/.test(
+      lower,
+    );
+  if (generalConflictApproach && !dyadicOrEpisode && !situationalAnchor) {
+    return false;
+  }
+
   const concrete =
     strongNarrativeOverride ||
     (namedPersonConflictAnchor && wc >= 18) ||

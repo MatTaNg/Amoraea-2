@@ -11,14 +11,14 @@ import type { PreClaudeScenarioConstructProbeFlags } from '@features/aria/resolv
 const ALREADY_ANSWERED_SINGLE_HOP_ADVANCE: Partial<
   Record<InterviewCanonicalProbeId, InterviewCanonicalProbeId>
 > = {
-  s1_contempt: 's2_james_differently',
+  s1_contempt: 's1_repair',
   s1_repair: 's2_james_differently',
   s2_james_differently: 's3_sophie_perspective',
   s2_james_repair: 's3_sophie_perspective',
-  s3_sophie_perspective: 's3_repair',
+  s3_sophie_perspective: 'm4_grudge',
   s3_repair: 'm4_grudge',
   m4_grudge: 'm4_commitment_orientation',
-  m4_commitment_orientation: 'm4_commitment_threshold',
+  m4_commitment_orientation: 'm_support',
   m4_commitment_threshold: 'm_support',
   m_support: 'm_support_need_recognition',
   m_support_need_recognition: 'm5_conflict',

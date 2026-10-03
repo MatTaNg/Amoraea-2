@@ -67,7 +67,6 @@ export const INTERVIEW_CANONICAL_PROBES: Record<
     momentNumber: 1,
     construct: 'repair_as_ryan',
     verbatimText: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-    retired: true,
   },
   s2_james_differently: {
     id: 's2_james_differently',
@@ -97,6 +96,7 @@ export const INTERVIEW_CANONICAL_PROBES: Record<
     momentNumber: 3,
     construct: 'repair_as_daniel',
     verbatimText: SCENARIO_C_REPAIR_QUESTION_CANONICAL,
+    retired: true,
   },
   m4_grudge: {
     id: 'm4_grudge',
