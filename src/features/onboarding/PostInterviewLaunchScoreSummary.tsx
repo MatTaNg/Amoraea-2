@@ -26,7 +26,7 @@ export function PostInterviewLaunchScoreSummary({ userId }: PostInterviewLaunchS
       <View style={styles.card}>
         <Text style={styles.sectionLabel}>Your Score</Text>
         {isPending ? (
-          <ActivityIndicator color={ACCENT} style={styles.loader} />
+          <ActivityIndicator size="small" color="#5BA8E8" style={styles.loader} />
         ) : (
           <Text style={styles.finalScore}>{formatLaunchWaitlistScoreDisplay(finalModifiedScore)}</Text>
         )}

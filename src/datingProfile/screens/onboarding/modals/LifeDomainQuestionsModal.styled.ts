@@ -75,6 +75,9 @@ export const styles = StyleSheet.create({
   questionBlock: {
     gap: 8,
   },
+  questionSeparator: {
+    height: 16,
+  },
   questionSuggestionBlock: {
     gap: 8,
     marginTop: 8,

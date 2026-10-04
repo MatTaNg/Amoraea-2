@@ -129,6 +129,9 @@ export async function generateAIReasoningSafe(
       );
     } catch (err) {
       lastErr = err;
+      const message = err instanceof Error ? err.message : String(err);
+      const edgeCapacity = /WORKER_RESOURCE_LIMIT|IDLE_TIMEOUT/i.test(message);
+      if (edgeCapacity) break;
       if (outer < maxOuter - 1) {
         void remoteLog('[AI_REASONING_INNER_EXHAUSTED]', {
           outer_attempt: outer + 1,

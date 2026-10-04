@@ -40,7 +40,10 @@ import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5Pro
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import { triggerCompletedScenarioScoringIfNeeded } from '@features/aria/runScenarioBoundaryScoring';
 import { advanceInterviewScenarioRefsAfterCanonicalShowScenarioCard } from '@features/aria/interviewScenarioRefSync';
-import { scenarioAMinimumEngagementForHandoff } from '@features/aria/scenarioFollowUpTranscriptGuard';
+import {
+  scenarioAMinimumEngagementForHandoff,
+  shouldStillSpeakSituation2AfterIncompleteS1Engagement,
+} from '@features/aria/scenarioFollowUpTranscriptGuard';
 import { scenarioBMinimumEngagementForHandoff } from '@features/aria/scenarioBProbeLogic';
 import { remoteLog } from '@utilities/remoteLog';
 import { scenarioCRepairConstructStillPending } from '@features/aria/scenarioCPromptDetection';
@@ -111,7 +114,11 @@ export function createParallelStreamSpeakShowScenarioCardOnce(
 
     if (
       kind === 'situation_2' &&
-      !scenarioAMinimumEngagementForHandoff(params.messagesToUse)
+      !shouldStillSpeakSituation2AfterIncompleteS1Engagement({
+        messages: params.messagesToUse,
+        fullStream,
+        repairQuestionAsked: deps.scenarioARepairQuestionAskedRef.current,
+      })
     ) {
       void remoteLog('[SHOW_SCENARIO_CARD_CANONICAL_SPEAK_SKIPPED]', {
         interviewSessionId: deps.interviewSessionIdRef.current,

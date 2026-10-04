@@ -79,7 +79,6 @@ export const SingleChoiceModal: React.FC<SingleChoiceModalProps> = ({
             options={options}
             value={value}
             onSelect={handleSelect}
-            deferSelectUntilPaint={autoAdvanceOnSelect && !hasSecondaryQuestion}
           />
           {hasSecondaryQuestion ? (
             <View style={styles.secondaryQuestionBlock}>

@@ -1,4 +1,5 @@
-import React from "react";
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from "@app/screens/AmoraeaLoadingSpinner";
+import React, { useState } from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -45,19 +46,40 @@ export function InsightScreen() {
     nextMeta,
   } = useAssessmentInsightPayload(user?.id, instrumentId);
   const navigateAfterAssessments = useNavigateAfterAssessments(user?.id);
+  const [continuing, setContinuing] = useState(false);
+
+  const continueAfterBattery = () => {
+    if (continuing) return;
+    setContinuing(true);
+    void navigateAfterAssessments().catch(() => {
+      setContinuing(false);
+    });
+  };
 
   const handleContinue = () => {
     if (isFinal) {
-      void navigateAfterAssessments();
+      continueAfterBattery();
       return;
     }
     if (!instrumentId) return;
     const hasNext = replaceWithNextOnboardingAssessment(navigation, instrumentId);
-    if (!hasNext) void navigateAfterAssessments();
+    if (!hasNext) continueAfterBattery();
   };
 
   if (loading) {
     return <AssessmentPreparingResults />;
+  }
+
+  if (continuing) {
+    return (
+      <View
+        style={styles.continuing}
+        accessibilityRole="progressbar"
+        accessibilityLabel="Loading"
+      >
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+      </View>
+    );
   }
 
   const displaySnapshot =
@@ -120,6 +142,12 @@ export function InsightScreen() {
 }
 
 const styles = StyleSheet.create({
+  continuing: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   container: {
     flex: 1,
     backgroundColor: theme.colors.background,

@@ -136,6 +136,15 @@ describe('showScenarioCardCanonicalTts', () => {
     expect(buildCanonicalShowScenarioCardTtsBody('moment_5')).toBe(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
   });
 
+  it('replaces a paraphrased conflict ask with the scripted question', () => {
+    const paraphrased =
+      "Got it. Last one then we'll wrap up. Think of a time when you and someone close to you had a real conflict — something that actually got tense between you. What happened, and how did it get resolved?";
+    expect(detectShowScenarioCardKind(paraphrased)).toBe('moment_5');
+    const rebuilt = buildCanonicalShowScenarioCardTtsFromStream(paraphrased)!;
+    expect(rebuilt).toContain(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT);
+    expect(rebuilt).not.toContain('someone close to you had a real conflict');
+  });
+
   it('skips Moment 5 canonical replay when stream already spoke the conflict question', () => {
     const spoken =
       "I'm with you. Here's one more question about you. " + MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT;

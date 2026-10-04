@@ -1,10 +1,9 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  ActivityIndicator,
   Alert,
   Pressable,
   Platform,
@@ -12,6 +11,11 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { LikertScale } from '@/shared/components/assessments/LikertScale';
+import {
+  QuestionnaireQuestion,
+  QuestionnaireStepLayout,
+  questionnaireScalePrompt,
+} from '@/shared/components/assessments/QuestionnaireStepLayout';
 import { getInstrumentConfig } from '@/data/assessments/instruments';
 import type { ECRItem } from '@/data/assessments/instruments/ecrItems';
 import { getShuffledItems } from '@/data/assessments/instruments/ecrItems';
@@ -22,7 +26,6 @@ import type { RelationshipValidationTestMode } from '@features/relationshipValid
 import { fetchRelationshipTestMode } from '@features/relationshipValidation/relationshipValidationRepo';
 import { reframePlatonicAssessmentStem } from '@features/relationshipValidation/platonicAssessmentReframe';
 import { skipValidationSexualCommunication } from '@features/relationshipValidation/validationPsychometricsProgress';
-import { useAssessmentScrollContent } from '@utilities/assessmentMobileLayout';
 
 type Props = {
   navigation: { replace: (screen: string, params?: Record<string, unknown>) => void };
@@ -30,7 +33,6 @@ type Props = {
 };
 
 export function ValidationInstrumentScreen({ navigation, route }: Props) {
-  const scrollContentStyle = useAssessmentScrollContent();
   const { user } = useAuth();
   const instrumentId = (route.params?.instrument ?? 'ECR-36') as AssessmentId;
   const config = getInstrumentConfig(instrumentId);
@@ -136,7 +138,7 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
   if (!config || (ecrShuffle && !ecrOrder) || testModeLoading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator size="large" color="#5BA8E8" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }
@@ -146,18 +148,28 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
   const rawItemText = activeEcrItem?.text ?? config.items[currentIndex];
   const itemText = reframePlatonicAssessmentStem(rawItemText, testMode);
   const canonicalId = activeEcrItem?.id ?? currentIndex + 1;
-  const flowProgressPct = totalQuestions > 0 ? (questionNumber / totalQuestions) * 100 : 0;
   const showSkipSection = sexualCommunication && currentIndex === 0;
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      <View style={styles.flowProgressTrack}>
-        <View style={[styles.flowProgressFill, { width: `${flowProgressPct}%` }]} />
-      </View>
-      <ScrollView contentContainerStyle={scrollContentStyle}>
-        <Text style={styles.meta}>
-          {config.title} · Question {questionNumber} of {totalQuestions}
-        </Text>
+      <QuestionnaireStepLayout
+        title={config.title}
+        current={questionNumber}
+        total={totalQuestions}
+        onBack={() => {
+          if (currentIndex > 0) {
+            setCurrentIndex((i) => Math.max(0, i - 1));
+            return;
+          }
+          navigation.replace('ValidationPsychometricsHub');
+        }}
+        backDisabled={saving || skipping}
+        prompt={questionnaireScalePrompt({
+          min: config.minLabel ?? '',
+          max: config.maxLabel ?? '',
+        })}
+        saving={saving}
+      >
         {showSkipSection ? (
           <Pressable
             onPress={() => void handleSkipSection()}
@@ -169,7 +181,7 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
             </Text>
           </Pressable>
         ) : null}
-        <Text style={styles.questionText}>{itemText}</Text>
+        <QuestionnaireQuestion>{itemText}</QuestionnaireQuestion>
         <LikertScale
           value={responses[String(canonicalId)] ?? null}
           onChange={handleResponse}
@@ -177,16 +189,12 @@ export function ValidationInstrumentScreen({ navigation, route }: Props) {
           max={config.max}
           minLabel={config.minLabel}
           maxLabel={config.maxLabel}
+          disabled={saving || skipping}
         />
-        {currentIndex > 0 ? (
-          <Pressable onPress={() => setCurrentIndex((i) => Math.max(0, i - 1))} disabled={saving}>
-            <Text style={styles.backText}>← Back</Text>
-          </Pressable>
-        ) : null}
-      </ScrollView>
+      </QuestionnaireStepLayout>
       {saving ? (
         <View style={styles.savingOverlay}>
-          <ActivityIndicator size="large" color="#FFFFFF" />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         </View>
       ) : null}
     </SafeAreaView>

@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React from 'react';
-import { ActivityIndicator, Platform, Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
 import { ariaScreenStyles as styles } from '@features/aria/ariaScreenStyles';
@@ -19,7 +20,7 @@ export function AriaInterviewResumeLoadingScreen(): React.ReactElement {
           },
         ]}
       >
-        <ActivityIndicator size="small" color="#7A9ABE" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         <Text
           style={{
             fontFamily: Platform.OS === 'web' ? undefined : 'Jost_300Light',

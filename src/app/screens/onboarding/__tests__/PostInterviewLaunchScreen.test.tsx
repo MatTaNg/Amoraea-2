@@ -1,6 +1,6 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, waitFor } from '@testing-library/react-native';
+import { fireEvent, render, screen as rtlScreen, waitFor } from '@testing-library/react-native';
 
 import { PostInterviewLaunchScreen } from '../PostInterviewLaunchScreen';
 
@@ -146,13 +146,18 @@ const originalConsoleError = console.error.bind(console);
 let consoleErrorSpy: jest.SpyInstance;
 let queryClient: QueryClient;
 
-function mockUserRoutingRow(referralNoticePending: string | null = null) {
+let feedbackSubmittedAt: string | null = null;
+
+function mockUserRoutingRow() {
   return {
-    select: jest.fn(() => ({
+    select: jest.fn((cols?: string) => ({
       eq: jest.fn(() => ({
         maybeSingle: jest.fn(() =>
           Promise.resolve({
-            data: { referral_notice_pending: referralNoticePending },
+            data:
+              typeof cols === 'string' && cols.includes('post_completion_feedback_submitted_at')
+                ? { post_completion_feedback_submitted_at: feedbackSubmittedAt }
+                : { referral_notice_pending: null },
             error: null,
           }),
         ),
@@ -182,6 +187,7 @@ describe('PostInterviewLaunchScreen', () => {
     });
     const AsyncStorage = require('@react-native-async-storage/async-storage');
     await AsyncStorage.clear();
+    feedbackSubmittedAt = null;
     mockFetchReferralDiscountStatus.mockResolvedValue(defaultStatus);
     const { supabase } = require('@data/supabase/client') as {
       supabase: { from: jest.Mock };
@@ -262,6 +268,26 @@ describe('PostInterviewLaunchScreen', () => {
       expect(
         screen.getByText("You've unlocked the maximum discount. Every tier is 100% off for you."),
       ).toBeTruthy();
+    });
+  });
+
+  it('shows Give Feedback until post-completion feedback has been submitted', async () => {
+    renderScreen();
+
+    expect(await rtlScreen.findByText('Give Feedback')).toBeTruthy();
+    fireEvent.press(rtlScreen.getByText('Give Feedback'));
+    expect(await rtlScreen.findByText(/begin to feel fatigue/i)).toBeTruthy();
+  });
+
+  it('hides Give Feedback after feedback has been submitted', async () => {
+    feedbackSubmittedAt = '2026-10-03T12:00:00.000Z';
+    renderScreen();
+
+    await waitFor(() => {
+      expect(rtlScreen.getByText('Congratulations on completing your assessment!')).toBeTruthy();
+    });
+    await waitFor(() => {
+      expect(rtlScreen.queryByText('Give Feedback')).toBeNull();
     });
   });
 });

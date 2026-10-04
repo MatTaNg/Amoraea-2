@@ -4,7 +4,7 @@ import { buildReasoningFailurePatch } from '../_shared/aiReasoningPostProcess.ts
 import { rollupPillarScoresFromStoredAttemptRow } from '../_shared/resolvePillarScoresForNarrative.ts';
 
 const ADMIN_EMAIL = 'admin@amoraea.com';
-const ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS = 300_000;
+const ADMIN_AI_REASONING_BACKGROUND_TIMEOUT_MS = 120_000;
 const HANDLER_VERSION = 'admin-retry-ai-reasoning-queued-v2';
 
 const corsHeaders: Record<string, string> = {

@@ -30,7 +30,8 @@ import {
   isShortAckOnlySentence,
   shouldHoldBoundaryWarmStreamingLine,
 } from '@features/aria/interviewerFrameworkPrompt';
-import { isAckOnlySentenceBeforeScenarioBoundary } from '@features/aria/interviewSpokenTextHeuristics';
+import { isAckOnlySentenceBeforeScenarioBoundary, isScenarioEndHandoffSentence } from '@features/aria/interviewSpokenTextHeuristics';
+import { looksLikeInterviewProcessQuestionRepeatRequest } from '@features/aria/interviewAnswerRelevance';
 import { looksLikeSkipConfirmationAssistantPrompt } from '@features/aria/metaCommentSkipFrustration';
 import {
   shouldDeferScenarioVignetteTailForOpeningMerge,
@@ -78,6 +79,7 @@ import {
   isIncompleteScenarioBJamesSayToJamesLeadSentence,
   isScenarioBBoundaryReflectionWithoutNextVignette,
   scenarioBMinimumEngagementForHandoff,
+  resolveScenarioBActiveQuestionWhenInProgress,
   looksLikeScenarioBJamesDifferentlyQuestion,
   looksLikeScenarioBJamesSayToJamesRolePlayQuestion,
   looksLikeScenarioBRepairAsJamesQuestion,
@@ -433,6 +435,19 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           spoken = `${state.deferredScenarioARepairShortAckSentence} ${spoken}`.trim();
           state.deferredScenarioARepairShortAckSentence = null;
         }
+        if (state.deferredScenarioAHandoffShortAckSentence) {
+          const heldAck = state.deferredScenarioAHandoffShortAckSentence;
+          state.deferredScenarioAHandoffShortAckSentence = null;
+          if (isScenarioEndHandoffSentence(spoken)) {
+            void remoteLog('[S1_SHORT_ACK_DROPPED_BEFORE_HANDOFF]', {
+              interviewSessionId: deps.interviewSessionIdRef.current,
+              preview: heldAck.slice(0, 80),
+              nextPreview: spoken.slice(0, 120),
+            });
+          } else {
+            spoken = `${heldAck} ${spoken}`.trim();
+          }
+        }
         if (state.deferredScenarioCShortAckSentence) {
           spoken = `${state.deferredScenarioCShortAckSentence} ${spoken}`.trim();
           state.deferredScenarioCShortAckSentence = null;
@@ -748,15 +763,33 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           const repairAnswerAlreadySatisfied = scenarioARepairAnswerAlreadySatisfiedInTranscript(
             params.messagesToUse,
           );
+          let latestUserText = '';
+          for (let i = params.messagesToUse.length - 1; i >= 0; i--) {
+            const row = params.messagesToUse[i];
+            if (row?.role === 'user') {
+              latestUserText = row.content ?? '';
+              break;
+            }
+          }
+          const userAskedToHearTheQuestionAgain =
+            looksLikeInterviewProcessQuestionRepeatRequest(latestUserText);
           const scenarioARepairAlreadyDelivered =
             repairAnswerAlreadySatisfied ||
             !shouldDeliverScenarioFollowUpQuestion(
               params.messagesToUse,
               SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-            ) || state.scenarioARepairQuestionSpokenThisStream;
+            ) ||
+            state.scenarioARepairQuestionSpokenThisStream ||
+            (deps.scenarioARepairQuestionAskedRef.current && !userAskedToHearTheQuestionAgain);
           if (scenarioARepairAlreadyDelivered) {
             const afterRepairEchoStrip = stripScenarioARepairQuestionStreamingEcho(spoken, true);
             if (afterRepairEchoStrip === null) {
+              if (deps.scenarioARepairQuestionAskedRef.current && !userAskedToHearTheQuestionAgain) {
+                void remoteLog('[S1_REPAIR_ALREADY_SPOKEN_ECHO_DROPPED]', {
+                  interviewSessionId: deps.interviewSessionIdRef.current,
+                  preview: spoken.slice(0, 220),
+                });
+              }
               return;
             }
             spoken = afterRepairEchoStrip;
@@ -896,9 +929,39 @@ export function createParallelStreamMaybeQueueSentenceForTts(
           });
           return;
         }
-        const s2ToS3CanonicalHandoffPending =
+        const s2HandoffEngagementReady =
           effectiveActiveScenario === 2 &&
           deps.currentInterviewMomentRef.current === 2 &&
+          scenarioBMinimumEngagementForHandoff(params.messagesToUse as MessageWithScenario[]);
+        if (
+          effectiveActiveScenario === 2 &&
+          deps.currentInterviewMomentRef.current === 2 &&
+          !s2HandoffEngagementReady &&
+          (isScenarioHandoffTransitionPhraseOnly(spoken) ||
+            hasScenarioBoundaryWrapPhrase(spoken) ||
+            looksLikeNonCanonicalScenarioCVignetteFiction(spoken) ||
+            textContainsScenarioCVignetteBody(spoken) ||
+            isExactShowScenario3VignetteText(spoken))
+        ) {
+          void remoteLog('[S2_PREMATURE_S3_STREAM_SUPPRESSED]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
+            preview: spoken.slice(0, 220),
+            reason: 's2_engagement_incomplete',
+          });
+          if (!state.s2PrematureAdvanceReplayQueued) {
+            state.s2PrematureAdvanceReplayQueued = true;
+            const replay = resolveScenarioBActiveQuestionWhenInProgress(
+              params.messagesToUse as MessageWithScenario[],
+            );
+            const alreadySpoken = deps.parallelStreamingTtsRef.current.spokenCompleteText.trim();
+            if (replay && !alreadySpoken) {
+              maybeQueueSentenceForTts(replay, false);
+            }
+          }
+          return;
+        }
+        const s2ToS3CanonicalHandoffPending =
+          s2HandoffEngagementReady &&
           (shouldAdvanceScenarioBAfterSatisfiedRepair(
             params.messagesToUse,
             fullStreamText,
@@ -1078,6 +1141,27 @@ export function createParallelStreamMaybeQueueSentenceForTts(
             interviewSessionId: deps.interviewSessionIdRef.current,
             preview: spoken.slice(0, 80),
             s1ContemptFixVersion: 24,
+          });
+          return;
+        }
+        if (
+          isActiveScenarioAConstructProbeTurn(
+            deps.currentScenarioRef.current,
+            deps.currentInterviewMomentRef.current,
+          ) &&
+          !isInterviewCanonicalProbeRetired('s1_repair') &&
+          deps.scenarioARepairQuestionAskedRef.current &&
+          !shouldDeliverScenarioFollowUpQuestion(
+            params.messagesToUse,
+            SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
+          ) &&
+          isShortAckOnlySentence(spoken) &&
+          !looksLikeScenarioARepairQuestion(spoken)
+        ) {
+          state.deferredScenarioAHandoffShortAckSentence = spoken;
+          void remoteLog('[S1_HANDOFF_SHORT_ACK_DEFERRED]', {
+            interviewSessionId: deps.interviewSessionIdRef.current,
+            preview: spoken.slice(0, 80),
           });
           return;
         }

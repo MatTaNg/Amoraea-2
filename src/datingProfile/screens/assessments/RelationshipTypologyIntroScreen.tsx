@@ -65,10 +65,9 @@ export function RelationshipTypologyIntroScreen() {
         <View style={styles.inner}>
           <View style={styles.card}>
             <View style={styles.cardAccent} pointerEvents="none" />
-            <Text style={styles.overline}>Relationship typology</Text>
             <Text style={styles.title}>How we learn how you connect</Text>
             <Text style={styles.subtitle}>
-              You will complete three brief psychometric tests and your profile—about{' '}
+              You will complete three brief psychometric tests and then your profile, about{' '}
               {TYPOLOGY_ONBOARDING_TOTAL_DURATION_LABEL} total, with pauses between each step.
             </Text>
 

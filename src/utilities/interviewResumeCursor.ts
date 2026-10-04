@@ -1,5 +1,6 @@
 import { isGreetingOnly } from '../features/aria/interviewLocalPersistence';
 import { isRepeatableMainInterviewQuestionLine } from '../features/aria/interviewDisengagementProbes';
+import { personalResumeQuestionRank } from '../features/aria/interviewDisengagementTranscriptHelpers';
 import { transcriptHasInterviewClosingAssistantMessage } from '../features/aria/elongatingProbe';
 import { SCENARIO_2_TO_3_TRANSITION_FALLBACK } from '../features/aria/interviewTransitionBundles';
 import { looksLikeMoment4GrudgePrompt, looksLikeMoment4ThresholdQuestion } from '../features/aria/moment4ProbeLogic';
@@ -924,10 +925,7 @@ export function resumeCheckpointIndicatesPersonalPartActive(
   if (resumeTranscriptIndicatesPersonalPartActive(transcriptMessages, synced)) return true;
   const q = (lastQuestionText ?? '').trim();
   if (!q) return false;
-  if (looksLikeMoment4GrudgePrompt(q)) return true;
-  if (looksLikeMoment4ThresholdQuestion(q)) return true;
-  if (looksLikeMoment4SpecificityFollowUpEcho(q)) return true;
-  return false;
+  return personalResumeQuestionRank(q) > 0;
 }
 
 export function buildResumeWelcomeMessage(params: {

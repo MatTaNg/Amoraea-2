@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, RefreshControl } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import { RELATIONSHIP_VALIDATION_TRACK } from '@features/relationshipValidation/constants';
 import { filterValidationCohortRows } from '@features/relationshipValidation/validationCohortFilters';
@@ -120,7 +121,7 @@ export function ValidationCohortTab() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#5BA8E8" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }

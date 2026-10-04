@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet } from 'react-native';
 import {
   INTERVIEW_REPORT_PILLAR_KEYS,
   type InterviewReportAttempt,
@@ -85,7 +85,7 @@ export function InterviewReportPanel({
 
       {attempt.reasoning_pending && mode === 'partial' ? (
         <View style={styles.pendingRow}>
-          <ActivityIndicator size="small" color="#7A9ABE" />
+          <ActivityIndicator size="small" color="#5BA8E8" />
           <Text style={styles.pendingText}>Preparing narrative insights…</Text>
         </View>
       ) : null}

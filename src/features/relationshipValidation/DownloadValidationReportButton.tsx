@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   TouchableOpacity,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Platform,
   View,
@@ -114,7 +114,7 @@ export function DownloadValidationReportButton({
               a moment — please read it before answering the feedback questions.
             </Text>
             <View style={styles.loadingCard}>
-              <ActivityIndicator color="#5BA8E8" size="small" />
+              <ActivityIndicator size="small" color="#5BA8E8" />
               <Text style={styles.loadingText}>Preparing your report…</Text>
             </View>
           </>
@@ -127,7 +127,7 @@ export function DownloadValidationReportButton({
             before you continue to the feedback questions below.
           </Text>
           <View style={styles.loadingCard}>
-            <ActivityIndicator color="#5BA8E8" size="small" />
+            <ActivityIndicator size="small" color="#5BA8E8" />
             <Text style={styles.loadingText}>Generating your report…</Text>
           </View>
         </>
@@ -156,7 +156,7 @@ export function DownloadValidationReportButton({
           >
             {exporting ? (
               <View style={styles.reportButtonLoading}>
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator size="small" color="#fff" />
                 <Text style={styles.reportButtonLoadingText}>Opening report…</Text>
               </View>
             ) : (

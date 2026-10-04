@@ -28,6 +28,7 @@ import {
   wordCount,
 } from './metaCommentPatternScoring';
 import { classifyPriorAnswerMetaKind } from './interviewPriorAnswerMetaDetection';
+import { getInabilitySubstantiveOverrideDetail } from './metaCommentInabilityOverride';
 import type {
   ConfusionSubtype,
   MetaCommentClassification,
@@ -187,6 +188,7 @@ export function classifyUserMetaComment(text: string): MetaCommentClassification
     if (priorMetaKind === 'sufficiency_check_in') {
       return withConfusionSubtype({ type: 'checking_in', confidence: 0.72 }, t);
     }
+    if (getInabilitySubstantiveOverrideDetail(t)) return null;
     return withConfusionSubtype(
       { type: 'ambiguous_short', confidence: Math.max(0.35, bestWeak) },
       t

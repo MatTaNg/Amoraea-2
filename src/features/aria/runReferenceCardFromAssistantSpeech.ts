@@ -23,6 +23,7 @@ import {
 } from '@features/aria/interviewReferenceCardResumeHelpers';
 
 import { stripControlTokens } from '@features/aria/interviewControlTokens';
+import { isShowScenarioTransitionLeadOnly } from '@features/aria/interviewAssessablePromptText';
 
 import {
 
@@ -31,6 +32,8 @@ import {
   extractScenarioModalQuestionFromAssistantText,
 
   getLastSubstantiveScenarioModalQuestion,
+
+  isShowScenarioExcludedAssistantText,
 
   resolveMoment4ShowScenarioReferenceCard,
 
@@ -464,7 +467,9 @@ export function runApplyReferenceCardFromAssistantSpeech(
 
   const cleaned = stripControlTokens(rawText).trim();
 
-  if (!cleaned) return;
+  if (!cleaned || isShowScenarioTransitionLeadOnly(cleaned)) return;
+
+  if (isShowScenarioExcludedAssistantText(cleaned)) return;
 
   const assistantForModal = buildAssistantForModal(deps.messages);
 
@@ -905,6 +910,8 @@ export function runReferenceCardShouldUpdateOnPlaybackStart(rawText: string): bo
   const cleaned = stripControlTokens(rawText).trim();
 
   if (!cleaned) return false;
+
+  if (isShowScenarioExcludedAssistantText(cleaned)) return false;
 
   if (isIrrelevantAnswerRetryAssistantLine(cleaned)) return false;
 

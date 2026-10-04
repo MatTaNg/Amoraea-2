@@ -1,6 +1,4 @@
-/** Defer until after the next paint so selected styling can render before auto-advance. */
+/** Advance immediately. Persistence runs after the next page is shown. */
 export function afterOnboardingSelectionFeedback(action: () => void): void {
-  requestAnimationFrame(() => {
-    requestAnimationFrame(action);
-  });
+  action();
 }

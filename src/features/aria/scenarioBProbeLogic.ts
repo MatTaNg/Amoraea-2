@@ -6,6 +6,7 @@ import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestra
 import { assistantTextLooksLikeMoment4HandoffLead } from './interviewTransitionBundles';
 import { isScenarioBoundaryPositiveAddressReflection } from './interviewReflectionTextStrips';
 import { isDecline } from './interviewControlTokens';
+import { isShortAckOnlySentence } from './interviewerFrameworkPrompt';
 import { looksLikeIncompleteCutOffUserAnswer, looksLikeInterviewProcessMetaComment, looksLikeInterviewProcessQuestionRepeatRequest } from './interviewAnswerRelevance';
 import { classifyUserMetaComment } from './metaCommentClassifierCore';
 import {
@@ -223,6 +224,8 @@ export function isScenarioBNonSubstantiveUserTurnForHandoff(
 ): boolean {
   const t = (userContent ?? '').replace(/\s+/g, ' ').trim();
   if (!t) return true;
+  if (isShortAckOnlySentence(t)) return true;
+  if (/^(?:thanks|thank you)(?:\s+so\s+much|\s+very\s+much)?\s*[.!?…]?\s*$/i.test(t)) return true;
   if (looksLikeInterviewProcessQuestionRepeatRequest(t)) return true;
   if (looksLikeInterviewProcessMetaComment(t) && t.split(/\s+/).filter(Boolean).length <= 8) {
     return true;
@@ -284,6 +287,14 @@ export function countScenarioBUserTurns(messages: readonly MessageWithScenario[]
   return messages.filter((m) => m.role === 'user' && m.scenarioNumber === 2).length;
 }
 
+/** "Thank you." / "Got it." is not an answer to Situation 2. */
+export function scenarioBUserTurnCountsTowardEngagement(
+  text: string,
+  priorAssistantContent?: string,
+): boolean {
+  return !isScenarioBNonSubstantiveUserTurnForHandoff(text, priorAssistantContent);
+}
+
 export function transcriptHasUserResponseAfterScenarioBJamesDifferently(
   messages: readonly MessageWithScenario[],
 ): boolean {
@@ -297,7 +308,9 @@ export function transcriptHasUserResponseAfterScenarioBJamesDifferently(
     ) {
       continue;
     }
-    return messages.slice(i + 1).some((t) => t.role === 'user' && (t.content ?? '').trim());
+    return messages
+      .slice(i + 1)
+      .some((t) => t.role === 'user' && scenarioBUserTurnCountsTowardEngagement(t.content ?? ''));
   }
   return false;
 }
@@ -310,7 +323,9 @@ function transcriptHasUserResponseAfterScenarioBJamesRepair(
     if (m.role !== 'assistant') continue;
     const content = m.content ?? '';
     if (!looksLikeScenarioBRepairAsJamesQuestion(content)) continue;
-    return messages.slice(i + 1).some((t) => t.role === 'user' && (t.content ?? '').trim());
+    return messages
+      .slice(i + 1)
+      .some((t) => t.role === 'user' && scenarioBUserTurnCountsTowardEngagement(t.content ?? ''));
   }
   return false;
 }

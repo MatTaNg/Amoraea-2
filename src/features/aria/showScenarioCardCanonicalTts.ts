@@ -96,6 +96,7 @@ const SHOW_SCENARIO_CARD_BODY_START: Record<ShowScenarioCardKind, RegExp[]> = {
   moment_5: [
     /\bThink of a time when you had a conflict with someone important to you\b/i,
     /\bThink of a time when you had a conflict with someone important\b/i,
+    /\bThink of a time when you\b[\s\S]{0,160}\bhad a (?:real )?conflict\b/i,
   ],
 };
 

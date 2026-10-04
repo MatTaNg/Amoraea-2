@@ -222,6 +222,9 @@ export function looksLikeMoment5ConflictQuestionIntro(lowerNormalized: string): 
     lower.includes('think of a time when you had a conflict with someone close') ||
     lower.includes('think of a time you had a conflict with someone close') ||
     (/\bthink of a time (?:when )?you had a (?:real )?conflict\b/.test(lower) &&
+      /\b(?:someone (?:important|close)|important to you|close to you)\b/.test(lower)) ||
+    (/\bthink of a time when you\b/.test(lower) &&
+      /\bhad a (?:real )?conflict\b/.test(lower) &&
       /\b(?:someone (?:important|close)|important to you|close to you)\b/.test(lower))
   );
 }

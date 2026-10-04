@@ -3,6 +3,7 @@ import { View } from 'react-native';
 
 import type { VoiceState } from '@features/aria/hooks/useAriaInterviewSession';
 import { UserInterviewLayout, type ActiveScenario } from '@app/screens/UserInterviewLayout';
+import { showScenarioCardIsUserVisible } from '@features/aria/interviewScenarioModalPrompt';
 import type { FlameState } from '@app/screens/FlameOrb';
 
 export function AriaInterviewerActivePanel({
@@ -68,17 +69,21 @@ export function AriaInterviewerActivePanel({
     ? Math.max(audioRecorderInputMeterLevel, preInitMeterLevel)
     : 0;
 
-  const micLabelOverride = useTapMicUi
-    ? audioRecorderIsRecording
-      ? 'Tap to stop'
-      : 'Tap to speak'
-    : undefined;
+  const micLabelOverride =
+    useTapMicUi && (audioRecorderIsRecording || voiceState === 'idle')
+      ? audioRecorderIsRecording
+        ? 'Tap to stop'
+        : 'Tap to speak'
+      : undefined;
 
   return (
     <View style={{ flex: 1, backgroundColor: '#05060D' }}>
       <UserInterviewLayout
         flameState={flameState}
-        showScenarioReferenceEnabled={interviewUiPhase === 'scenario_active' && !!referenceCardScenario}
+        showScenarioReferenceEnabled={
+          interviewUiPhase === 'scenario_active' &&
+          showScenarioCardIsUserVisible(referenceCardScenario?.text, referenceCardPrompt)
+        }
         referenceCardScenario={referenceCardScenario}
         referenceCardPrompt={referenceCardPrompt}
         ttsPlaybackReliabilityNotice={ttsPlaybackReliabilityNotice}

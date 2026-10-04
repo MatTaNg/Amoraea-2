@@ -127,18 +127,23 @@ describe('ReferralCodeIntroShell', () => {
 });
 
 describe('isReferralCodeIntroSuppressedRoute', () => {
-  it('suppresses edit profile and nested onboarding routes', () => {
+  it('suppresses questionnaires, typology, onboarding, and the interview congrats screen', () => {
     expect(isReferralCodeIntroSuppressedRoute('DatingProfileEdit')).toBe(true);
     expect(isReferralCodeIntroSuppressedRoute('PostInterviewLaunch')).toBe(true);
+    expect(isReferralCodeIntroSuppressedRoute('PostInterviewPassed')).toBe(true);
+    expect(isReferralCodeIntroSuppressedRoute('PsychometricAssessment')).toBe(true);
+    expect(isReferralCodeIntroSuppressedRoute('DatingInstrument')).toBe(true);
+    expect(isReferralCodeIntroSuppressedRoute('DatingTypologyIntro')).toBe(true);
     expect(isReferralCodeIntroSuppressedRoute('Amoraea')).toBe(false);
 
     const onboardingState = {
       stale: false,
       type: 'stack',
       key: 'root',
-      index: 0,
-      routeNames: ['DatingProfileOnboarding'],
+      index: 1,
+      routeNames: ['PostInterviewPassed', 'DatingProfileOnboarding'],
       routes: [
+        { key: 'passed', name: 'PostInterviewPassed' },
         {
           key: 'onboarding',
           name: 'DatingProfileOnboarding',
@@ -155,5 +160,9 @@ describe('isReferralCodeIntroSuppressedRoute', () => {
     } as const;
 
     expect(isReferralCodeIntroSuppressedRoute('DatingModals', onboardingState)).toBe(true);
+    expect(isReferralCodeIntroSuppressedRoute('PostInterviewPassed', {
+      ...onboardingState,
+      index: 0,
+    })).toBe(true);
   });
 });

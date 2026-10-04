@@ -8,7 +8,7 @@ import { buildEvidenceContextFromAttemptPatterns } from './narrativeEvidenceGuid
 import { rollupPillarScoresFromStoredAttemptRow } from './resolvePillarScoresForNarrative.ts';
 
 /** Matches admin-retry / complete-standard-interview background budget. */
-export const NARRATIVE_BACKGROUND_TIMEOUT_MS = 300_000;
+export const NARRATIVE_BACKGROUND_TIMEOUT_MS = 120_000;
 
 export type NarrativeAttemptRow = {
   id: string;
@@ -176,7 +176,7 @@ export async function processNarrativeForAttempt(
       [],
       {
         perAttemptTimeoutMs: NARRATIVE_BACKGROUND_TIMEOUT_MS,
-        maxAttempts: 4,
+        maxAttempts: 2,
         evidenceContext,
       },
     );

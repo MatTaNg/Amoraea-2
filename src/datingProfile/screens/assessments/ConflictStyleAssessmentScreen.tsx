@@ -1,11 +1,8 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   View,
-  Text,
   StyleSheet,
-  ScrollView,
-  Pressable,
-  ActivityIndicator,
   Alert,
 } from "react-native";
 import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
@@ -13,6 +10,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { RouteProp } from "@react-navigation/native";
 import { replaceWithPreviousOnboardingAssessment } from "@/datingProfile/onboarding/navigateToPreviousOnboardingAssessment";
+import { exitDatingProfileOnboardingToPostInterview } from "@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/shared/hooks/AuthProvider";
 import { useProfile } from "@/shared/hooks/useProfile";
@@ -29,14 +27,16 @@ import { shufflePair } from "@/data/assessments/instruments/conflictStyleShuffle
 import { saveAssessmentProgress } from "@/data/services/assessmentService";
 import { profilesRepo } from "@/data/repos/profilesRepo";
 import { theme } from "@/shared/theme/theme";
-import { AssessmentHeader } from "@/shared/components/assessments/AssessmentHeader";
+import {
+  QuestionnaireOption,
+  QuestionnaireQuestion,
+  QuestionnaireStepLayout,
+} from "@/shared/components/assessments/QuestionnaireStepLayout";
 import { AssessmentPreparingResults } from "@/shared/components/assessments/AssessmentPreparingResults";
 import {
-  ASSESSMENT_IDS,
   getCompletedAssessments,
   getFirstIncompleteAssessment,
   getNextInstrument,
-  onboardingAssessmentBatteryIndex,
 } from "@/data/services/assessmentService";
 import { useNavigateAfterAssessments } from "@/datingProfile/onboarding/useNavigateAfterAssessments";
 
@@ -324,6 +324,15 @@ export function ConflictStyleAssessmentScreen() {
     })();
   };
 
+  const goToPreviousQuestion = () => {
+    if (saving || currentIndex <= 0) return;
+    setCurrentIndex((i) => i - 1);
+  };
+
+  const exitToCongrats = () => {
+    exitDatingProfileOnboardingToPostInterview(navigation, user?.id);
+  };
+
   const goBack = () => {
     if (saving) return;
     if (currentIndex > 0) {
@@ -336,7 +345,7 @@ export function ConflictStyleAssessmentScreen() {
   if (loadingMeta) {
     return (
       <View style={[styles.centered, { flex: 1, backgroundColor: theme.colors.background }]}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }
@@ -350,52 +359,36 @@ export function ConflictStyleAssessmentScreen() {
   }
 
   const qNum = currentIndex + 1;
-  const progressPct = (qNum / total) * 100;
   const selected = answers[currentIndex];
-  const assessmentIndex = onboardingAssessmentBatteryIndex("CONFLICT-30");
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <View style={styles.flowProgressTrack}>
-        <View style={[styles.flowProgressFill, { width: `${progressPct}%` }]} />
-      </View>
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.questionScrollContent}
-        keyboardShouldPersistTaps="handled"
+      <QuestionnaireStepLayout
+        title="Conflict style"
+        current={qNum}
+        total={total}
+        onBack={fromFlow === "onboarding" ? exitToCongrats : goBack}
+        headerBackLabel={fromFlow === "onboarding" ? "Back to previous screen" : "Go back"}
+        onPreviousQuestion={fromFlow === "onboarding" ? goToPreviousQuestion : undefined}
+        previousQuestionDisabled={saving || currentIndex <= 0}
+        backDisabled={saving}
       >
-        <View style={styles.questionCard}>
-          <AssessmentHeader
-            assessmentIndex={assessmentIndex}
-            currentQ={qNum}
-            totalQ={total}
-            assessmentName="Conflict style"
-            totalAssessments={ASSESSMENT_IDS.length}
-          />
-          <Text style={styles.question}>{pair?.prompt ?? ""}</Text>
-          {shuffled &&
-            [shuffled.first, shuffled.second].map((opt, displayIdx) => {
+        <QuestionnaireQuestion>{pair?.prompt ?? ""}</QuestionnaireQuestion>
+        {shuffled
+          ? [shuffled.first, shuffled.second].map((opt, displayIdx) => {
               const isSel = selected?.selectedOptionIndex === displayIdx;
               return (
-                <Pressable
+                <QuestionnaireOption
                   key={`${currentIndex}-${displayIdx}`}
-                  style={[styles.option, isSel && styles.optionReviewed]}
+                  label={opt.text}
+                  selected={isSel}
                   disabled={saving}
                   onPress={() => selectOption(displayIdx, opt.style)}
-                >
-                  <Text style={styles.optionText}>{opt.text}</Text>
-                </Pressable>
+                />
               );
-            })}
-          <Pressable
-            style={styles.backBtn}
-            onPress={goBack}
-            disabled={saving}
-          >
-            <Text style={[styles.backText, saving && styles.backDisabled]}>← Back</Text>
-          </Pressable>
-        </View>
-      </ScrollView>
+            })
+          : null}
+      </QuestionnaireStepLayout>
     </SafeAreaView>
   );
 }

@@ -1,4 +1,7 @@
+import { useLayoutEffect } from 'react';
+
 import { useAriaInterviewClosingQuestionState } from '@features/aria/hooks/useAriaInterviewClosingQuestionState';
+import { bindInterviewProgressSources } from '@features/aria/interviewProgressUiStore';
 
 export type {
   AriaInterviewScreenSessionGateState,
@@ -46,6 +49,14 @@ export function useAriaInterviewScreenSessionState(
   });
   const progressReset = useAriaInterviewSessionProgressResetGateRefs(userId);
   const closingQuestion = useAriaInterviewClosingQuestionState();
+
+  useLayoutEffect(() => {
+    return bindInterviewProgressSources(
+      scenario.currentInterviewMomentRef,
+      scenario.interviewMomentsCompleteRef,
+      shell.lastQuestionTextRef,
+    );
+  }, [scenario.currentInterviewMomentRef, scenario.interviewMomentsCompleteRef, shell.lastQuestionTextRef]);
 
   return {
     routing,

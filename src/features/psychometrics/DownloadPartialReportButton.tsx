@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   TouchableOpacity,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Platform,
   View,
@@ -89,7 +89,7 @@ export function DownloadPartialReportButton({
             We&apos;re saving your interview results. Your downloadable preview will be ready in a moment.
           </Text>
           <View style={styles.loadingCard}>
-            <ActivityIndicator color={PSYCHOMETRICS_ACCENT} size="small" />
+            <ActivityIndicator size="small" color="#93c5fd" />
             <Text style={styles.loadingText}>Preparing your preview…</Text>
           </View>
         </>
@@ -99,7 +99,7 @@ export function DownloadPartialReportButton({
             We&apos;re writing your partial report from your AI interview. This usually takes about a minute.
           </Text>
           <View style={styles.loadingCard}>
-            <ActivityIndicator color={PSYCHOMETRICS_ACCENT} size="small" />
+            <ActivityIndicator size="small" color="#93c5fd" />
             <Text style={styles.loadingText}>Generating your report…</Text>
           </View>
         </>
@@ -143,7 +143,7 @@ export function DownloadPartialReportButton({
           >
             {exporting ? (
               <View style={styles.reportButtonLoading}>
-                <ActivityIndicator color={isSecondary ? PSYCHOMETRICS_ACCENT : '#fff'} size="small" />
+                <ActivityIndicator size="small" color={isSecondary ? '#93c5fd' : '#fff'} />
                 <Text
                   style={[
                     styles.reportButtonLoadingText,

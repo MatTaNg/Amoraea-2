@@ -14,10 +14,11 @@ import {
   clearResumeDeferredUserSpeech,
   flushResumeDeferredUserSpeechWhenUnblocked,
 } from '@features/aria/resumeDeferredUserSpeech';
+import { findLastRepeatableInterviewQuestionText } from '@features/aria/interviewDisengagementProbes';
 import {
   findLastMoment4RepeatableQuestionText,
-  findLastRepeatableInterviewQuestionText,
-} from '@features/aria/interviewDisengagementProbes';
+  resolvePersonalPartResumeQuestionText,
+} from '@features/aria/interviewDisengagementTranscriptHelpers';
 import { MOMENT_4_GRUDGE_QUESTION_TEXT } from '@features/aria/moment4ProbeLogic';
 import {
   isAssistantBubbleForTranscript,
@@ -87,18 +88,7 @@ export function resolveResumeWelcomeQuestionText(
     activeScenario: options.activeScenario ?? undefined,
   };
   if (options.inPersonalPart) {
-    const hasMoment5Question = messages.some(
-      (m) =>
-        m.role === 'assistant' &&
-        !m.isWelcomeBack &&
-        !m.isScoreCard &&
-        transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? ''),
-    );
-    const raw = hasMoment5Question
-      ? findLastRepeatableInterviewQuestionText(messages, fallbackLastQuestionText, {
-          activeScenario: options.activeScenario ?? undefined,
-        })
-      : (findLastMoment4RepeatableQuestionText(messages) ?? MOMENT_4_GRUDGE_QUESTION_TEXT);
+    const raw = resolvePersonalPartResumeQuestionText(messages, fallbackLastQuestionText);
     return resolveQuestionOnlyTextForResumeWelcome(raw, resolveOpts);
   }
   const raw = findLastRepeatableInterviewQuestionText(messages, fallbackLastQuestionText, {
@@ -168,9 +158,10 @@ export async function applyResumeWelcomeMessagesAndPlayback(params: {
       deps.setInterviewUiPhase('scenario_active');
     } else {
       const moment4Question =
-        findLastMoment4RepeatableQuestionText(fullMessages) ??
-        resolveLastMoment4QuestionCardBodyFromTranscript(fullMessages) ??
-        refSync.prompt?.trim() ??
+        deps.resumeLastAssistantTextRef.current?.trim() ||
+        findLastMoment4RepeatableQuestionText(fullMessages) ||
+        resolveLastMoment4QuestionCardBodyFromTranscript(fullMessages) ||
+        refSync.prompt?.trim() ||
         MOMENT_4_GRUDGE_QUESTION_TEXT;
       deps.committedScenarioRef.current = {
         label: MOMENT_4_PERSONAL_LABEL,

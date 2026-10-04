@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, SafeAreaView, StyleSheet, View } from 'react-native';
+import { SafeAreaView, StyleSheet, View } from 'react-native';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/hooks/AuthProvider';
 import { MarketResearchModal } from '@features/onboarding/MarketResearchModal';
@@ -79,7 +80,7 @@ export function AssessmentWelcomeScreen({ navigation, route }: Props) {
   if (checkingResume) {
     return (
       <SafeAreaView style={styles.loading}>
-        <ActivityIndicator size="large" color={PSYCHOMETRICS_ACCENT} />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </SafeAreaView>
     );
   }

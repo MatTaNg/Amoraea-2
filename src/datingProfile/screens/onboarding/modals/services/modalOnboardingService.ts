@@ -530,9 +530,10 @@ class ModalOnboardingService {
         'photos',
         'attractionPreferences',
         'lifeDomains',
+        'profilePrompts',
+        'lifeDomainOptionalIntro',
         ...LIFE_DOMAIN_OPTIONAL_OPEN_ENDED_ONBOARDING_STEPS.map((s) => s.step),
         'typology',
-        'profilePrompts',
         'personalityDocuments',
         'profileComplete',
         'complete',
@@ -661,10 +662,10 @@ class ModalOnboardingService {
       return 'photos';
     if (!this.attractionPreferencesCompletionSatisfied(ctx)) return 'attractionPreferences';
     if (!this.lifeDomainsCompletionSatisfied(ctx)) return 'lifeDomains';
-    const incompleteOptionalOpenEnded = this.firstIncompleteLifeDomainOptionalStep(ctx);
-    if (incompleteOptionalOpenEnded) return incompleteOptionalOpenEnded;
-    if (shouldShowTypologyOnboardingStep((ctx as any)?.typology)) return 'typology';
     if (this.profilePromptsSetupMissing(ctx)) return 'profilePrompts';
+    const incompleteOptionalOpenEnded = this.firstIncompleteLifeDomainOptionalStep(ctx);
+    if (incompleteOptionalOpenEnded) return 'lifeDomainOptionalIntro';
+    if (shouldShowTypologyOnboardingStep((ctx as any)?.typology)) return 'typology';
     if (savedStep === 'profileComplete' || savedStep === 'complete') return 'profileComplete';
     if (savedStep === 'personalityDocuments') return 'personalityDocuments';
     return 'personalityDocuments';
@@ -961,25 +962,6 @@ class ModalOnboardingService {
         onboarding_data: onboardingData,
       };
 
-      console.log('Saving onboarding progress:', {
-        userId,
-        currentStep: progress.currentStep,
-        completedSteps,
-        onboardingDataKeys: Object.keys(onboardingData),
-        onboardingDataValues: Object.entries(onboardingData).reduce((acc, [key, value]) => {
-          if (value !== undefined && value !== null && value !== '') {
-            if (Array.isArray(value)) {
-              acc[key] = `Array(${value.length})`;
-            } else if (typeof value === 'object') {
-              acc[key] = `Object(${Object.keys(value).length} keys)`;
-            } else {
-              acc[key] = String(value).substring(0, 50);
-            }
-          }
-          return acc;
-        }, {} as Record<string, string>),
-      });
-
       // Upsert — avoids duplicate key races when two saves run before either insert completes.
       const { error: upsertError } = await supabase.from('onboarding_progress').upsert(
         {
@@ -993,13 +975,6 @@ class ModalOnboardingService {
         console.error('Supabase error saving progress:', upsertError);
         return { success: false, error: upsertError as Error };
       }
-
-      console.log('Successfully saved onboarding progress in database:', {
-        userId,
-        currentStep: progress.currentStep,
-        completedStepsCount: completedSteps.length,
-        dataKeys: Object.keys(onboardingData),
-      });
 
       return { success: true };
     } catch (error) {

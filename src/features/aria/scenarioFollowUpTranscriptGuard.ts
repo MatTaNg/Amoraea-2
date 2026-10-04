@@ -28,6 +28,7 @@ import {
   looksLikeScenarioAContemptProbeQuestion,
 } from './scenarioAContemptProbeTextMatch';
 import { isInterviewCanonicalProbeRetired } from './interviewCanonicalProbeRegistry';
+import { countWords } from './disengagementProbeNormalize';
 import {
   scenarioAContemptConstructReadyForRetiredRepairHandoff,
 } from './scenarioAContemptProbeCoverage';
@@ -138,6 +139,10 @@ function isTransientScenarioARepairCompletionInterstitial(content: string): bool
   const c = (content ?? '').trim();
   if (!c) return true;
   if (isNonRepeatableAssistantLineForVerbatimReplay(c)) return true;
+  // Cut-off retry and the short meta ack sit between the repair ask and the user's answer.
+  if (c.length < 220 && /\b(?:can you try again|just say whatever comes to mind|take your time)\b/i.test(c)) {
+    return true;
+  }
   return false;
 }
 
@@ -262,8 +267,12 @@ export function scenarioFollowUpAlreadyInTranscript(
     if (!transcriptContainsScenarioARepairQuestion(msgs)) {
       return false;
     }
-    // Phantom repair lines in transcript must not block spoken delivery until the user answers repair.
-    return scenarioARepairAnswerAlreadySatisfiedInTranscript(msgs);
+    // Phantom repair lines must not block the first spoken ask. Once the user has
+    // answered that ask, do not speak the same question again.
+    return (
+      scenarioARepairAnswerAlreadySatisfiedInTranscript(msgs) ||
+      isScenarioARepairFollowUpCompleteInTranscript(msgs)
+    );
   }
   if (looksLikeScenarioBFullAppreciationProbeQuestion(t)) {
     return transcriptContainsScenarioBAppreciationProbe(msgs);
@@ -313,7 +322,7 @@ export function scenarioOneFollowUpFlagsFromTranscript(msgs: readonly ScenarioFo
   };
 }
 
-/** Scenario A may close after the contempt probe is answered. Hypothetical Ryan repair is retired. */
+/** Scenario A may close once the Ryan repair question is answered, or the user already gave an explicit repair-as-Ryan plan. */
 export function scenarioAMinimumEngagementForHandoff(
   messages: readonly ScenarioFollowUpTranscriptMessage[],
 ): boolean {
@@ -350,13 +359,7 @@ export function scenarioAMinimumEngagementForHandoff(
     const userTurnCount = filtered.filter((m) => m.role === 'user').length;
     if (userTurnCount >= 2 && !transcriptContainsScenarioAContemptProbe(messages)) {
       const lastUserContent = (direct.lastUserContent ?? '').trim();
-      if (
-        lastUserContent &&
-        userAnswerSatisfiesScenarioARepairPrompt(
-          lastUserContent,
-          SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY,
-        )
-      ) {
+      if (lastUserContent && userAnswerIncludesExplicitScenarioARepairAsRyan(lastUserContent)) {
         return true;
       }
     }
@@ -371,13 +374,35 @@ export function scenarioAMinimumEngagementForHandoff(
       if (filtered[j].role !== 'assistant') continue;
       const asst = (filtered[j] as { content?: string }).content ?? '';
       if (looksLikeScenarioARepairQuestionLoose(asst)) {
-        return userAnswerSatisfiesScenarioARepairPrompt(userContent, asst);
+        if (userAnswerSatisfiesScenarioARepairPrompt(userContent, asst)) return true;
+        // The repair question was asked and answered. A long third-person read still
+        // closes scenario 1 so the next situation can be spoken.
+        return countWords(userContent) >= 12;
       }
       break;
     }
     break;
   }
   return false;
+}
+
+/**
+ * Situation 2 still has to be spoken when the close already started, even if the
+ * repair answer is shorter than the usual handoff bar.
+ */
+export function shouldStillSpeakSituation2AfterIncompleteS1Engagement(args: {
+  messages: readonly ScenarioFollowUpTranscriptMessage[];
+  fullStream: string;
+  repairQuestionAsked: boolean;
+}): boolean {
+  if (scenarioAMinimumEngagementForHandoff(args.messages)) return true;
+  if (!args.repairQuestionAsked) return false;
+  const stream = args.fullStream ?? '';
+  return (
+    hasScenarioBoundaryWrapPhrase(stream) ||
+    textContainsScenarioBVignetteBody(stream) ||
+    /\bhere'?s the next situation\b/i.test(stream)
+  );
 }
 
 /** Next scripted S1 follow-up when a premature S1→S2 handoff is blocked. */

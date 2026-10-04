@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useState, Suspense, lazy, useMemo, useRef } from 'react';
 import { Platform } from 'react-native';
 import {
@@ -79,7 +80,7 @@ import {
   isReferralCodeIntroSuppressedRoute,
   resolveActiveNavigationRouteName,
 } from '@features/referrals/ReferralCodeIntroShell';
-import { ReferralCompletionCongratulationsShell } from '@features/referrals/ReferralCompletionCongratulationsShell';
+import { PostCompletionFeedbackPromptShell } from '@features/onboarding/PostCompletionFeedbackPromptShell';
 import { RelationshipValidationNavigator } from '@app/navigation/RelationshipValidationNavigator';
 import { fetchValidationShellRouting } from '@features/relationshipValidation/relationshipValidationRepo';
 import {
@@ -87,7 +88,7 @@ import {
   readValidationStandardReturnRoute,
   shouldUseRelationshipValidationNavigator,
 } from '@features/relationshipValidation/validationShellRouting';
-import { StyleSheet, View, Text, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text } from 'react-native';
 import {
   initAudosFromEnv,
   syncAudosIdentifyFromSupabaseUser,
@@ -433,7 +434,7 @@ function LoggedInInterviewShellReady({
           marketResearchComplete={marketResearchComplete}
           suppressReferralIntro={isReferralCodeIntroSuppressedRoute(activeRouteName, navigationState)}
         />
-        <ReferralCompletionCongratulationsShell userId={userId} />
+        <PostCompletionFeedbackPromptShell userId={userId} />
       </View>
     </NavigationContainer>
   );
@@ -670,7 +671,7 @@ const LoggedInInterviewShell = ({ userId }: { userId: string }) => {
 
 const LoadingScreen = () => (
   <View style={[ROOT_STYLE, { justifyContent: 'center', alignItems: 'center' }]}>
-    <ActivityIndicator size="large" color="#7A9ABE" />
+    <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
     <Text style={{ marginTop: 16, color: '#7A9ABE', fontSize: 14 }}>Loading...</Text>
   </View>
 );

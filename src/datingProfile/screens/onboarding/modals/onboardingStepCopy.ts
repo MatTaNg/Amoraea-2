@@ -31,10 +31,7 @@ export const ONBOARDING_LONGEST_RELATIONSHIP_DESCRIPTION =
   'What has been your longest romantic relationship?';
 
 export const ONBOARDING_HEIGHT_WEIGHT_NOTE =
-  'This is only used to calculate BMI. Your height, weight, and BMI will not be communicated to your potential matches.';
-
-export const ONBOARDING_TYPOLOGY_DESCRIPTION =
-  'Optional: add any typology details you would like to share. Skip any field and tap Next when you are ready.';
+  'This is only used to calculate BMI. Your weight, and BMI will not be communicated to your potential matches.';
 
 export const ONBOARDING_LIFE_DOMAINS_DESCRIPTION =
   'Distribute 100 points across the 5 life domains to indicate how important each is to you. All domains must add up to exactly 100.';
@@ -47,12 +44,6 @@ export const ONBOARDING_HOBBY_DEALBREAKER_DESCRIPTION =
 
 export const ONBOARDING_DEALBREAKERS_LEAD =
   'Please note that although honoring yourself is important, dealbreakers will also significantly reduce potential matches.';
-
-export const ONBOARDING_LIFE_DOMAIN_QUESTIONS_REQUIRED_DESCRIPTION =
-  'Answer each required question for this life area to continue. You can add more detail later from your profile.';
-
-export const ONBOARDING_LIFE_DOMAIN_QUESTIONS_OPTIONAL_DESCRIPTION =
-  'Optional: share more about this life area if you like. You can skip any question and tap Next.';
 
 export const ONBOARDING_RECREATIONAL_DRUGS_DESCRIPTION =
   'Examples include MDMA, cocaine, or similar in social settings. Cannabis and psychedelics/plant medicines are asked separately.';

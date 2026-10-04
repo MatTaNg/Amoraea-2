@@ -388,7 +388,7 @@ export type CompleteStandardInterviewResult =
   | { ok: false; error: string };
 
 /** Matches admin-retry-ai-reasoning background budget (Tab 2 retry succeeds with this). */
-const STANDARD_REASONING_BACKGROUND_TIMEOUT_MS = 300_000;
+const STANDARD_REASONING_BACKGROUND_TIMEOUT_MS = 120_000;
 
 type ReasoningBackgroundInputs = {
   pillarForReasoning: Record<string, number>;
@@ -421,7 +421,7 @@ async function runStandardInterviewReasoningInBackground(
       [],
       {
         perAttemptTimeoutMs: STANDARD_REASONING_BACKGROUND_TIMEOUT_MS,
-        maxAttempts: 4,
+        maxAttempts: 2,
         evidenceContext: inputs.evidenceContext,
       },
     );

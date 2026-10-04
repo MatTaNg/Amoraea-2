@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { ActivityIndicator, View, Text, StyleSheet } from "react-native";
 import type { AssessmentInsightSnapshot } from "@/datingProfile/types";
 import { theme } from "@/shared/theme/theme";
 
@@ -132,7 +132,7 @@ export const AssessmentInsightBody: React.FC<AssessmentInsightBodyProps> = ({
           <Text style={styles.aiHeading}>Personalized reflection</Text>
           {showAiLoading ? (
             <View style={styles.aiLoadingRow}>
-              <ActivityIndicator color={theme.colors.primary} />
+              <ActivityIndicator size="small" color="#5BA8E8" />
               <Text style={styles.aiLoadingText}>Writing your reflection…</Text>
             </View>
           ) : null}

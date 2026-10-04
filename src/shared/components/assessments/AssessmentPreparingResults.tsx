@@ -1,7 +1,7 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React from "react";
-import { View, Text, StyleSheet, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import { theme } from "@/shared/theme/theme";
-import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
 
 type Props = {
   /** Optional supporting line under the title (e.g. what is loading). */
@@ -18,11 +18,9 @@ export function AssessmentPreparingResults({ subtitle }: Props) {
       accessibilityRole="progressbar"
       accessibilityLabel="Preparing your results"
     >
-      <View style={styles.card}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
-        <Text style={styles.title}>Preparing your results</Text>
-        {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-      </View>
+      <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+      <Text style={styles.title}>Preparing your results</Text>
+      {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
     </View>
   );
 }
@@ -35,16 +33,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     alignItems: "center",
     padding: 24,
-  },
-  card: {
-    width: "100%",
-    maxWidth: PAGE_CONTENT_MAX_WIDTH,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: "rgba(91,168,232,0.24)",
-    backgroundColor: "rgba(91,168,232,0.08)",
-    padding: 28,
-    alignItems: "center",
   },
   title: {
     color: theme.colors.text,

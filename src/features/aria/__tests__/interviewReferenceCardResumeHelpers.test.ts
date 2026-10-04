@@ -51,6 +51,40 @@ describe('interviewReferenceCardResumeHelpers', () => {
     expect(synced.prompt).toBe(SCENARIO_C_SOPHIE_PERSPECTIVE_PROBE);
   });
 
+  it('resume Situation 1 after the opening shows the vignette, not the readiness line', () => {
+    const synced = syncReferenceCardStateFromAssistantMessages(
+      [
+        {
+          role: 'assistant',
+          content:
+            "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+        },
+        { role: 'assistant', content: "What's going on between these two?" },
+      ],
+      { activeScenario: 1, lastQuestionText: "What's going on between these two?" },
+    );
+    expect(synced.phase).toBe('scenario_active');
+    expect(synced.scenario?.label).toBe('Situation 1');
+    expect(synced.scenario?.text).toBe(SHOW_SCENARIO_1_VIGNETTE_EXACT);
+    expect(synced.scenario?.text).not.toMatch(/are you ready/i);
+    expect(synced.prompt).toBe(SCENARIO_1_OPENING);
+  });
+
+  it('keeps Show scenario off until Situation 1 has begun', () => {
+    const synced = syncReferenceCardStateFromAssistantMessages(
+      [
+        {
+          role: 'assistant',
+          content:
+            "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+        },
+      ],
+      { activeScenario: 1, lastQuestionText: 'Are you ready?' },
+    );
+    expect(synced.phase).toBe('pre_scenario');
+    expect(synced.scenario).toBeNull();
+  });
+
   it('resume Show scenario footer keeps Situation 1 contempt probe', () => {
     const synced = syncReferenceCardStateFromAssistantMessages([
       { role: 'assistant', content: SHOW_SCENARIO_1_VIGNETTE_EXACT },

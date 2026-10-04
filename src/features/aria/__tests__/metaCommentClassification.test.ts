@@ -239,6 +239,18 @@ describe('classifyUserMetaComment', () => {
     expect(getInabilitySubstantiveOverrideDetail(hedged)?.full_response_word_count).toBeGreaterThanOrEqual(40);
   });
 
+  it('does not offer to skip when a conflict follow-up answer starts with I am not sure', () => {
+    const answer = "I'm not sure I apologized and that was it.";
+    expect(classifyUserMetaComment(answer)).toBeNull();
+    expect(getInabilitySubstantiveOverrideDetail(answer)?.override_trigger).toBe(
+      'behavioral_observation_detected',
+    );
+    expect(classifyUserMetaComment("I'm not sure.")?.type).toBe('inability');
+    expect(classifyUserMetaComment("I'm not quite sure")?.type).toBe('inability');
+    expect(classifyUserMetaComment("I'm not sure how to answer")).toBeNull();
+    expect(classifyUserMetaComment("I'm not sure, we talked it through.")).toBeNull();
+  });
+
   it('overrides inability when a hedged response includes a behavioral observation', () => {
     const hedged = "I'm not sure, but he did show appreciation and he was genuine in his joy.";
     expect(classifyUserMetaComment(hedged)).toBeNull();

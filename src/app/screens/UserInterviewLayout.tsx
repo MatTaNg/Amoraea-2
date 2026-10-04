@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   Pressable,
-  ActivityIndicator,
   Platform,
   Animated,
   Linking,
@@ -25,6 +24,10 @@ import {
   isScenarioModalEligibleScenarioQuestionPrompt,
   resolveScenarioModalDisplayParts,
 } from '@features/aria/interviewLanguageGate';
+import {
+  getInterviewProgressSnapshot,
+  subscribeInterviewProgress,
+} from '@features/aria/interviewProgressUiStore';
 import { resolveInterviewTopInset } from '@features/aria/utils/interviewOverlayInsets';
 // Design tokens — Amoraea interviewer
 const BG = '#05060D';
@@ -158,6 +161,11 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const safeInsets = useSafeAreaInsets();
   const headerTopInset = Platform.OS === 'web' ? 0 : resolveInterviewTopInset(safeInsets);
+  const interviewProgress = useSyncExternalStore(
+    subscribeInterviewProgress,
+    getInterviewProgressSnapshot,
+    getInterviewProgressSnapshot,
+  );
   /** Mobile Safari: `useWindowDimensions` can exceed the visible viewport (URL bar / home indicator). */
   const [visualViewportH, setVisualViewportH] = useState<number | null>(null);
   useEffect(() => {
@@ -261,33 +269,32 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
     return () => loop.stop();
   }, [voiceState, rippleAnim]);
 
-  const micLabel =
-    micLabelOverride !== undefined
-      ? micLabelOverride
-      : voiceState === 'listening' || voiceState === 'recording'
-        ? 'Listening...'
-        : voiceState === 'speaking' &&
-            (Platform.OS !== 'web' || interviewerOutputActive)
-          ? 'Speaking...'
-          : voiceState === 'processing'
-            ? '...'
-            : 'Tap to speak';
-
   const interviewerSpeakingUi =
     voiceState === 'speaking' && (Platform.OS !== 'web' || interviewerOutputActive);
-
-  const statusLabelOpacity =
-    interviewerSpeakingUi || voiceState === 'processing' ? 0.35 : 0.7;
-
-  const rippleScale = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
-  const rippleOpacity = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
 
   const isMicDisabled =
     !!micError ||
     inputDisabled ||
     voiceState === 'processing' ||
     (Platform.OS === 'web' ? interviewerOutputActive : voiceState === 'speaking');
-  const micOpacity = interviewerSpeakingUi ? 0.35 : 1;
+
+  const micLabel = isMicDisabled
+    ? interviewerSpeakingUi
+      ? 'Speaking...'
+      : voiceState === 'processing'
+        ? '...'
+        : ''
+    : micLabelOverride !== undefined
+      ? micLabelOverride
+      : voiceState === 'listening' || voiceState === 'recording'
+        ? 'Listening...'
+        : 'Tap to speak';
+
+  const statusLabelOpacity = isMicDisabled ? 0.35 : 0.7;
+
+  const rippleScale = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.6] });
+  const rippleOpacity = rippleAnim.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] });
+
   const isListeningOrRecording = voiceState === 'listening' || voiceState === 'recording';
   const isRecording = voiceState === 'recording';
   const showMicMeter = showMicInputMeter || isRecording;
@@ -510,6 +517,8 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                      * from touch; `onPressIn` still fires. For tap-to-speak, run the mic action on pressIn on web
                      * and omit onPress to avoid double-toggle when both fire on desktop.
                      */
+                    accessibilityRole="button"
+                    accessibilityState={{ disabled: isMicDisabled }}
                     onPress={
                       Platform.OS === 'web' && micToggleMode && onMicPress
                         ? undefined
@@ -541,18 +550,14 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
                     style={[
                       styles.micButton,
                       isListeningOrRecording && (isRecording ? styles.micButtonRecording : styles.micButtonListening),
-                      { opacity: micOpacity },
+                      isMicDisabled && styles.micButtonDisabled,
                     ]}
                   >
-                    {voiceState === 'processing' ? (
-                      <ActivityIndicator size="small" color={FLAME_MID} />
-                    ) : (
-                      <Ionicons
-                        name="mic"
-                        size={24}
-                        color={isRecording ? '#E84444' : FLAME_MID}
-                      />
-                    )}
+                    <Ionicons
+                      name="mic"
+                      size={24}
+                      color={isRecording ? '#E84444' : isMicDisabled ? TEXT_DIM : FLAME_MID}
+                    />
                   </Pressable>
                 </Animated.View>
               </View>
@@ -727,6 +732,21 @@ export const UserInterviewLayout: React.FC<UserInterviewLayoutProps> = ({
             <View style={styles.exitPlaceholder} />
           )}
         </View>
+        <View
+          style={styles.progressRow}
+          accessibilityRole="progressbar"
+          accessibilityLabel="Interview progress"
+          accessibilityValue={{
+            min: 0,
+            max: 100,
+            now: interviewProgress.percent,
+          }}
+        >
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${interviewProgress.percent}%` }]} />
+          </View>
+          <Text style={styles.progressLabel}>{interviewProgress.percent}% complete</Text>
+        </View>
       </View>
 
       {/* Main content */}
@@ -831,6 +851,34 @@ const styles = StyleSheet.create({
     height: 56,
     backgroundColor: BG,
   },
+  progressRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 24,
+    paddingBottom: 10,
+  },
+  progressTrack: {
+    flex: 1,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(82, 142, 220, 0.16)',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: FLAME_MID,
+  },
+  progressLabel: {
+    fontFamily: FONT_UI,
+    fontSize: 11,
+    fontWeight: '400',
+    letterSpacing: 0.4,
+    color: TEXT_SECONDARY,
+    minWidth: 84,
+    textAlign: 'right',
+  },
   wordmarkRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
@@ -888,7 +936,7 @@ const styles = StyleSheet.create({
   main: {
     flex: 1,
     paddingHorizontal: 24,
-    overflow: 'hidden',
+    overflow: 'visible',
     position: 'relative',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -927,6 +975,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: '100%',
     zIndex: 1,
+    overflow: 'visible',
   },
   /** Subtle de-emphasis when idle long after TTS — pairs with `lateStartRecordingCue` copy below. */
   flameSectionLateCue: {
@@ -1206,6 +1255,11 @@ const styles = StyleSheet.create({
     ...(Platform.OS === 'web'
       ? { boxShadow: '0 0 24px rgba(30, 111, 217, 0.4)' }
       : { shadowColor: FLAME_CORE, shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.4, shadowRadius: 24, elevation: 8 }),
+  },
+  micButtonDisabled: {
+    opacity: 0.38,
+    borderColor: 'rgba(82, 142, 220, 0.12)',
+    backgroundColor: 'rgba(13, 17, 32, 0.5)',
   },
   micButtonRecording: {
     borderColor: '#E84444',

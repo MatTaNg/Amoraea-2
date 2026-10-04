@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { RelationshipValidationWelcomeModal } from '@features/relationshipValidation/RelationshipValidationWelcomeModal';
 import {
   fetchRelationshipValidationRecord,
@@ -59,7 +60,7 @@ export function ValidationEntryScreen({ userId, navigation }: Props) {
   if (booting && !showWelcome) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="large" color="#5BA8E8" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }

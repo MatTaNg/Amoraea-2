@@ -412,6 +412,10 @@ export function computeLeadQuality(
   const isSerious = seriousness === 'Seriously';
   const longSearch = duration === '1 to 3 years' || duration === 'More than 3 years';
   const highSpend =
+    spend === '$501-$1,000' ||
+    spend === '$1,000-$3,000' ||
+    spend === '$3,000 - $10,000' ||
+    spend === '$10,000+' ||
     spend === '501 - 1,000' ||
     spend === '1,001 - 3,000' ||
     spend === '3,001 - 5,000' ||

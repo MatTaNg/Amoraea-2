@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
@@ -7,7 +8,6 @@ import {
   Animated,
   Easing,
   Pressable,
-  ActivityIndicator,
 } from 'react-native';
 import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { FlameOrb } from '@app/screens/FlameOrb';
@@ -347,7 +347,7 @@ export const PostInterviewProcessingScreen: React.FC<{
     return (
       <PostInterviewScrollLayout>
         <View style={styles.revealGate}>
-          <ActivityIndicator size="large" color={ACCENT} />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         </View>
       </PostInterviewScrollLayout>
     );

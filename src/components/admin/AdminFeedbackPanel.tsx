@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   TextInput,
@@ -7,7 +8,6 @@ import {
   TouchableOpacity,
   Pressable,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@data/supabase/client';
@@ -343,7 +343,7 @@ export function AdminFeedbackPanel() {
 
       {loading ? (
         <View style={styles.loadWrap}>
-          <ActivityIndicator color="#7A9ABE" />
+          <ActivityIndicator size="small" color="#5BA8E8" />
         </View>
       ) : (
         <>

@@ -1,5 +1,7 @@
 import {
   compactTranscriptForNarrativePrompt,
+  isEdgeCapacityError,
+  isEdgeIdleTimeoutError,
   isTransientNarrativeGenerationErrorMessage,
   isWorkerResourceLimitError,
   shouldAutoCompactTranscriptForNarrative,
@@ -35,6 +37,14 @@ describe('narrativeTranscriptCompaction', () => {
     expect(isWorkerResourceLimitError(429, 'rate limit')).toBe(false);
   });
 
+  it('treats edge idle timeout like a capacity failure', () => {
+    const body = '{"code":"IDLE_TIMEOUT","message":"Request idle timeout limit (150s) reached"}';
+    expect(isEdgeIdleTimeoutError(504, body)).toBe(true);
+    expect(isEdgeCapacityError(504, body)).toBe(true);
+    expect(isEdgeCapacityError(546, '{"code":"WORKER_RESOURCE_LIMIT"}')).toBe(true);
+    expect(isEdgeIdleTimeoutError(500, 'gateway timeout')).toBe(false);
+  });
+
   it('detects transient narrative generation error messages', () => {
     expect(
       isTransientNarrativeGenerationErrorMessage(
@@ -42,6 +52,11 @@ describe('narrativeTranscriptCompaction', () => {
       ),
     ).toBe(true);
     expect(isTransientNarrativeGenerationErrorMessage('HTTP 429 rate limit')).toBe(true);
+    expect(
+      isTransientNarrativeGenerationErrorMessage(
+        'AI reasoning request failed: [http] 504 {"code":"IDLE_TIMEOUT","message":"Request idle timeout limit (150s) reached"}',
+      ),
+    ).toBe(true);
     expect(isTransientNarrativeGenerationErrorMessage('invalid JSON from model')).toBe(false);
   });
 });

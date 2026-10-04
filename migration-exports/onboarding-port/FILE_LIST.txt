@@ -52,10 +52,6 @@ C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/sc
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/components/PickerField.styled.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/components/PickerField.tsx
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/constants/additionalInfoConstants.ts
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/free/FreeUserOnboardingFlow.tsx
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/free/FreeUserOnboardingScreen.tsx
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/free/services/freeUserOnboardingService.ts
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/free/types.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/hooks/useAdditionalInfoForm.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/hooks/useAvailabilityAndContact.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/hooks/useBasicInfoState.ts
@@ -122,8 +118,6 @@ C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/sc
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/modals/types.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/modals/TypologyModal.styled.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/modals/TypologyModal.tsx
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/modals/WelcomeModal.styled.ts
-C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/modals/WelcomeModal.tsx
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/ProfileBuilderScreen.styled.ts
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/ProfileBuilderScreen.tsx
 C:/Users/ng528/Documents/Amoraea/Amoraea-app/migration/onboarding-port/bundle/screens/onboarding/steps/BasicInfoStep.tsx

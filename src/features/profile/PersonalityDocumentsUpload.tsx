@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
@@ -399,7 +399,7 @@ export function PersonalityDocumentsUpload({
       >
         {uploading ? (
           <View style={styles.uploadButtonInner}>
-            <ActivityIndicator color={theme.colors.text} size="small" />
+            <ActivityIndicator size="small" color={theme.colors.text} />
             <Text style={styles.uploadButtonText}>Uploading...</Text>
           </View>
         ) : (
@@ -413,7 +413,7 @@ export function PersonalityDocumentsUpload({
       <Text style={styles.hint}>PDF, Word, images, text files — up to 20MB each</Text>
 
       {loading ? (
-        <ActivityIndicator color={theme.colors.textSecondary} style={styles.loader} />
+        <ActivityIndicator size="small" color="#5BA8E8" style={styles.loader} />
       ) : docs.length > 0 ? (
         <View style={styles.docList}>
           {docs.map((doc) => {

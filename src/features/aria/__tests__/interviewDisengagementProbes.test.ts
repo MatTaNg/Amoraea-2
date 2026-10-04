@@ -37,6 +37,7 @@ import {
   userAnswerHasSophiePerspectiveLanguage,
 } from '../interviewDisengagementProbes';
 import { applyPostClaudeScenarioAdvanceBundleOverride } from '../interviewScenarioAdvanceAfterRepair';
+import { userAnswerIncludesExplicitScenarioARepairAsRyan } from '../interviewRepairRefusalDetection';
 import { SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY } from '../probeAndScoringUtils';
 import { scenarioAMinimumEngagementForHandoff } from '../scenarioFollowUpTranscriptGuard';
 import {
@@ -590,6 +591,31 @@ describe('interviewDisengagementProbes', () => {
         'What would that repair look like if you were Ryan?',
       ),
     ).toBe(true);
+  });
+
+  it('does not treat generic sit-down-and-talk advice as an explicit Ryan repair answer', () => {
+    const answer = 'I would suggest they sit down and talk.';
+    expect(userAnswerIncludesExplicitScenarioARepairAsRyan(answer)).toBe(false);
+    expect(
+      userAnswerSatisfiesScenarioARepairPrompt(answer, SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY),
+    ).toBe(false);
+    const messages = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      { role: 'user', content: answer },
+    ];
+    expect(scenarioARepairAnswerAlreadySatisfiedInTranscript(messages)).toBe(false);
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it.', 1)).toBe(false);
+  });
+
+  it('treats an explicit as-Ryan plan as already answering the repair question', () => {
+    const answer =
+      'If I were Ryan, I would apologize to Emma and commit to keeping calls off during the date.';
+    expect(userAnswerIncludesExplicitScenarioARepairAsRyan(answer)).toBe(true);
+    const messages = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      { role: 'user', content: answer },
+    ];
+    expect(shouldAdvanceScenarioAAfterSatisfiedRepair(messages, 'Got it.', 1)).toBe(true);
   });
 
   it('treats first-person apology + commitment as satisfying Scenario A repair', () => {

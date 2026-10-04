@@ -64,6 +64,19 @@ export function isUnauthorizedS1FollowUp(text: string): boolean {
 }
 
 /** True when text contains a later scenario vignette or boundary lead. */
+/**
+ * Scenario-close speech. A short "Got it." in front of this is a second acknowledgement.
+ */
+export function isScenarioEndHandoffSentence(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  if (/\bthat['’]?s the end of this scenario\b/i.test(t)) return true;
+  if (/\bhere'?s the next situation\b/i.test(t)) return true;
+  if (/\bgood work\b/i.test(t) && /\b(?:end of this scenario|next situation)\b/i.test(t)) return true;
+  if (/\bsarah\b/i.test(t) && /\bjames\b/i.test(t)) return true;
+  return looksLikeScenarioHandoffOrVignetteBundle(t);
+}
+
 export function looksLikeScenarioHandoffOrVignetteBundle(text: string): boolean {
   const t = text.replace(/\s+/g, ' ').trim().toLowerCase();
   if (!t) return false;

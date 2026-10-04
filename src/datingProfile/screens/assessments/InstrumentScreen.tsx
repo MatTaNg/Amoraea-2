@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, {
   useState,
   useEffect,
@@ -10,11 +11,7 @@ import {
   View,
   Text,
   StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Platform,
   Alert,
-  Pressable,
 } from "react-native";
 import { PAGE_CONTENT_MAX_WIDTH } from "@utilities/pageContentWidth";
 import { useNavigation, useRoute } from "@react-navigation/native";
@@ -23,9 +20,12 @@ import type { RouteProp } from "@react-navigation/native";
 import type { DatingProfileStackParamList } from "@app/navigation/DatingProfileOnboardingNavigator";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useAuth } from "@/shared/hooks/AuthProvider";
-import { Button } from "@/shared/ui/Button";
-import { AssessmentHeader } from "@/shared/components/assessments/AssessmentHeader";
 import { LikertScale } from "@/shared/components/assessments/LikertScale";
+import {
+  QuestionnaireQuestion,
+  QuestionnaireStepLayout,
+  questionnaireScalePrompt,
+} from "@/shared/components/assessments/QuestionnaireStepLayout";
 import { getInstrumentConfig } from "@/data/assessments/instruments";
 import type { ECRItem } from "@/data/assessments/instruments/ecrItems";
 import { getShuffledItems } from "@/data/assessments/instruments/ecrItems";
@@ -36,12 +36,12 @@ import {
   getFirstIncompleteAssessment,
   ASSESSMENT_IDS,
   FIRST_DATING_PROFILE_ASSESSMENT_ID,
-  onboardingAssessmentBatteryIndex,
   type AssessmentId,
 } from "@/data/services/assessmentService";
 import { useProfile } from "@/shared/hooks/useProfile";
 import { useNavigateAfterAssessments } from "@/datingProfile/onboarding/useNavigateAfterAssessments";
 import { replaceWithPreviousOnboardingAssessment } from "@/datingProfile/onboarding/navigateToPreviousOnboardingAssessment";
+import { exitDatingProfileOnboardingToPostInterview } from "@/datingProfile/onboarding/exitDatingProfileOnboardingToPostInterview";
 import { theme } from "@/shared/theme/theme";
 
 const SAVE_PROGRESS_EVERY = 5;
@@ -189,20 +189,20 @@ export function InstrumentScreen() {
             "Couldn't save",
             "Your session may have expired. Sign in again and retake or contact support."
           );
-          return;
-        }
-        const scores = config.score(next);
-        const elapsedSec =
-          assessmentStartMsRef.current != null
-            ? Math.max(0, Math.floor((Date.now() - assessmentStartMsRef.current) / 1000))
-            : undefined;
-        const result = await saveAssessmentResult(user.id, instrumentId, scores, next, {
-          timeTakenSec: elapsedSec,
-        });
-        if (result.success) {
-          await refreshProfile();
-          navigation.replace("DatingInsight", { instrument: instrumentId });
         } else {
+          const scores = config.score(next);
+          const elapsedSec =
+            assessmentStartMsRef.current != null
+              ? Math.max(0, Math.floor((Date.now() - assessmentStartMsRef.current) / 1000))
+              : undefined;
+          const result = await saveAssessmentResult(user.id, instrumentId, scores, next, {
+            timeTakenSec: elapsedSec,
+          });
+          if (result.success) {
+            await refreshProfile();
+            navigation.replace("DatingInsight", { instrument: instrumentId });
+            return;
+          }
           Alert.alert(
             "Couldn't save",
             result.error?.message ?? "Please check your connection and try again."
@@ -214,9 +214,8 @@ export function InstrumentScreen() {
           "Couldn't save",
           e instanceof Error ? e.message : "Please try again."
         );
-      } finally {
-        setSaving(false);
       }
+      setSaving(false);
     },
     [user?.id, config, instrumentId, navigation, refreshProfile]
   );
@@ -264,6 +263,15 @@ export function InstrumentScreen() {
   );
 
   const goToPreviousQuestion = useCallback(() => {
+    if (saving || safeIndexForSync <= 0) return;
+    setCurrentIndex((i) => Math.max(0, i - 1));
+  }, [safeIndexForSync, saving]);
+
+  const exitToCongrats = useCallback(() => {
+    exitDatingProfileOnboardingToPostInterview(navigation, user?.id);
+  }, [navigation, user?.id]);
+
+  const leaveInstrument = useCallback(() => {
     if (saving) return;
     if (safeIndexForSync > 0) {
       setCurrentIndex((i) => Math.max(0, i - 1));
@@ -283,7 +291,7 @@ export function InstrumentScreen() {
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <ActivityIndicator size="large" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }
@@ -292,14 +300,27 @@ export function InstrumentScreen() {
   const activeEcrItem = ecrShuffle && ecrOrder ? ecrOrder[safeIndexForSync] : null;
   const itemText = activeEcrItem?.text ?? config.items[safeIndexForSync];
   const canonicalId = activeEcrItem?.id ?? safeIndexForSync + 1;
-  const flowProgressPct = totalQuestions > 0 ? (questionNumber / totalQuestions) * 100 : 0;
-  const assessmentIndex = onboardingAssessmentBatteryIndex(instrumentId);
 
   if (ecrShuffle && !showIntro && !ecrOrder) {
     return (
       <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
         <View style={[styles.container, styles.centered]}>
-          <ActivityIndicator size="large" />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (saving) {
+    return (
+      <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
+        <View
+          style={styles.savingPage}
+          accessibilityRole="progressbar"
+          accessibilityLabel="Saving your answers"
+        >
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+          <Text style={styles.savingOverlayHint}>Saving…</Text>
         </View>
       </SafeAreaView>
     );
@@ -307,52 +328,32 @@ export function InstrumentScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "left", "right"]}>
-      <View style={styles.flowProgressTrack}>
-        <View style={[styles.flowProgressFill, { width: `${flowProgressPct}%` }]} />
-      </View>
-      <ScrollView
-        style={[styles.scroll, Platform.OS === "web" && styles.scrollWeb]}
-        contentContainerStyle={styles.questionScrollContent}
+      <QuestionnaireStepLayout
+        title={config.title}
+        current={questionNumber}
+        total={totalQuestions}
+        onBack={isCoreOnboardingInstrument ? exitToCongrats : leaveInstrument}
+        headerBackLabel={isCoreOnboardingInstrument ? "Back to previous screen" : "Go back"}
+        onPreviousQuestion={isCoreOnboardingInstrument ? goToPreviousQuestion : undefined}
+        previousQuestionDisabled={saving || safeIndexForSync <= 0}
+        backDisabled={saving}
+        prompt={questionnaireScalePrompt({
+          min: config.minLabel ?? "",
+          max: config.maxLabel ?? "",
+        })}
+        saving={saving}
       >
-        <View style={styles.questionCard}>
-          <AssessmentHeader
-            assessmentIndex={assessmentIndex}
-            currentQ={questionNumber}
-            totalQ={totalQuestions}
-            assessmentName={config.title}
-            totalAssessments={ASSESSMENT_IDS.length}
-          />
-          <Text style={styles.questionText}>{itemText}</Text>
-          <LikertScale
-            value={responses[String(canonicalId)] ?? null}
-            onChange={handleResponse}
-            min={config.min}
-            max={config.max}
-            minLabel={config.minLabel}
-            maxLabel={config.maxLabel}
-          />
-          <Pressable
-            style={styles.backBtn}
-            onPress={goToPreviousQuestion}
-            disabled={saving}
-          >
-            <Text style={[styles.backText, saving && styles.backDisabled]}>
-              ← Back
-            </Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-      {saving && (
-        <View
-          style={styles.savingOverlay}
-          pointerEvents="auto"
-          accessibilityRole="progressbar"
-          accessibilityLabel="Saving your answers"
-        >
-          <ActivityIndicator size="large" color="#FFFFFF" />
-          <Text style={styles.savingOverlayHint}>Saving…</Text>
-        </View>
-      )}
+        <QuestionnaireQuestion>{itemText}</QuestionnaireQuestion>
+        <LikertScale
+          value={responses[String(canonicalId)] ?? null}
+          onChange={handleResponse}
+          min={config.min}
+          max={config.max}
+          minLabel={config.minLabel}
+          maxLabel={config.maxLabel}
+          disabled={saving}
+        />
+      </QuestionnaireStepLayout>
     </SafeAreaView>
   );
 }
@@ -468,12 +469,11 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: theme.colors.textSecondary,
   },
-  savingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.45)",
+  savingPage: {
+    flex: 1,
+    backgroundColor: theme.colors.background,
     justifyContent: "center",
     alignItems: "center",
-    zIndex: 1000,
   },
   savingOverlayHint: {
     marginTop: 16,

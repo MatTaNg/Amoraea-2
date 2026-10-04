@@ -46,7 +46,6 @@ export const EthnicityOnboardingModal: React.FC<EthnicityOnboardingModalProps> =
           <SingleChoiceOptionList
             options={heritageOptions}
             value={ethnicity}
-            deferSelectUntilPaint
             onSelect={onHeritageSelect}
           />
         </View>

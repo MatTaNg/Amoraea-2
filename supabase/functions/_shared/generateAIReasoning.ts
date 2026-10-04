@@ -27,8 +27,11 @@ import {
   logNarrativeGenerationOutcome,
 } from './reportNarrativeGeneration.ts';
 import {
+  AI_REASONING_EDGE_ATTEMPT_TIMEOUT_MS,
+  AI_REASONING_EDGE_MAX_TOKENS,
+  AI_REASONING_EDGE_SHRINK_MAX_TOKENS,
   compactTranscriptForNarrativePrompt,
-  isWorkerResourceLimitError,
+  isEdgeCapacityError,
   shouldAutoCompactTranscriptForNarrative,
 } from './narrativeTranscriptCompaction.ts';
 
@@ -457,12 +460,15 @@ export async function generateAIReasoning(
   logNarrativeEvidenceAudit('ai_reasoning', sliceIds);
 
   const aiReasoningBudgets = REPORT_NARRATIVE_TOKEN_BUDGETS.ai_reasoning;
-  let maxTokensForCall = aiReasoningBudgets.initial;
+  let maxTokensForCall = Math.min(aiReasoningBudgets.initial, AI_REASONING_EDGE_MAX_TOKENS);
   let retriedHigherBudget = false;
 
   /** One fetch attempt should not block indefinitely; proxies can hang without closing the socket. */
-  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS =
-    options?.perAttemptTimeoutMs ?? DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS;
+  const requestedTimeoutMs = options?.perAttemptTimeoutMs ?? DEFAULT_AI_REASONING_PER_ATTEMPT_TIMEOUT_MS;
+  const REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS = Math.min(
+    requestedTimeoutMs,
+    AI_REASONING_EDGE_ATTEMPT_TIMEOUT_MS,
+  );
   const maxAttempts = options?.maxAttempts ?? 4;
   let lastErr: Error | null = null;
   let response: Response | null = null;
@@ -531,18 +537,23 @@ export async function generateAIReasoning(
       if (!response.ok) {
         const errText = await response.text();
         clearTimeout(abortTimer);
-        const resourceLimit = isWorkerResourceLimitError(response.status, errText);
+        const capacity = isEdgeCapacityError(response.status, errText);
         const meta = classifyAIReasoningRequestError(new Error(`HTTP ${response.status} ${errText}`), response);
         lastErr = new Error(
           `AI reasoning request failed: [${meta.kind}] ${response.status} ${errText.slice(0, 500)}`
         );
-        if (resourceLimit) {
-          console.warn('[narrative] WORKER_RESOURCE_LIMIT — retrying with compact transcript', {
+        if (capacity) {
+          const alreadyShrunk =
+            useCompactTranscript && maxTokensForCall <= AI_REASONING_EDGE_SHRINK_MAX_TOKENS;
+          useCompactTranscript = true;
+          maxTokensForCall = AI_REASONING_EDGE_SHRINK_MAX_TOKENS;
+          console.warn('[narrative] edge capacity — retrying compact transcript and smaller output', {
             attempt,
             status: response.status,
             promptChars: userPrompt.length,
+            maxTokens: maxTokensForCall,
           });
-          useCompactTranscript = true;
+          if (alreadyShrunk) throw lastErr;
           continue;
         }
         if (response.status >= 400 && response.status < 500 && response.status !== 429) {
@@ -566,6 +577,12 @@ export async function generateAIReasoning(
           '[Reasoning] abort occurred at stage:',
           responseText != null && responseText.length > 0 ? 'post-response' : 'fetch'
         );
+        const alreadyShrunk =
+          useCompactTranscript && maxTokensForCall <= AI_REASONING_EDGE_SHRINK_MAX_TOKENS;
+        useCompactTranscript = true;
+        maxTokensForCall = AI_REASONING_EDGE_SHRINK_MAX_TOKENS;
+        if (alreadyShrunk || attempt === maxAttempts - 1) throw lastErr;
+        continue;
       }
       if (attempt === maxAttempts - 1) throw lastErr;
     }
@@ -583,12 +600,13 @@ export async function generateAIReasoning(
 
   let envelope = JSON.parse(responseText) as AnthropicEnvelope;
 
-  if (anthropicStoppedDueToMaxTokens(envelope.stop_reason)) {
+  const raisedMaxTokens = Math.min(aiReasoningBudgets.retry, AI_REASONING_EDGE_MAX_TOKENS);
+  if (anthropicStoppedDueToMaxTokens(envelope.stop_reason) && raisedMaxTokens > maxTokensForCall) {
     console.warn(
-      `[Reasoning] stop_reason=max_tokens at ${maxTokensForCall} — retrying with ${aiReasoningBudgets.retry}`,
+      `[Reasoning] stop_reason=max_tokens at ${maxTokensForCall} — retrying with ${raisedMaxTokens}`,
     );
     retriedHigherBudget = true;
-    maxTokensForCall = aiReasoningBudgets.retry;
+    maxTokensForCall = raisedMaxTokens;
     const retryBody = { ...body, max_tokens: maxTokensForCall };
     const retryAbort = new AbortController();
     const retryTimer = setTimeout(() => retryAbort.abort(), REASONING_FETCH_PER_ATTEMPT_TIMEOUT_MS);

@@ -17,10 +17,25 @@ function splitClauses(text: string): string[] {
     .filter(Boolean);
 }
 
+/** Bare "I'm not sure" is inability. Any words after that hedge are an answer. */
+function notSureHedgeIsFollowedByMoreContent(text: string): boolean {
+  const t = text.trim();
+  if (/^\s*i'?m\s+not\s+(?:quite\s+)?sure\s*[.!?…]*\s*$/i.test(t)) return false;
+  return /\bi'?m\s+not\s+(?:quite\s+)?sure\b/i.test(t);
+}
+
 export function getInabilitySubstantiveOverrideDetail(text: string): InabilityOverrideDetail | null {
   const t = text.trim();
   if (!t) return null;
   const wc = wordCount(t);
+  if (notSureHedgeIsFollowedByMoreContent(t)) {
+    const hasCharacterName = SCENARIO_CHARACTER_RE.test(t);
+    return {
+      inability_override_fired: true,
+      override_trigger: wc >= 40 && hasCharacterName ? 'word_count_fallback' : 'behavioral_observation_detected',
+      full_response_word_count: wc,
+    };
+  }
   const inabilityScore = patternScore(t, INABILITY_RES);
   const hasExplicitInability =
     inabilityScore > 0 ||

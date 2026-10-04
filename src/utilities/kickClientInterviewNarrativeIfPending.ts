@@ -18,7 +18,7 @@ import { finalizeInterviewOnlyGateForAttempt } from '@features/psychometrics/fin
 import { evaluateScoringStagesReadyForRollup } from '@features/psychometrics/ensureInterviewRollupArtifacts';
 import { buildEvidenceContextFromAttemptPatterns } from '@features/reports/narrativeEvidenceAudit';
 
-const CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS = 300_000;
+const CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS = 120_000;
 const NARRATIVE_ATTEMPT_SELECT =
   'id, user_id, pillar_scores, scenario_1_scores, scenario_2_scores, scenario_3_scores, scenario_specific_patterns, transcript, weighted_score, passed, ai_reasoning, reasoning_pending, skip_count, ego_development_level, language_markers, defense_patterns, disclosure_calibration, mentalizing_overcertainty_count, skip_penalty_total, auto_failed, moment_4_concreteness, moment_5_concreteness, personal_moment_emotional_vocab_density, personal_moment_emotional_vocab_low';
 
@@ -274,7 +274,7 @@ export async function kickClientInterviewNarrativeIfPending(
       {
         reasoningOptions: {
           perAttemptTimeoutMs: CLIENT_NARRATIVE_BACKUP_TIMEOUT_MS,
-          maxAttempts: 4,
+          maxAttempts: 2,
           compactTranscript: true,
           evidenceContext,
         },
@@ -282,9 +282,9 @@ export async function kickClientInterviewNarrativeIfPending(
     );
     if ((reasoning as { _reasoningPending?: boolean })._reasoningPending) {
       const err = (reasoning as { _error?: string })._error ?? 'reasoning_pending';
-      const resourceLimit = /WORKER_RESOURCE_LIMIT/i.test(err);
+      const edgeLimit = /WORKER_RESOURCE_LIMIT|IDLE_TIMEOUT/i.test(err);
       console.log(
-        `[narrative] deferred for attempt ${attemptId} — ${resourceLimit ? 'edge worker capacity' : 'transient failure'}; keeping reasoning_pending`,
+        `[narrative] deferred for attempt ${attemptId} — ${edgeLimit ? 'edge worker limit' : 'transient failure'}; keeping reasoning_pending`,
       );
       await persistNarrativeGenerationDeferred(
         attemptId,
@@ -292,8 +292,8 @@ export async function kickClientInterviewNarrativeIfPending(
         ar,
         source,
         err,
-        resourceLimit
-          ? 'Narrative generation queued (edge capacity — will retry).'
+        edgeLimit
+          ? 'Narrative generation queued (edge limit — will retry).'
           : 'Narrative generation queued (transient failure — will retry).',
       );
       return { skipped: true, error: err };

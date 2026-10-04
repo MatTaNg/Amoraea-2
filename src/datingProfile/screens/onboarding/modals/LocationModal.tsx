@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
-import { View, ScrollView, Text, ActivityIndicator, Platform } from 'react-native';
+import { ActivityIndicator, View, ScrollView, Text, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import * as Location from 'expo-location';

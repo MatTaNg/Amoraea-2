@@ -14,7 +14,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQueryClient } from '@tanstack/react-query';
-import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
+import {
+  PostInterviewProfileCtaLoadingPage,
+  PostInterviewScrollLayout,
+} from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { PostInterviewProfileEncouragement } from '@app/screens/onboarding/PostInterviewProfileEncouragement';
 import { AMORAEA_FLAME_ORB_LOGO } from '@app/screens/flameOrbLogo';
 import { DownloadPersonalReportButton } from '@features/psychometrics/DownloadPersonalReportButton';
@@ -32,6 +35,12 @@ import { usePostInterviewProfileCta } from '@features/onboarding/usePostIntervie
 import * as Clipboard from 'expo-clipboard';
 import { supabase } from '@data/supabase/client';
 import { clearReferralNoticePending } from '@data/repos/usersRoutingRepo';
+import { PostCompletionFeedbackModal } from '@features/onboarding/PostCompletionFeedbackModal';
+import {
+  fetchPostCompletionFeedbackSubmittedAt,
+  POST_COMPLETION_FEEDBACK_GIVE_LABEL,
+  subscribePostCompletionFeedbackSubmitted,
+} from '@features/onboarding/postCompletionFeedback';
 import { PostInterviewLaunchReferralCard } from '@features/referrals/PostInterviewLaunchReferralCard';
 import { finalizeGateResultAfterPsychometrics } from '@features/onboarding/finalizeGateResultAfterPsychometrics';
 import {
@@ -77,6 +86,8 @@ export const PostInterviewLaunchScreen: React.FC<{
   const discountValueRef = useRef(0);
   const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [copyFeedback, setCopyFeedback] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedbackSubmitted, setFeedbackSubmitted] = useState<boolean | null>(null);
   const [animatedDiscount, setAnimatedDiscount] = useState(0);
   const { data: passedCount } = useLaunchWaitlistPassedCountQuery();
   const {
@@ -102,6 +113,21 @@ export const PostInterviewLaunchScreen: React.FC<{
 
   useEffect(() => {
     loadWebFontsOnce();
+  }, []);
+
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void fetchPostCompletionFeedbackSubmittedAt(userId).then((stamp) => {
+      if (!cancelled) setFeedbackSubmitted(stamp != null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [userId]);
+
+  useEffect(() => {
+    return subscribePostCompletionFeedbackSubmitted(() => setFeedbackSubmitted(true));
   }, []);
 
   useEffect(() => {
@@ -232,6 +258,10 @@ export const PostInterviewLaunchScreen: React.FC<{
 
   const counterDisplay = passedCount == null ? '—' : String(passedCount);
 
+  if (profileCtaBusy) {
+    return <PostInterviewProfileCtaLoadingPage />;
+  }
+
   return (
     <>
     <PostInterviewScrollLayout scrollViewRef={scrollViewRef}>
@@ -275,27 +305,18 @@ export const PostInterviewLaunchScreen: React.FC<{
             />
             <Pressable
               onPress={() => void openProfileCta()}
-              disabled={profileCtaBusy}
-              style={({ pressed }) => [
-                styles.profileOnboardingCta,
-                pressed && !profileCtaBusy && { opacity: 0.9 },
-                profileCtaBusy && { opacity: 0.85 },
-              ]}
+              style={({ pressed }) => [styles.profileOnboardingCta, pressed && { opacity: 0.9 }]}
               accessibilityRole="button"
               accessibilityLabel={profileCtaLabel}
             >
               <Ionicons name="person-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
               <Text style={styles.profileOnboardingCtaText}>{profileCtaLabel}</Text>
-              {profileCtaBusy ? (
-                <ActivityIndicator color="#fff" style={{ marginLeft: 8 }} />
-              ) : (
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color="rgba(255,255,255,0.9)"
-                  style={{ marginLeft: 8 }}
-                />
-              )}
+              <Ionicons
+                name="chevron-forward"
+                size={20}
+                color="rgba(255,255,255,0.9)"
+                style={{ marginLeft: 8 }}
+              />
             </Pressable>
           </>
         ) : (
@@ -304,7 +325,7 @@ export const PostInterviewLaunchScreen: React.FC<{
             accessibilityLabel="Loading profile status"
             accessibilityRole="progressbar"
           >
-            <ActivityIndicator color="#93c5fd" />
+            <ActivityIndicator size="small" color="#5BA8E8" />
           </View>
         )}
       </View>
@@ -320,7 +341,27 @@ export const PostInterviewLaunchScreen: React.FC<{
         referralNotice={referralNotice}
         onDismissReferralNotice={() => void dismissReferralNotice()}
       />
+      {feedbackSubmitted === false ? (
+        <Pressable
+          onPress={() => setFeedbackOpen(true)}
+          style={({ pressed }) => [styles.feedbackButton, pressed && { opacity: 0.9 }]}
+          accessibilityRole="button"
+          accessibilityLabel={POST_COMPLETION_FEEDBACK_GIVE_LABEL}
+        >
+          <Text style={styles.feedbackButtonText}>{POST_COMPLETION_FEEDBACK_GIVE_LABEL}</Text>
+        </Pressable>
+      ) : null}
     </PostInterviewScrollLayout>
+    <PostCompletionFeedbackModal
+      visible={feedbackOpen}
+      userId={userId}
+      entryPoint="congrats"
+      onDismiss={() => setFeedbackOpen(false)}
+      onSubmitted={() => {
+        setFeedbackSubmitted(true);
+        setFeedbackOpen(false);
+      }}
+    />
     </>
   );
 };
@@ -447,5 +488,21 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     color: 'rgba(255,255,255,0.58)',
     textAlign: 'center',
+  },
+  feedbackButton: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#9CCBFF',
+    borderRadius: 12,
+    paddingVertical: 16,
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  feedbackButtonText: {
+    fontFamily: FONT_BODY,
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#041018',
   },
 });

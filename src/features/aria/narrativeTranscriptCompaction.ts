@@ -121,8 +121,24 @@ export function shouldAutoCompactTranscriptForNarrative(
   return rawChars > NARRATIVE_TRANSCRIPT_AUTO_COMPACT_RAW_CHARS || transcript.length > 90;
 }
 
+/** Output size that can finish inside the Supabase edge idle limit (150s). */
+export const AI_REASONING_EDGE_MAX_TOKENS = 4096;
+/** Smaller output after a 546 or 504 so the retry returns before the gateway kills it. */
+export const AI_REASONING_EDGE_SHRINK_MAX_TOKENS = 2560;
+/** Abort before the platform idle timeout so a deferral can still be saved. */
+export const AI_REASONING_EDGE_ATTEMPT_TIMEOUT_MS = 120_000;
+
 export function isWorkerResourceLimitError(status: number, errText: string): boolean {
   return status === 546 || /WORKER_RESOURCE_LIMIT/i.test(errText);
+}
+
+export function isEdgeIdleTimeoutError(status: number, errText: string): boolean {
+  return status === 504 && /IDLE_TIMEOUT|idle timeout/i.test(errText);
+}
+
+/** 546 worker capacity or 504 idle timeout — same recovery: smaller, compact request. */
+export function isEdgeCapacityError(status: number, errText: string): boolean {
+  return isWorkerResourceLimitError(status, errText) || isEdgeIdleTimeoutError(status, errText);
 }
 
 /** Transient edge / network failures — keep reasoning_pending for a later retry. */

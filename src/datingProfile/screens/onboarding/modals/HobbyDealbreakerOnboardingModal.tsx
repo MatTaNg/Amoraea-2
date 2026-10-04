@@ -72,7 +72,6 @@ export const HobbyDealbreakerOnboardingModal: React.FC<HobbyDealbreakerOnboardin
           <SingleChoiceOptionList
             options={options}
             value={value}
-            deferSelectUntilPaint
             onSelect={handleSelect}
           />
         </View>

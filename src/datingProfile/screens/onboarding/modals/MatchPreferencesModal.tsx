@@ -170,7 +170,6 @@ export const MatchPreferencesModal: React.FC<MatchPreferencesModalProps> = ({
             <SingleChoiceOptionList
               options={currentQuestion.options.map((o) => ({ label: o, value: o }))}
               value={String(preferences[currentQuestion.key] ?? '')}
-              deferSelectUntilPaint
               onSelect={handleSelect}
             />
           </View>

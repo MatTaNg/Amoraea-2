@@ -144,12 +144,50 @@ function scenarioARepairAsRyanSignalsInAnswer(answer: string): boolean {
   return firstPersonRepair || ryanOwnership;
 }
 
+function scenarioAAnswerIsGenericCoupleAdvice(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  const asRyan = /\bif i (?:were|'?m|am) ryan\b/.test(t) || /\b(as ryan|being ryan)\b/.test(t);
+  if (asRyan) return false;
+  return (
+    /\b(i would|i'd|i will)\s+suggest\b/.test(t) ||
+    /\b(they|them|both of them|the two of them)\b/.test(t)
+  );
+}
+
+/** A specific repair move, not the bare word "talk" or "sit down". */
+function scenarioAAnswerHasSpecificRepairMove(text: string): boolean {
+  const t = normalizeApostrophes(text).toLowerCase();
+  return (
+    /\b(apologiz\w*|say sorry|commit|assure|prioritiz\w*|voicemail|take responsibility|boundar(?:y|ies)|agreement|talk it through|follow through|limit(?:ing)?\s+calls?)\b/.test(
+      t,
+    ) ||
+    /\b(?:sit(?:ting)?\s*-?\s*down|talk|listen)\s+with\s+(?:emma|her|my\s+(?:mom|mother|family))\b/.test(
+      t,
+    ) ||
+    /\b(?:tell|ask)\s+(?:emma|her|my\s+(?:mom|mother|family))\b/.test(t)
+  );
+}
+
 /**
- * Contempt-probe answers need repair-as-Ryan framing — not generic "together"/"share" analysis.
+ * True only when the user already answered the Ryan repair question clearly,
+ * before that question is asked. Generic advice such as "I would suggest they
+ * sit down and talk" does not count.
  */
 export function userAnswerIncludesExplicitScenarioARepairAsRyan(answer: string): boolean {
+  const t = normalizeApostrophes(answer).toLowerCase().trim();
+  if (!t || scenarioAAnswerIsGenericCoupleAdvice(t)) return false;
   if (!repairAnswerHasConcreteSuggestionActionOrStep(answer)) return false;
-  return scenarioARepairAsRyanSignalsInAnswer(answer);
+
+  const explicitRyanRole =
+    /\bif i (?:were|'?m|am) ryan\b/.test(t) || /\b(as ryan|being ryan)\b/.test(t);
+  if (explicitRyanRole) return true;
+
+  const firstPersonRepair =
+    /\b(i would|i'd|i will|i should|i shouldn't have|i should have|i commit|i assure|i apologize|i apologise)\b/.test(
+      t,
+    );
+  if (!firstPersonRepair) return false;
+  return scenarioAAnswerHasSpecificRepairMove(t);
 }
 
 /**
@@ -626,7 +664,8 @@ export function shouldAdvanceScenarioBAfterSatisfiedRepair(
         continue;
       }
       for (let j = i + 1; j < messages.length; j += 1) {
-        if (messages[j].role === 'user' && (messages[j].content ?? '').trim()) {
+        const userText = (messages[j].content ?? '').trim();
+        if (messages[j].role === 'user' && userText && !isShortAckOnlySentence(userText)) {
           jamesDifferentlyAnswered = true;
           break;
         }

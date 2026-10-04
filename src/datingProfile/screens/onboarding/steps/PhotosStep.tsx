@@ -1,5 +1,6 @@
+import { AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useRef, useEffect } from "react";
-import { View, Text, TouchableOpacity, ActivityIndicator, Alert } from "react-native";
+import { View, Text, TouchableOpacity, Alert } from "react-native";
 import { handleApiError } from "@/shared/utils/errorHandling";
 import { Image } from "expo-image";
 import { useNavigation } from "@react-navigation/native";
@@ -105,7 +106,7 @@ export const PhotosStep: React.FC<PhotosStepProps> = ({
         ))}
         {Array.from({ length: uploadingPhotosCount }).map((_, index) => (
           <View key={`uploading-${index}`} style={styles.uploadingPhotoContainer}>
-            <ActivityIndicator size="large" color="#007AFF" />
+            <AmoraeaLoadingSpinner size="large" />
             <Text style={styles.uploadingText}>
               Uploading...
             </Text>

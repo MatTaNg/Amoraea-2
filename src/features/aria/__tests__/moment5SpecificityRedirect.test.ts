@@ -28,6 +28,12 @@ describe('moment5SpecificityRedirect resolution follow-up', () => {
     expect(looksLikeMoment5ResolutionFollowUpPrompt(sessionLogFollowUp)).toBe(true);
     expect(looksLikeMoment5ResolutionFollowUpPrompt(sessionLogResolutionCompleteFollowUp)).toBe(true);
     expect(looksLikeMoment5ResolutionFollowUpPrompt(sessionLogTensionResolutionFollowUp)).toBe(true);
+    expect(looksLikeMoment5ResolutionFollowUpPrompt(MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT)).toBe(false);
+    expect(
+      looksLikeMoment5ResolutionFollowUpPrompt(
+        "Think of a time when you and someone close to you had a real conflict — something that actually got tense between you. What happened, and how did it get resolved?",
+      ),
+    ).toBe(false);
     expect(
       looksLikeMoment5ResolutionFollowUpPrompt(
         'That makes a lot of sense. When you explained your reasons to her, how did she take it, and did things feel resolved between you two after that?',

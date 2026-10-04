@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   StyleSheet,
   Text,
@@ -7,10 +8,12 @@ import {
   Platform,
   Animated,
   Easing,
-  ActivityIndicator,
   Linking,
 } from 'react-native';
-import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
+import {
+  PostInterviewProfileCtaLoadingPage,
+  PostInterviewScrollLayout,
+} from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { PostInterviewProfileEncouragement } from '@app/screens/onboarding/PostInterviewProfileEncouragement';
 import { POST_INTERVIEW_PROFILE_TIME_ESTIMATE } from '@features/onboarding/postInterviewProfileCompletion';
 import { Ionicons } from '@expo/vector-icons';
@@ -210,6 +213,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
 
   useFocusEffect(
     useCallback(() => {
+      setProfileCtaBusy(false);
       let cancelled = false;
       void (async () => {
         const { data: auth } = await supabase.auth.getUser();
@@ -289,8 +293,9 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
       } else {
         navigateToDatingProfileOnboardingEntry(navigation, uid);
       }
-    } finally {
+    } catch (error) {
       setProfileCtaBusy(false);
+      if (__DEV__) console.warn('[PostInterviewPassed] open profile failed', error);
     }
   }, [userId, navigation, datingProfileFullyComplete, assessmentsComplete]);
 
@@ -355,6 +360,10 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
     void Linking.openURL(WHATSAPP_COMMUNITY_URL);
   };
 
+  if (profileCtaBusy) {
+    return <PostInterviewProfileCtaLoadingPage />;
+  }
+
   return (
     <PostInterviewScrollLayout>
         <FlickeringFlame size={104} />
@@ -389,22 +398,13 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
 
               <Pressable
                 onPress={() => void openProfileCta()}
-                disabled={profileCtaBusy}
-                style={({ pressed }) => [
-                  styles.profileOnboardingCta,
-                  pressed && !profileCtaBusy && { opacity: 0.9 },
-                  profileCtaBusy && { opacity: 0.85 },
-                ]}
+                style={({ pressed }) => [styles.profileOnboardingCta, pressed && { opacity: 0.9 }]}
                 accessibilityRole="button"
                 accessibilityLabel={profileCtaLabel}
               >
                 <Ionicons name="person-outline" size={20} color="#fff" style={{ marginRight: 8 }} />
                 <Text style={styles.profileOnboardingCtaText}>{profileCtaLabel}</Text>
-                {profileCtaBusy ? (
-                  <ActivityIndicator color="#fff" style={{ marginLeft: 8 }} />
-                ) : (
-                  <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
-                )}
+                <Ionicons name="chevron-forward" size={20} color="rgba(255,255,255,0.9)" style={{ marginLeft: 8 }} />
               </Pressable>
               {!profileReadyForMatching ? (
                 <Text style={styles.profileOnboardingHint}>
@@ -418,7 +418,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
               accessibilityLabel="Loading profile status"
               accessibilityRole="progressbar"
             >
-              <ActivityIndicator color="#93c5fd" />
+              <ActivityIndicator size="small" color="#5BA8E8" />
             </View>
           )}
 
@@ -468,7 +468,7 @@ export const PostInterviewPassedScreen: React.FC<{ navigation: any; route: { par
                 retakeBusy && { opacity: 0.55 },
               ]}
             >
-              {retakeBusy ? <ActivityIndicator color="#93c5fd" /> : <Text style={styles.retakeButtonLabel}>Retake test</Text>}
+              {retakeBusy ? <ActivityIndicator size="small" color="#93c5fd" /> : <Text style={styles.retakeButtonLabel}>Retake test</Text>}
             </Pressable>
             <Text style={styles.retakeHint}>
               Starts a new interview run. Your prior scores stay on file for review.

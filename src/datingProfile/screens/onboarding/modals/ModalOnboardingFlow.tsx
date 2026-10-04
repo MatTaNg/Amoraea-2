@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useState, useEffect } from 'react';
-import { View, ActivityIndicator, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/hooks/AuthProvider';
@@ -21,6 +22,7 @@ import { capProfilePhotoList } from '@/shared/profilePhotoLimit';
 import { PhotosVideoModal } from './PhotosVideoModal';
 import { LifeDomainsModal } from './LifeDomainsModal';
 import { LifeDomainQuestionsModal } from './LifeDomainQuestionsModal';
+import { LifeDomainOptionalIntroModal } from './LifeDomainOptionalIntroModal';
 import { LifeDomainSingleQuestionOnboardingModal } from './LifeDomainSingleQuestionOnboardingModal';
 import {
   findLifeDomainQuestionStepRow,
@@ -37,6 +39,7 @@ import {
   getPrevOnboardingStep,
   resolveRestoredOnboardingStep,
 } from './onboardingStepNavigation';
+import { deferAfterNavigationPaint } from '@/shared/utils/deferAfterPaint';
 import { upsertLifeDomainAnswer } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import { syncLifeDomainImportanceFromOnboarding } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import { mergeAndPersistMatchPreferences } from '@/screens/profile/editProfile/matchPreferencesProfileService';
@@ -187,6 +190,8 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
   const isInitialLoad = React.useRef(true);
   /** Prevents double step advances on rapid taps (saves run in the background). */
   const stepTransitionLockRef = React.useRef(false);
+  /** Drops an older after-paint save when a newer step change schedules one. */
+  const deferredSaveGenRef = React.useRef(0);
   /** Furthest step reached — persisted on save; back navigation does not regress this. */
   const persistedStepRef = React.useRef<OnboardingStep>('name');
 
@@ -544,11 +549,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
       return;
     }
 
-    const dataString = JSON.stringify(updatedData);
-    if (dataString === lastSavedDataRef.current) {
-      setOnboardingData(updatedData);
-      return;
-    }
+    setOnboardingData(updatedData);
 
     if (user?.id && !isInitialLoad.current) {
         // Clear any pending save
@@ -786,12 +787,31 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     setOnboardingData(updatedData);
   }, [user?.id, currentStep]);
 
-  /** Fast path for auto-advance single-choice taps — updates UI immediately; persisted on step change. */
+  /** Fast path for auto-advance taps — updates the page immediately and saves afterward. */
   const setChoice = React.useCallback((patch: Partial<OnboardingData>) => {
     const updatedData = { ...onboardingDataRef.current, ...patch };
     onboardingDataRef.current = updatedData;
     setOnboardingData(updatedData);
-  }, []);
+    const uid = user?.id;
+    if (!uid) return;
+    const gen = ++deferredSaveGenRef.current;
+    deferAfterNavigationPaint(() => {
+      if (deferredSaveGenRef.current !== gen) return;
+      void modalOnboardingService
+        .saveProgress(uid, {
+          currentStep: persistedStepRef.current,
+          onboardingData: onboardingDataRef.current,
+        })
+        .then((saveResult) => {
+          if (!saveResult.success) {
+            console.error('Failed to save choice:', saveResult.error);
+          }
+        })
+        .catch((error) => {
+          console.error('Error saving choice:', error);
+        });
+    });
+  }, [user?.id]);
 
   const goToPrevStep = () => {
     if (stepTransitionLockRef.current) return;
@@ -807,19 +827,26 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
     stepTransitionLockRef.current = true;
     try {
+      setOnboardingData(latestData);
       setCurrentStep(prevStep);
+      persistedStepRef.current = prevStep;
       if (user?.id) {
-        void modalOnboardingService
-          .saveProgress(user.id, {
-            currentStep: persistedStepRef.current,
-            onboardingData: latestData,
-          })
-          .then((saveResult) => {
-            if (!saveResult.success) {
-              console.error('Error saving progress on back:', saveResult.error);
-            }
-          })
-          .catch((e) => console.error('Error saving progress on back:', e));
+        const saveUid = user.id;
+        const gen = ++deferredSaveGenRef.current;
+        deferAfterNavigationPaint(() => {
+          if (deferredSaveGenRef.current !== gen) return;
+          void modalOnboardingService
+            .saveProgress(saveUid, {
+              currentStep: prevStep,
+              onboardingData: latestData,
+            })
+            .then((saveResult) => {
+              if (!saveResult.success) {
+                console.error('Error saving progress on back:', saveResult.error);
+              }
+            })
+            .catch((e) => console.error('Error saving progress on back:', e));
+        });
       }
     } finally {
       stepTransitionLockRef.current = false;
@@ -845,11 +872,6 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
     }
     const stepWeLeave = currentStep;
     const uid = user?.id;
-    if (uid) {
-      void persistLifeDomainAnswerForStep(stepWeLeave, uid).catch((e) => {
-        if (__DEV__) console.warn('[ModalOnboarding] life domain answer save', e);
-      });
-    }
 
     const navCtx = getOnboardingNavigationContext(onboardingDataRef.current);
     const nextStep = getNextOnboardingStep(currentStep, navCtx);
@@ -887,9 +909,16 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
       if (!uid) return;
 
-      void (async () => {
+      const saveUid = uid;
+      const gen = ++deferredSaveGenRef.current;
+      deferAfterNavigationPaint(() => {
+        if (deferredSaveGenRef.current !== gen) return;
+        void persistLifeDomainAnswerForStep(stepWeLeave, saveUid).catch((e) => {
+          if (__DEV__) console.warn('[ModalOnboarding] life domain answer save', e);
+        });
+        void (async () => {
         try {
-          const saveResult = await modalOnboardingService.saveProgress(uid, {
+          const saveResult = await modalOnboardingService.saveProgress(saveUid, {
             currentStep: nextStep,
             onboardingData: latestData,
           });
@@ -1130,7 +1159,46 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
         } catch (error) {
           console.error('Error saving after step change:', error);
         }
-      })();
+        })();
+      });
+    } finally {
+      stepTransitionLockRef.current = false;
+    }
+  };
+
+  const finishOnboardingAfterRequiredFields = () => {
+    if (stepTransitionLockRef.current) return;
+    const latestData = onboardingDataRef.current;
+    const uid = user?.id;
+
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    if (profileSaveTimeoutRef.current) {
+      clearTimeout(profileSaveTimeoutRef.current);
+      profileSaveTimeoutRef.current = null;
+    }
+
+    stepTransitionLockRef.current = true;
+    try {
+      setOnboardingData(latestData);
+      setCurrentStep('profileComplete');
+      persistedStepRef.current = 'profileComplete';
+      if (!uid) return;
+      const saveUid = uid;
+      const gen = ++deferredSaveGenRef.current;
+      deferAfterNavigationPaint(() => {
+        if (deferredSaveGenRef.current !== gen) return;
+        void modalOnboardingService
+          .saveProgress(saveUid, {
+            currentStep: 'profileComplete',
+            onboardingData: latestData,
+          })
+          .catch((error) => {
+            console.error('Error saving after skipping optional questions:', error);
+          });
+      });
     } finally {
       stepTransitionLockRef.current = false;
     }
@@ -1192,9 +1260,9 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 
   if (loading) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" />
-        <Text style={{ marginTop: 12, color: '#6B7280' }}>Loading your profile progress...</Text>
+      <View style={flowStyles.profileProgressLoading}>
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+        <Text style={flowStyles.profileProgressLoadingText}>Loading your profile progress...</Text>
       </View>
     );
   }
@@ -1291,21 +1359,24 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
               onboardingDataRef.current = { ...onboardingDataRef.current, attractedTo: picked };
             }
             const attractedTo = picked ?? onboardingDataRef.current.attractedTo;
+            goToNextStep();
             if (attractedTo && attractedTo.length > 0 && user?.id) {
               const attractionUid = user.id;
-              void (async () => {
-                try {
-                  const { profilesRepo } = await import('@/data/repos/profilesRepo');
-                  const mappedAttraction = mapAttractionToDb(attractedTo);
-                  if (mappedAttraction) {
-                    await profilesRepo.updateProfile(attractionUid, { attractedTo: mappedAttraction });
+              const pickedAttraction = attractedTo;
+              deferAfterNavigationPaint(() => {
+                void (async () => {
+                  try {
+                    const { profilesRepo } = await import('@/data/repos/profilesRepo');
+                    const mappedAttraction = mapAttractionToDb(pickedAttraction);
+                    if (mappedAttraction) {
+                      await profilesRepo.updateProfile(attractionUid, { attractedTo: mappedAttraction });
+                    }
+                  } catch (error) {
+                    console.error('Error saving attracted_to:', error);
                   }
-                } catch (error) {
-                  console.error('Error saving attracted_to:', error);
-                }
-              })();
+                })();
+              });
             }
-            void goToNextStep();
           }}
           onBack={goToPrevStep}
         />
@@ -1330,23 +1401,26 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           onRelationshipStyleChange={(style) => setChoice({ relationshipStyle: style })}
           onNext={() => {
             const latestData = onboardingDataRef.current;
-            if (latestData.relationshipStyle && latestData.relationshipStyle.trim() !== '' && user?.id) {
+            const relationshipStyle = latestData.relationshipStyle;
+            goToNextStep();
+            if (relationshipStyle && relationshipStyle.trim() !== '' && user?.id) {
               const rsUid = user.id;
-              void (async () => {
-                try {
-                  const dbValue = mapRelationshipStyleUiToDb(latestData.relationshipStyle!);
-                  const { profilesRepo } = await import('@/data/repos/profilesRepo');
-                  await profilesRepo.updateProfile(rsUid, {
-                    relationshipStyle: dbValue as any,
-                    relationshipType: mapRelationshipStyleUiToRelationshipType(latestData.relationshipStyle!),
-                  } as any);
-                  console.log('Saved relationship_style to Supabase:', dbValue);
-                } catch (error) {
-                  console.error('Error saving relationship_style:', error);
-                }
-              })();
+              deferAfterNavigationPaint(() => {
+                void (async () => {
+                  try {
+                    const dbValue = mapRelationshipStyleUiToDb(relationshipStyle);
+                    const { profilesRepo } = await import('@/data/repos/profilesRepo');
+                    await profilesRepo.updateProfile(rsUid, {
+                      relationshipStyle: dbValue as any,
+                      relationshipType: mapRelationshipStyleUiToRelationshipType(relationshipStyle),
+                    } as any);
+                    console.log('Saved relationship_style to Supabase:', dbValue);
+                  } catch (error) {
+                    console.error('Error saving relationship_style:', error);
+                  }
+                })();
+              });
             }
-            void goToNextStep();
           }}
           onBack={goToPrevStep}
         />
@@ -1366,25 +1440,28 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           location={onboardingData.location || ''}
           onLocationChange={(location) => updateData({ location })}
           onNext={() => {
-            void goToNextStep();
             const latestData = onboardingDataRef.current;
-            if (latestData.location?.trim() && user?.id) {
+            const location = latestData.location;
+            goToNextStep();
+            if (location?.trim() && user?.id) {
               const locUid = user.id;
-              void (async () => {
-                try {
-                  const { profilesRepo } = await import('@/data/repos/profilesRepo');
-                  const { geocodeLocation } = await import('@/shared/utils/geocoding');
-                  const coordinates = await geocodeLocation(latestData.location!);
-                  const profileUpdates: any = { location: latestData.location!.trim() };
-                  if (coordinates) {
-                    profileUpdates.lat = coordinates.latitude;
-                    profileUpdates.lon = coordinates.longitude;
+              deferAfterNavigationPaint(() => {
+                void (async () => {
+                  try {
+                    const { profilesRepo } = await import('@/data/repos/profilesRepo');
+                    const { geocodeLocation } = await import('@/shared/utils/geocoding');
+                    const coordinates = await geocodeLocation(location);
+                    const profileUpdates: any = { location: location.trim() };
+                    if (coordinates) {
+                      profileUpdates.lat = coordinates.latitude;
+                      profileUpdates.lon = coordinates.longitude;
+                    }
+                    await profilesRepo.updateProfile(locUid, profileUpdates);
+                  } catch (error) {
+                    console.error('Error saving location:', error);
                   }
-                  await profilesRepo.updateProfile(locUid, profileUpdates);
-                } catch (error) {
-                  console.error('Error saving location:', error);
-                }
-              })();
+                })();
+              });
             }
           }}
           onBack={goToPrevStep}
@@ -1778,15 +1855,26 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           lifeDomains={Array.isArray(onboardingData.lifeDomains) ? undefined : onboardingData.lifeDomains}
           onLifeDomainsChange={(lifeDomains) => updateData({ lifeDomains })}
           onNext={() => {
-            void goToNextStep();
             const latest = onboardingDataRef.current;
             const ld = Array.isArray(latest.lifeDomains) ? undefined : latest.lifeDomains;
+            goToNextStep();
             if (user?.id && ld) {
-              void syncLifeDomainImportanceFromOnboarding(user.id, ld).catch((e) => {
-                if (__DEV__) console.warn('[ModalOnboarding] life domain importance', e);
+              const importanceUid = user.id;
+              deferAfterNavigationPaint(() => {
+                void syncLifeDomainImportanceFromOnboarding(importanceUid, ld).catch((e) => {
+                  if (__DEV__) console.warn('[ModalOnboarding] life domain importance', e);
+                });
               });
             }
           }}
+          onBack={goToPrevStep}
+        />
+      )}
+
+      {currentStep === 'lifeDomainOptionalIntro' && (
+        <LifeDomainOptionalIntroModal
+          onFillOutMore={goToNextStep}
+          onFinish={finishOnboardingAfterRequiredFields}
           onBack={goToPrevStep}
         />
       )}
@@ -1804,7 +1892,12 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             enforceRequired={false}
             optionalOpenEndedLeftover
             initialAnswers={onboardingData.lifeDomainAnswers}
-            onAnswersChange={(lifeDomainAnswers) => updateData({ lifeDomainAnswers })}
+            onAnswersChange={(lifeDomainAnswers) => {
+              onboardingDataRef.current = {
+                ...onboardingDataRef.current,
+                lifeDomainAnswers,
+              };
+            }}
             onNext={goToNextStep}
             onBack={goToPrevStep}
           />
@@ -1841,7 +1934,7 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           matchPreferences={onboardingData.matchPreferences}
           startAtLastQuestion={openLifestyleAtLastQuestion}
           onMatchPreferencesChange={(matchPreferences) =>
-            updateData({
+            setChoice({
               matchPreferences: {
                 ...(onboardingDataRef.current.matchPreferences ?? {}),
                 ...matchPreferences,
@@ -1860,14 +1953,17 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           onNext={() => {
             const latest = onboardingDataRef.current;
             const archetypes = normalizeArchetypesFromProfile(latest.archetypes);
-            if (user?.id && isCompleteArchetypeSelection(archetypes.length)) {
-              void import('@/data/repos/profilesRepo').then(({ profilesRepo }) =>
-                profilesRepo.updateProfile(user.id, { archetypes }).catch((error) => {
-                  console.error('Failed to save archetypes on step advance:', error);
-                }),
-              );
-            }
             goToNextStep();
+            if (user?.id && isCompleteArchetypeSelection(archetypes.length)) {
+              const archetypesUid = user.id;
+              deferAfterNavigationPaint(() => {
+                void import('@/data/repos/profilesRepo').then(({ profilesRepo }) =>
+                  profilesRepo.updateProfile(archetypesUid, { archetypes }).catch((error) => {
+                    console.error('Failed to save archetypes on step advance:', error);
+                  }),
+                );
+              });
+            }
           }}
           onBack={goToPrevStep}
         />
@@ -1879,28 +1975,29 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
           photos={onboardingData.photos || []}
           onPhotosChange={(photos) => updateData({ photos })}
           onNext={() => {
-            void goToNextStep();
-            const latestData = onboardingDataRef.current;
+            goToNextStep();
             if (user?.id) {
               const photosUid = user.id;
-              void (async () => {
-                try {
-                  const { profilesRepo } = await import('@/data/repos/profilesRepo');
-                  const profileUpdates: any = {};
-                  const livePhotos = onboardingDataRef.current.photos;
-                  if (livePhotos !== undefined) {
-                    const validPhotos = Array.isArray(livePhotos)
-                      ? livePhotos.filter((p) => p && p.trim() !== '')
-                      : [];
-                    profileUpdates.photos = capProfilePhotoList(validPhotos);
+              deferAfterNavigationPaint(() => {
+                void (async () => {
+                  try {
+                    const { profilesRepo } = await import('@/data/repos/profilesRepo');
+                    const profileUpdates: any = {};
+                    const livePhotos = onboardingDataRef.current.photos;
+                    if (livePhotos !== undefined) {
+                      const validPhotos = Array.isArray(livePhotos)
+                        ? livePhotos.filter((p) => p && p.trim() !== '')
+                        : [];
+                      profileUpdates.photos = capProfilePhotoList(validPhotos);
+                    }
+                    if (Object.keys(profileUpdates).length > 0) {
+                      await profilesRepo.updateProfile(photosUid, profileUpdates);
+                    }
+                  } catch (error) {
+                    console.error('Error saving photos:', error);
                   }
-                  if (Object.keys(profileUpdates).length > 0) {
-                    await profilesRepo.updateProfile(photosUid, profileUpdates);
-                  }
-                } catch (error) {
-                  console.error('Error saving photos:', error);
-                }
-              })();
+                })();
+              });
             }
           }}
           onBack={goToPrevStep}
@@ -1920,15 +2017,18 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
             })
           }
           onNext={() => {
-            void goToNextStep();
             const latest = onboardingDataRef.current;
             const mp = latest.matchPreferences;
+            goToNextStep();
             if (user?.id && mp && typeof mp === 'object' && !Array.isArray(mp)) {
-              void mergeAndPersistMatchPreferences(user.id, mp as Record<string, unknown>).catch(
-                (e) => {
-                  if (__DEV__) console.warn('[ModalOnboarding] match preferences', e);
-                },
-              );
+              const matchUid = user.id;
+              deferAfterNavigationPaint(() => {
+                void mergeAndPersistMatchPreferences(matchUid, mp as Record<string, unknown>).catch(
+                  (e) => {
+                    if (__DEV__) console.warn('[ModalOnboarding] match preferences', e);
+                  },
+                );
+              });
             }
           }}
           onBack={goToPrevStep}
@@ -1948,6 +2048,18 @@ export const ModalOnboardingFlow: React.FC<ModalOnboardingFlowProps> = ({
 };
 
 const flowStyles = StyleSheet.create({
+  profileProgressLoading: {
+    flex: 1,
+    backgroundColor: '#05060D',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  profileProgressLoadingText: {
+    marginTop: 16,
+    color: '#7A9ABE',
+    textAlign: 'center',
+  },
   root: {
     flex: 1,
   },

@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -5,7 +6,6 @@ import {
   ScrollView,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   RefreshControl,
   Modal,
   Pressable,
@@ -751,7 +751,7 @@ export function OverviewTab() {
   if (loading) {
     return (
       <View style={styles.center}>
-        <ActivityIndicator color="#fff" size="large" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         <Text style={styles.loadingText}>Computing analytics across all attempts...</Text>
       </View>
     );

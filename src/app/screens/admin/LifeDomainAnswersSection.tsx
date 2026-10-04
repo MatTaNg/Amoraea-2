@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet } from 'react-native';
 import { supabase } from '@/data/supabase/client';
 import {
   LIFE_DOMAIN_ONBOARDING_DOMAINS,
@@ -94,7 +94,7 @@ export function LifeDomainAnswersSection({
   }, [userId, wantKidsProp]);
 
   if (loading) {
-    return <ActivityIndicator color="#5BA8E8" style={{ marginVertical: 12 }} />;
+    return <ActivityIndicator size="small" color="#5BA8E8" style={{ marginVertical: 12 }} />;
   }
 
   if (error) {
