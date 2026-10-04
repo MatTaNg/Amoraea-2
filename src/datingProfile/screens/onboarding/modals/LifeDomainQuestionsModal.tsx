@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ONBOARDING_STEP_SCREEN_EDGES, ONBOARDING_STEP_SCREEN_EDGES_WITH_BOTTOM } from './onboardingStepScreenEdges';
-import { View, ScrollView, Text, TextInput } from 'react-native';
+import { View, FlatList, Text, TextInput } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '@/shared/ui/Button';
 import { OnboardingHeader } from './components/OnboardingHeader';
@@ -24,10 +24,11 @@ import {
   type OnboardingLifeDomainsSliders,
 } from '@/screens/profile/editProfile/lifeDomainProfileService';
 import { AppSelect } from '@/shared/ui/AppSelect';
-import {
-  ONBOARDING_LIFE_DOMAIN_QUESTIONS_OPTIONAL_DESCRIPTION,
-  ONBOARDING_LIFE_DOMAIN_QUESTIONS_REQUIRED_DESCRIPTION,
-} from './onboardingStepCopy';
+import { deferAfterNavigationPaint } from '@/shared/utils/deferAfterPaint';
+
+function QuestionSeparator() {
+  return <View style={styles.questionSeparator} />;
+}
 
 function mergeLifeDomainAnswerMaps(
   fromDb: LifeDomainAnswersMap,
@@ -83,10 +84,18 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
     setQuestionSuggestion('');
   }, [domainId, userId]);
 
+  const didSyncSeedRef = useRef(false);
   useEffect(() => {
+    if (!didSyncSeedRef.current) {
+      didSyncSeedRef.current = true;
+      answersBaselineRef.current = answers;
+      return;
+    }
     const merged = mergeLifeDomainAnswerMaps({}, draftSeedRef.current);
     setAnswers(merged);
-    answersBaselineRef.current = JSON.parse(JSON.stringify(merged)) as LifeDomainAnswersMap;
+    answersBaselineRef.current = merged;
+    // Seed is already applied in useState; repeating it on mount re-renders every field.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- answers is the initial snapshot only
   }, [domainId, initialAnswers]);
 
   useEffect(() => {
@@ -102,7 +111,7 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
         if (cancelled) return;
         const merged = mergeLifeDomainAnswerMaps(fromDb, draftSeedRef.current);
         setAnswers(merged);
-        answersBaselineRef.current = JSON.parse(JSON.stringify(merged)) as LifeDomainAnswersMap;
+        answersBaselineRef.current = merged;
       } catch (e) {
         if (__DEV__) console.warn('[LifeDomainQuestionsModal] load', e);
       }
@@ -131,7 +140,7 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
 
   const handleBack = useCallback(() => {
     onAnswersChange?.(answers);
-    answersBaselineRef.current = JSON.parse(JSON.stringify(answers)) as LifeDomainAnswersMap;
+    answersBaselineRef.current = answers;
     onBack();
   }, [answers, onAnswersChange, onBack]);
 
@@ -147,20 +156,26 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
       return;
     }
 
-    answersBaselineRef.current = JSON.parse(JSON.stringify(answers)) as LifeDomainAnswersMap;
-    onAnswersChange?.(answers);
+    const snapshot = answers;
+    onAnswersChange?.(snapshot);
     onNext();
 
-    void (async () => {
-      try {
-        if (lifeDomains && domainId === 'finance') {
-          await syncLifeDomainImportanceFromOnboarding(userId, lifeDomains);
+    const uid = userId;
+    const domains = lifeDomains;
+    const domain = domainId;
+    deferAfterNavigationPaint(() => {
+      answersBaselineRef.current = snapshot;
+      void (async () => {
+        try {
+          if (domains && domain === 'finance') {
+            await syncLifeDomainImportanceFromOnboarding(uid, domains);
+          }
+          await saveLifeDomainAnswersFromOnboarding(uid, snapshot);
+        } catch (e) {
+          if (__DEV__) console.warn('[LifeDomainQuestionsModal] save', e);
         }
-        await saveLifeDomainAnswersFromOnboarding(userId, answers);
-      } catch (e) {
-        if (__DEV__) console.warn('[LifeDomainQuestionsModal] save', e);
-      }
-    })();
+      })();
+    });
   };
 
   const questionLabelSuffix = (q: LifeDomainQuestionDef) => {
@@ -254,28 +269,33 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
         title={`${domainMeta.icon} ${domainMeta.name}`}
         onBack={handleBack}
       />
-      <ScrollView
+      <FlatList
+        data={questions}
+        keyExtractor={(q) => q.id}
+        renderItem={({ item }) => renderQuestion(item)}
         style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        keyboardShouldPersistTaps="handled"
-      >
-        <View style={styles.container}>
-          <Text style={styles.description}>
-            {optionalOpenEndedLeftover
-              ? ONBOARDING_LIFE_DOMAIN_QUESTIONS_OPTIONAL_DESCRIPTION
-              : ONBOARDING_LIFE_DOMAIN_QUESTIONS_REQUIRED_DESCRIPTION}
-          </Text>
-          {!optionalOpenEndedLeftover ? (
-            <Text style={styles.domainMeta}>
-              {answered} of {total} required answered on this step
-            </Text>
-          ) : null}
-          {validationError ? (
-            <Text style={styles.validationError}>{validationError}</Text>
-          ) : null}
-          <View style={styles.domainBody}>{questions.map((q) => renderQuestion(q))}</View>
-        </View>
-      </ScrollView>
+        contentContainerStyle={[styles.scrollContent, styles.container]}
+        keyboardShouldPersistTaps="always"
+        initialNumToRender={typeof jest === 'undefined' ? 2 : questions.length}
+        maxToRenderPerBatch={typeof jest === 'undefined' ? 2 : questions.length}
+        windowSize={5}
+        updateCellsBatchingPeriod={32}
+        ItemSeparatorComponent={QuestionSeparator}
+        ListHeaderComponent={
+          !optionalOpenEndedLeftover || validationError ? (
+            <View>
+              {!optionalOpenEndedLeftover ? (
+                <Text style={styles.domainMeta}>
+                  {answered} of {total} required answered on this step
+                </Text>
+              ) : null}
+              {validationError ? (
+                <Text style={styles.validationError}>{validationError}</Text>
+              ) : null}
+            </View>
+          ) : null
+        }
+      />
 
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
         <View style={styles.buttonRow}>
@@ -283,11 +303,13 @@ export const LifeDomainQuestionsModal: React.FC<LifeDomainQuestionsModalProps> =
             title="Back"
             variant="outline"
             onPress={handleBack}
+            immediate
             style={styles.backButton}
           />
           <Button
             title="Next"
             onPress={handleNext}
+            immediate
             style={styles.nextButton}
           />
         </View>

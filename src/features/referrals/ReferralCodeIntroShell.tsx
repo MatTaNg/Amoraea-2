@@ -18,14 +18,32 @@ import { ReferralDiscountModal } from '@features/referrals/ReferralDiscountModal
 
 const FONT_BODY = Platform.OS === 'web' ? "'DM Sans', system-ui, sans-serif" : undefined;
 
-/** Routes that already surface referral UI inline — hide the global floating chip/modal. */
+/**
+ * Hide the floating referral chip on questionnaire, typology, profile onboarding,
+ * and the interview congrats screen.
+ */
 export const REFERRAL_CODE_INTRO_SUPPRESSED_ROUTES = [
   'PostInterviewLaunch',
+  'PostInterviewPassed',
   'DatingProfileEdit',
+  'PsychometricAssessment',
+  'PsychometricsComplete',
+  'DatingProfileOnboarding',
+  'DatingOnboardingEntry',
+  'DatingTypologyIntro',
+  'DatingProfileSetupTransition',
+  'DatingModals',
+  'DatingBreak',
+  'DatingInstrument',
+  'DatingInsight',
+  'DatingConflictStyle',
+  'DatingConflictResults',
+  'DatingProfileBuilder',
+  'DatingAdditionalInfo',
+  'ValidationPsychometricsHub',
+  'ValidationInstrument',
+  'ValidationConflict',
 ] as const;
-
-/** Parent stack route — suppress on all nested onboarding steps. */
-export const REFERRAL_CODE_INTRO_SUPPRESSED_ROUTE_PREFIXES = ['DatingProfileOnboarding'] as const;
 
 export function resolveActiveNavigationRouteName(
   state: NavigationState | undefined,
@@ -38,34 +56,32 @@ export function resolveActiveNavigationRouteName(
   return node.routes[node.index ?? 0]?.name;
 }
 
-function navigationTreeContainsRoute(
-  state: NavigationState | undefined,
-  routeName: string,
-): boolean {
-  if (!state) return false;
-  for (const route of state.routes) {
-    if (route.name === routeName) return true;
-    if (route.state && navigationTreeContainsRoute(route.state as NavigationState, routeName)) {
-      return true;
-    }
+function isSuppressedRouteName(routeName: string | undefined): boolean {
+  return (
+    routeName != null &&
+    (REFERRAL_CODE_INTRO_SUPPRESSED_ROUTES as readonly string[]).includes(routeName)
+  );
+}
+
+/** Route names from the focused screen up through its parent navigators. */
+export function focusedNavigationRouteNames(state: NavigationState | undefined): string[] {
+  const names: string[] = [];
+  let node = state;
+  while (node) {
+    const route = node.routes[node.index ?? 0];
+    if (!route) break;
+    names.push(route.name);
+    node = route.state as NavigationState | undefined;
   }
-  return false;
+  return names;
 }
 
 export function isReferralCodeIntroSuppressedRoute(
   routeName: string | undefined,
   navigationState?: NavigationState,
 ): boolean {
-  if (
-    routeName != null &&
-    (REFERRAL_CODE_INTRO_SUPPRESSED_ROUTES as readonly string[]).includes(routeName)
-  ) {
-    return true;
-  }
-
-  return (REFERRAL_CODE_INTRO_SUPPRESSED_ROUTE_PREFIXES as readonly string[]).some((name) =>
-    navigationTreeContainsRoute(navigationState, name),
-  );
+  if (isSuppressedRouteName(routeName)) return true;
+  return focusedNavigationRouteNames(navigationState).some((name) => isSuppressedRouteName(name));
 }
 
 type ReferralCodeIntroShellProps = {

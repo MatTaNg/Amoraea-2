@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useEffect } from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
+import { StyleSheet, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { DatingProfileStackParamList } from "@app/navigation/DatingProfileOnboardingNavigator";
@@ -35,7 +36,7 @@ export function BreakScreen() {
 
   return (
     <View style={styles.container}>
-      <ActivityIndicator size="large" color={theme.colors.primary} />
+      <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
     </View>
   );
 }

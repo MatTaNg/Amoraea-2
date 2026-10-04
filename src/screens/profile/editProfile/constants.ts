@@ -11,7 +11,7 @@ export function normalizePartnerPoliticalAlignmentToYesNo(raw: string): string {
 /** Partner already has children — options shown in onboarding MatchPreferencesModal. */
 export const PREF_PARTNER_HAS_CHILDREN_OPTIONS: string[] = [
   'No preference',
-  'Yes — OK if they already have children',
+  'Yes, Ok if they already have children',
   'Prefer partner without children',
 ];
 

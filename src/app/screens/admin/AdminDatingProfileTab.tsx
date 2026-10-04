@@ -1,10 +1,10 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
   ScrollView,
   StyleSheet,
-  ActivityIndicator,
   Image,
   Platform,
   Linking,
@@ -110,7 +110,7 @@ export function AdminDatingProfileTab({ userId }: Props) {
   if (loading) {
     return (
       <View style={styles.centered}>
-        <ActivityIndicator color="#5BA8E8" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         <Text style={styles.loadingText}>Loading dating profile…</Text>
       </View>
     );

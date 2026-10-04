@@ -25,11 +25,13 @@ export const INNER_FLAME_PATH = `
   Z
 `;
 
-/** Matches `CONFIG` scale in `FlameOrb.tsx` (CSS transform on logo). */
+/** Base logo scale. Speaking keeps the previous expanded size. */
 export const FLAME_STATE_SCALE = {
   idle: 1,
   speaking: 1.55,
-  /** Keep interview logo at idle size while the user records — mic button carries listening UI. */
   listening: 1,
-  processing: 1.08,
+  processing: 1,
 } as const;
+
+/** Room around the idle logo for the speaking expansion (1.55 × pulse) plus rings. */
+export const FLAME_ORB_STAGE_SCALE = 1.86;

@@ -200,6 +200,13 @@ export async function deliverScenario1VignetteAfterReadinessAssent(
   }
   deps.parallelStreamingTtsRef.current.accumulatedFullText = displayText;
   deps.lastQuestionTextRef.current = SCENARIO_1_OPENING;
+  const s1Scenario: ActiveScenario = { label: 'Situation 1', text: SHOW_SCENARIO_1_VIGNETTE_EXACT };
+  deps.setReferenceCardPrompt?.(SCENARIO_1_OPENING);
+  deps.setReferenceCardScenario?.(s1Scenario);
+  if (deps.committedScenarioRef) {
+    deps.committedScenarioRef.current = s1Scenario;
+  }
+  deps.setInterviewUiPhase?.('scenario_active');
   await deps.speakTextSafe(displayText, SHOW_SCENARIO_CARD_CANONICAL_SPEECH);
   if (deps.ttsUtteranceInFlightRef) {
     deps.ttsUtteranceInFlightRef.current = null;
@@ -208,13 +215,6 @@ export async function deliverScenario1VignetteAfterReadinessAssent(
     deps.ttsLineInFlightRef.current = false;
   }
   deps.parallelStreamingTtsRef.current.spokenCompleteText = displayText;
-  deps.setReferenceCardPrompt?.(SCENARIO_1_OPENING);
-  const s1Scenario: ActiveScenario = { label: 'Situation 1', text: SHOW_SCENARIO_1_VIGNETTE_EXACT };
-  deps.setReferenceCardScenario?.(s1Scenario);
-  if (deps.committedScenarioRef) {
-    deps.committedScenarioRef.current = s1Scenario;
-  }
-  deps.setInterviewUiPhase?.('scenario_active');
   deps.setVoiceState('idle');
   deps.setIsWaiting(false);
   markQuestionDelivered(new Date().toISOString());

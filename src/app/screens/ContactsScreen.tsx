@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -6,7 +7,6 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
-  ActivityIndicator,
   Alert,
   TextInput,
 } from 'react-native';
@@ -98,7 +98,7 @@ export const ContactsScreen: React.FC<{ navigation: any; route: any }> = ({ navi
     return (
       <SafeAreaContainer>
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         </View>
       </SafeAreaContainer>
     );
@@ -146,7 +146,7 @@ export const ContactsScreen: React.FC<{ navigation: any; route: any }> = ({ navi
       />
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <AmoraeaLoadingSpinner size="large" />
         </View>
       ) : (
         <ScrollView style={styles.contactList}>

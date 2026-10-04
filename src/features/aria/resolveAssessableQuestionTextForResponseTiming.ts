@@ -1,5 +1,8 @@
 import { assistantTextLooksLikeMoment4HandoffLead } from '@features/aria/interviewTransitionBundles';
-import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
+import {
+  assessablePromptQuestionBody,
+  personalScenarioPromptForRepeat,
+} from '@features/aria/interviewAssessablePromptText';
 import { extractScenarioModalQuestionFromAssistantText } from '@features/aria/interviewScenarioModalPrompt';
 import {
   looksLikeMoment4GrudgePrompt,
@@ -74,6 +77,9 @@ export function resolveAssessableQuestionTextForResponseTiming(
   if (looksLikeScenarioBRepairAsJamesQuestion(t)) {
     return SCENARIO_B_JAMES_REPAIR_CANONICAL;
   }
+
+  const personalPrompt = personalScenarioPromptForRepeat(t);
+  if (personalPrompt) return personalPrompt;
 
   const extracted = extractScenarioModalQuestionFromAssistantText(t);
   if (extracted?.trim()) {

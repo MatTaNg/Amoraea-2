@@ -24,6 +24,7 @@ import { looksLikeSkipConfirmationAssistantPrompt } from '@features/aria/metaCom
 import { stripInternalReflectionSchemaLeak } from '@features/aria/interviewReflectionTextStrips';
 import { stripDuplicateScenarioAContemptProbeParagraphs, stripDuplicateScenarioARepairQuestionParagraphs } from '@features/aria/interviewAssistantDuplicateStrip';
 import { isShortAckOnlySentence } from '@features/aria/interviewerFrameworkPrompt';
+import { isScenarioEndHandoffSentence } from '@features/aria/interviewSpokenTextHeuristics';
 import {
   looksLikeScenarioARepairQuestion,
   looksLikeScenarioARepairStreamFragment,
@@ -41,6 +42,7 @@ import {
   coerceScenarioBJamesDifferentlyQuestionForTts,
   coerceScenarioBJamesSayToJamesQuestionForTts,
   SCENARIO_B_JAMES_DIFFERENTLY_CANONICAL,
+  scenarioBMinimumEngagementForHandoff,
 } from '@features/aria/scenarioBProbeLogic';
 import {
   coerceScenarioCNextProbeForStreamTts,
@@ -350,6 +352,13 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
         scenarioRef: deps.currentScenarioRef.current,
         momentRef: deps.currentInterviewMomentRef.current,
       });
+    } else if (!scenarioBMinimumEngagementForHandoff(params.messagesToUse)) {
+      state.pendingS2RepairSatisfiedHandoff = false;
+      void remoteLog('[S2_S3_HANDOFF_SKIPPED_ENGAGEMENT_INCOMPLETE]', {
+        interviewSessionId: deps.interviewSessionIdRef.current,
+        scenarioRef: deps.currentScenarioRef.current,
+        momentRef: deps.currentInterviewMomentRef.current,
+      });
     } else {
     state.pendingS2RepairSatisfiedHandoff = false;
     const advanceBundle = applyPostClaudeScenarioAdvanceBundleOverride(
@@ -437,10 +446,28 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
   } else if (state.pendingS2RepairSatisfiedHandoff) {
     state.pendingS2RepairSatisfiedHandoff = false;
   }
+  if (
+    state.deferredScenarioAHandoffShortAckSentence &&
+    isScenarioEndHandoffSentence(params.textToParallelStream.full)
+  ) {
+    void remoteLog('[S1_SHORT_ACK_DROPPED_BEFORE_HANDOFF]', {
+      interviewSessionId: deps.interviewSessionIdRef.current,
+      preview: state.deferredScenarioAHandoffShortAckSentence.slice(0, 80),
+    });
+    state.deferredScenarioAHandoffShortAckSentence = null;
+  }
   if (state.deferredWarmBoundarySentence) {
     const hold: string = state.deferredWarmBoundarySentence;
     state.deferredWarmBoundarySentence = null;
-    if (state.parallelTtsBatchBuffer.trim()) {
+    const s1CloseUsesClientBundle =
+      deps.currentInterviewMomentRef.current === 1 &&
+      deps.scenarioARepairQuestionAskedRef.current &&
+      isScenarioEndHandoffSentence(params.textToParallelStream.full);
+    if (s1CloseUsesClientBundle) {
+      void remoteLog('[S1_BOUNDARY_WARM_DEFERRED_DROPPED_FOR_CLIENT_BUNDLE]', {
+        preview: hold.slice(0, 120),
+      });
+    } else if (state.parallelTtsBatchBuffer.trim()) {
       state.parallelTtsBatchBuffer = `${hold} ${state.parallelTtsBatchBuffer}`.trim();
       state.parallelTtsBatchPrefetch = null;
       if (!discardParallelBatchRepairLeak('[S1_BATCH_WARM_DEFER_FLUSH_DISCARDED_BEFORE_CONTEMPT]')) {
@@ -452,6 +479,13 @@ export async function flushParallelStreamDeferredSentencesAtEnd(args: {
       });
     } else {
       maybeQueueSentenceForTts(hold, false);
+    }
+  }
+  if (state.deferredScenarioAHandoffShortAckSentence) {
+    const heldAck = state.deferredScenarioAHandoffShortAckSentence;
+    state.deferredScenarioAHandoffShortAckSentence = null;
+    if (!params.textToParallelStream.spokenStarted) {
+      maybeQueueSentenceForTts(heldAck, false);
     }
   }
   if (state.deferredScenarioARepairLeadSentence) {
@@ -921,6 +955,7 @@ export function resetParallelStreamOnError(ctx: ParallelStreamTtsPlaybackContext
   state.ttsCancelled = true;
   state.deferredWarmBoundarySentence = null;
   state.deferredScenarioARepairShortAckSentence = null;
+  state.deferredScenarioAHandoffShortAckSentence = null;
   state.deferredScenarioCShortAckSentence = null;
   state.pendingScenarioCNextProbeFlush = false;
   deps.recordingJustFinishedBeforeNextTtsRef.current = false;

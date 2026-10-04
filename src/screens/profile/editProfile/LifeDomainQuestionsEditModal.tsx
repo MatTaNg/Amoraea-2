@@ -1,10 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   ScrollView,
   Text,
   TextInput,
-  ActivityIndicator,
   Modal,
   Pressable,
   StyleSheet,

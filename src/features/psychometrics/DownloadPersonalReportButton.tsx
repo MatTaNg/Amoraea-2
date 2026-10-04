@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import {
+  ActivityIndicator,
   TouchableOpacity,
   Text,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   Platform,
   View,
@@ -70,7 +70,7 @@ export function DownloadPersonalReportButton({ userId, style, variant = 'dark' }
             minute.
           </Text>
           <View style={[styles.loadingCard, isDark ? styles.loadingCardDark : styles.loadingCardLight]}>
-            <ActivityIndicator color={ACCENT} size="small" />
+            <ActivityIndicator size="small" color={isDark ? '#93c5fd' : '#2563eb'} />
             <Text style={[styles.loadingText, isDark ? styles.loadingTextDark : styles.loadingTextLight]}>
               Generating your report…
             </Text>
@@ -108,7 +108,7 @@ export function DownloadPersonalReportButton({ userId, style, variant = 'dark' }
           >
             {exporting ? (
               <View style={styles.reportButtonLoading}>
-                <ActivityIndicator color="#fff" size="small" />
+                <ActivityIndicator size="small" color="#fff" />
                 <Text style={styles.reportButtonLoadingText}>Opening report…</Text>
               </View>
             ) : (

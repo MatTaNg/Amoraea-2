@@ -535,6 +535,44 @@ describe('applyPostClaudeScenarioAdvanceBundleOverride', () => {
     expect(scenarioBMinimumEngagementForHandoff(messages)).toBe(false);
   });
 
+  it('does not advance Scenario B when the user only says thank you', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content: 'What do you think is going on here?',
+      },
+      { role: 'user', content: 'Thank you.' },
+    ];
+    expect(scenarioBMinimumEngagementForHandoff(messages)).toBe(false);
+    expect(shouldAdvanceScenarioBAfterSatisfiedRepair(messages, "Here's the next situation.", 2)).toBe(
+      false,
+    );
+    expect(
+      applyPostClaudeScenarioAdvanceBundleOverride(
+        "Here's the next situation.",
+        'Matt',
+        messages,
+        2,
+        2,
+      ),
+    ).toBeNull();
+  });
+
+  it('does not treat thank you after the James-differently question as a Situation 2 answer', () => {
+    const messages = [
+      {
+        role: 'assistant',
+        content:
+          'What do you think James could have done differently to help Sarah feel appreciated?',
+      },
+      { role: 'user', content: 'Thank you.' },
+    ];
+    expect(scenarioBMinimumEngagementForHandoff(messages)).toBe(false);
+    expect(shouldAdvanceScenarioBAfterSatisfiedRepair(messages, "Here's the next situation.", 2)).toBe(
+      false,
+    );
+  });
+
   it('does not advance Scenario B when only one Scenario B user turn exists after Q1 jump-ahead', () => {
     const messages = [
       { role: 'assistant', content: 'What do you think is going on here?' },

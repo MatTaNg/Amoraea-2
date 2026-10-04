@@ -1,12 +1,13 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   SafeAreaView,
   ScrollView,
-  ActivityIndicator,
   Platform,
 } from 'react-native';
 import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
@@ -117,7 +118,7 @@ export function PostInterviewSexualCommunicationScreen({ navigation, route }: Pr
   if (loading) {
     return (
       <PostInterviewScrollLayout>
-        <ActivityIndicator color={ACCENT} size="large" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </PostInterviewScrollLayout>
     );
   }
@@ -178,7 +179,7 @@ export function PostInterviewSexualCommunicationScreen({ navigation, route }: Pr
             <Text style={styles.skipButtonText}>Skip for now</Text>
           </TouchableOpacity>
         </View>
-        {saving ? <ActivityIndicator color={ACCENT} style={{ marginTop: 16 }} /> : null}
+        {saving ? <ActivityIndicator size="small" color="#5BA8E8" style={{ marginTop: 16 }} /> : null}
       </ScrollView>
     </SafeAreaView>
   );

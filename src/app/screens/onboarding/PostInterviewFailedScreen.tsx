@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   StyleSheet,
   Text,
@@ -8,7 +9,6 @@ import {
   Platform,
   Animated,
   Easing,
-  ActivityIndicator,
   Linking,
 } from 'react-native';
 import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
@@ -503,7 +503,7 @@ export const PostInterviewFailedScreen: React.FC<{
                 retakeBusy && { opacity: 0.55 },
               ]}
             >
-              {retakeBusy ? <ActivityIndicator color="#93c5fd" /> : <Text style={styles.retakeButtonLabel}>Retake test</Text>}
+              {retakeBusy ? <ActivityIndicator size="small" color="#93c5fd" /> : <Text style={styles.retakeButtonLabel}>Retake test</Text>}
             </Pressable>
             <Text style={styles.retakeHint}>
               Starts a new interview run. Your prior scores stay on file for review.

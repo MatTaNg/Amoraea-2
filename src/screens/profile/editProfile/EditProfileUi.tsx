@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
   Pressable,
   Platform,
-  ActivityIndicator,
   ScrollView,
   type ViewStyle,
 } from 'react-native';
@@ -194,7 +194,7 @@ export function EditProfileTabHeader({
         <Text style={styles.tabHeaderTitle}>{title}</Text>
         {saving ? (
           <View style={styles.tabHeaderSaving}>
-            <ActivityIndicator size="small" color={ep.colors.flameMid} />
+            <ActivityIndicator size="small" color="#5BA8E8" />
             <Text style={styles.tabHeaderSavingText}>Saving…</Text>
           </View>
         ) : null}

@@ -1,6 +1,7 @@
 import { describe, expect, it } from '@jest/globals';
 
 import { splitScenarioTransitionForEmotionModal } from '@features/aria/emotionModalTransitionOrchestration';
+import { MOMENT_4_HANDOFF_NO_NAME_LEAD } from '@features/aria/interviewTransitionBundles';
 import { coerceScenarioCBoundaryHandoffForTts } from '@features/aria/scenarioCPromptDetection';
 
 describe('coerceScenarioCBoundaryHandoffForTts', () => {
@@ -20,6 +21,12 @@ describe('coerceScenarioCBoundaryHandoffForTts', () => {
     expect(split.afterModal).toMatch(/held a grudge|really hard time with/i);
     expect(out).not.toContain('[SCENARIO');
     expect(out).not.toMatch(/wraps up the third situation/i);
+  });
+
+  it('leaves a finished personal-questions lead unchanged so the grudge card is not spoken twice', () => {
+    expect(coerceScenarioCBoundaryHandoffForTts(MOMENT_4_HANDOFF_NO_NAME_LEAD, 'Matt')).toBe(
+      MOMENT_4_HANDOFF_NO_NAME_LEAD,
+    );
   });
 
   it('leaves unrelated scenario C repair questions unchanged', () => {

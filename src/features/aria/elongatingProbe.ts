@@ -455,9 +455,17 @@ export function applyConsecutiveStreamSentenceDedup(
   };
 }
 
+/** Explicit completion line. Streaming often splits this off from the thank-you. */
+export function isInterviewCompleteAnnouncement(text: string): boolean {
+  const t = (text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return false;
+  return /\byour interview is complete\b/i.test(t);
+}
+
 /** Any per-sentence closing fragment eligible for stream buffering / dedupe. */
 export function isInterviewClosingStreamFragment(text: string): boolean {
   return (
+    isInterviewCompleteAnnouncement(text) ||
     isInterviewClosingThanksFragment(text) ||
     isInterviewClosingReflectiveAckFragment(text) ||
     isIncompleteInterviewClosingLeadSentence(text) ||
@@ -522,6 +530,7 @@ export function stripPrematureInterviewClosingFromScenarioDraft(draft: string): 
     t.match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((s) => s.trim()).filter(Boolean) ?? [t];
   const kept = parts.filter(
     (p) =>
+      !isInterviewCompleteAnnouncement(p) &&
       !isInterviewClosingThanksFragment(p) &&
       !isInterviewClosingReflectiveAckFragment(p) &&
       !looksLikeInterviewClosingAssistantMessage(p),
@@ -589,6 +598,7 @@ export function stripInterviewClosingStreamingEcho(
   if (!t0) return t0;
   if (!closingAlreadySpoken) return t0;
   if (looksLikeInterviewClosingAssistantMessage(t0)) return null;
+  if (isInterviewCompleteAnnouncement(t0)) return null;
   if (isInterviewClosingThanksFragment(t0)) return null;
   if (isInterviewClosingReflectiveAckFragment(t0)) return null;
   return t0;

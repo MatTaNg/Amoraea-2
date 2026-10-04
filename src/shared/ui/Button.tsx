@@ -1,12 +1,12 @@
 import React from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   Text,
   StyleSheet,
   type StyleProp,
   type ViewStyle,
   type TextStyle,
-  ActivityIndicator,
 } from 'react-native';
 
 type Props = {
@@ -17,6 +17,8 @@ type Props = {
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
   loading?: boolean;
+  /** Fire on touch-down so an open keyboard cannot delay the press. */
+  immediate?: boolean;
 };
 
 export const Button: React.FC<Props> = ({
@@ -27,25 +29,47 @@ export const Button: React.FC<Props> = ({
   style,
   textStyle,
   loading,
-}) => (
-  <Pressable
-    onPress={onPress}
-    disabled={disabled || loading}
-    style={({ pressed }) => [
-      styles.base,
-      variant === 'outline' ? styles.outline : styles.solid,
-      (disabled || loading) && styles.disabled,
-      pressed && styles.pressed,
-      style,
-    ]}
-  >
-    {loading ? (
-      <ActivityIndicator color={variant === 'outline' ? '#5BA8E8' : '#fff'} />
-    ) : (
-      <Text style={[styles.label, variant === 'outline' && styles.labelOutline, textStyle]}>{title}</Text>
-    )}
-  </Pressable>
-);
+  immediate = false,
+}) => {
+  const handledOnPressIn = React.useRef(false);
+  const fire = () => {
+    if (disabled || loading) return;
+    onPress();
+  };
+  return (
+    <Pressable
+      onPressIn={
+        immediate
+          ? () => {
+              handledOnPressIn.current = true;
+              fire();
+            }
+          : undefined
+      }
+      onPress={() => {
+        if (handledOnPressIn.current) {
+          handledOnPressIn.current = false;
+          return;
+        }
+        fire();
+      }}
+      disabled={disabled || loading}
+      style={({ pressed }) => [
+        styles.base,
+        variant === 'outline' ? styles.outline : styles.solid,
+        (disabled || loading) && styles.disabled,
+        pressed && styles.pressed,
+        style,
+      ]}
+    >
+      {loading ? (
+        <ActivityIndicator color={variant === 'outline' ? '#5BA8E8' : '#fff'} />
+      ) : (
+        <Text style={[styles.label, variant === 'outline' && styles.labelOutline, textStyle]}>{title}</Text>
+      )}
+    </Pressable>
+  );
+};
 
 const styles = StyleSheet.create({
   base: {

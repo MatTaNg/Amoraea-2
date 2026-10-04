@@ -1,7 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 
+import { clearFlameSpeechLevel, setFlameSpeechLevel } from '@app/screens/flameSpeechLevel';
 import { logTtsAutoplayPlayOutcome, type TtsTelemetrySource } from '@features/aria/telemetry/tsAutoplayTelemetry';
 import { applyNativeTtsPrePlaybackAudioMode } from './audioModeHelpers';
+import { buildSpeechLevelEnvelope, speechLevelAtPosition } from './speechLevelEnvelope';
 
 /** Avoid top-level `expo-av` import — it breaks web lazy-load of the interview chunk (SDK 53+). */
 function getExpoAvAudio(): typeof import('expo-av').Audio {
@@ -30,6 +32,7 @@ function arrayBufferToBase64(buffer: ArrayBuffer): string {
 }
 
 export async function stopNativeElevenLabsMp3Playback(): Promise<void> {
+  clearFlameSpeechLevel();
   const s = activeNativeTtsSound;
   activeNativeTtsSound = null;
   if (!s) return;
@@ -62,6 +65,7 @@ export async function playNativeElevenLabsMpegArrayBuffer(
   }
   const fileUri = `${dir}tts_${Date.now()}.mp3`;
   await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  const speechEnvelope = await buildSpeechLevelEnvelope(arrayBuffer);
   await applyNativeTtsPrePlaybackAudioMode('speakWithElevenLabs:nativeBeforeSoundCreate');
   const Audio = getExpoAvAudio();
   const { sound } = await Audio.Sound.createAsync(
@@ -69,6 +73,9 @@ export async function playNativeElevenLabsMpegArrayBuffer(
     { shouldPlay: false, volume: 1.0, isMuted: false, rate: playbackRate, shouldCorrectPitch: true }
   );
   activeNativeTtsSound = sound;
+  if (typeof sound.setProgressUpdateIntervalAsync === 'function') {
+    await sound.setProgressUpdateIntervalAsync(80);
+  }
   if (playbackRate !== 1 && typeof sound.setRateAsync === 'function') {
     await sound.setRateAsync(playbackRate, true);
   }
@@ -76,7 +83,14 @@ export async function playNativeElevenLabsMpegArrayBuffer(
   try {
     await new Promise<void>((resolve, reject) => {
       sound.setOnPlaybackStatusUpdate((status) => {
-        if (status.isLoaded && status.didJustFinish) {
+        if (!status.isLoaded) return;
+        if (speechEnvelope && status.durationMillis) {
+          setFlameSpeechLevel(
+            speechLevelAtPosition(speechEnvelope, status.positionMillis ?? 0, status.durationMillis),
+          );
+        }
+        if (status.didJustFinish) {
+          clearFlameSpeechLevel();
           resolve();
         }
       });
@@ -105,6 +119,7 @@ export async function playNativeElevenLabsMpegArrayBuffer(
         });
     });
   } finally {
+    clearFlameSpeechLevel();
     if (activeNativeTtsSound === sound) {
       activeNativeTtsSound = null;
     }

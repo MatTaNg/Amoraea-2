@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, TouchableOpacity, ActivityIndicator } from "react-native";
+import { ActivityIndicator, View, Text, TouchableOpacity } from "react-native";
 import { handleApiError } from "@/shared/utils/errorHandling";
 import { Button } from "@/shared/ui/Button";
 import { Input } from "@/shared/ui/Input";
@@ -126,7 +126,7 @@ export const BirthInfoStep: React.FC<BirthInfoStepProps> = ({
       />
       {birthLocationPlacesLoading ? (
         <View style={styles.placeSearchLoadingRow}>
-          <ActivityIndicator size="small" color={theme.colors.primary} />
+          <ActivityIndicator size="small" color="#5BA8E8" />
           <Text style={styles.placeSearchLoadingText}>Looking up places…</Text>
         </View>
       ) : null}

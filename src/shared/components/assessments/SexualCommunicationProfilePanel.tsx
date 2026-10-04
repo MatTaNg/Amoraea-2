@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, StyleSheet } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { theme } from '@/shared/theme/theme';
 import { getPostInterviewAssessment } from '@features/psychometrics/assessmentContent';
@@ -36,7 +36,7 @@ export function SexualCommunicationProfilePanel({ userId }: Props) {
   if (loading) {
     return (
       <View style={styles.wrap}>
-        <ActivityIndicator color={theme.colors.primary} />
+        <ActivityIndicator size="small" color="#5BA8E8" />
       </View>
     );
   }

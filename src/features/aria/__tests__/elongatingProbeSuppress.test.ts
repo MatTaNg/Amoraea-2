@@ -496,6 +496,17 @@ describe('suppressed elongating fallbacks', () => {
     expect(stripPrematureInterviewClosingFromScenarioDraft(draft)).toBe('Got it.');
   });
 
+  it('stripPrematureInterviewClosingFromScenarioDraft drops a split interview-complete sentence', () => {
+    const draft =
+      'That makes a lot of sense. Good work getting through all of this. Your interview is complete. Thank you for being so open with me, Mad.';
+    expect(stripPrematureInterviewClosingFromScenarioDraft(draft)).toBe('That makes a lot of sense.');
+  });
+
+  it('isInterviewClosingStreamFragment treats the completion sentence as closing copy', () => {
+    expect(isInterviewClosingStreamFragment('Your interview is complete.')).toBe(true);
+    expect(isInterviewClosingStreamFragment('That makes a lot of sense.')).toBe(false);
+  });
+
   it('stripDuplicateInterviewClosingSentencesWithinDraft collapses duplicate good-work reflective openers', () => {
     const draft =
       'Good work getting through all of this — what you shared about listening really stuck with me. Good work getting through all of this — what you shared about listening without interrupting shows a lot about how you approach working things through. Thank you for being so open with me.';

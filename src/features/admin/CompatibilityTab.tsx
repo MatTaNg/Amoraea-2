@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   ScrollView,
   TextInput,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Pressable,
 } from 'react-native';
 import {
@@ -364,7 +364,7 @@ function UserDirectoryPanel({
       />
       {loading ? (
         <View style={styles.userListLoading}>
-          <ActivityIndicator size="small" color="#7A9ABE" />
+          <ActivityIndicator size="small" color="#5BA8E8" />
         </View>
       ) : (
         <ScrollView style={styles.userListScroll} contentContainerStyle={styles.userListScrollContent}>

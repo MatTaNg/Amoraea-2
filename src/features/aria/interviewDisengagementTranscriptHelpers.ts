@@ -39,6 +39,7 @@ import { getScenarioResumeIntroAssistantBody } from './interviewScenarioVignette
 import {
   SCENARIO_C_REPAIR_QUESTION_CANONICAL,
   coerceScenarioCRepairQuestionForTts,
+  isScenarioCQ1Prompt,
   isScenarioCRepairAssistantPrompt,
   looksLikeScenarioCRepairAsDanielQuestion,
   looksLikeScenarioCSophiePerspectiveQuestion,
@@ -70,24 +71,36 @@ import { hasScenarioBoundaryWrapPhrase } from './emotionModalTransitionOrchestra
 import { looksLikeBriefStreamAckOnly } from './interviewSpokenTextHeuristics';
 import { looksLikeCheckingInClientOwnedAckAssistantLine } from './metaCommentPatternScoring';
 import { stripControlTokens } from './interviewControlTokens';
+import { stripBriefInterviewAcknowledgmentPrefixForRepeat } from './interviewRepeatRequestTarget';
 import {
   looksLikeMoment4GrudgePrompt,
   looksLikeMoment4OrientationQuestion,
   looksLikeMoment4ThresholdQuestion,
   looksLikeMomentSupportConditionalProbe,
+  looksLikeMomentSupportNoSituationHypothetical,
   looksLikeMomentSupportQuestion,
   MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY,
   MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY,
   MOMENT_4_GRUDGE_QUESTION_TEXT,
   MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY,
+  MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT,
   MOMENT_SUPPORT_QUESTION_CARD_BODY,
   transcriptIncludesMoment4ThresholdAssistant,
 } from './moment4ProbeLogic';
 import { looksLikeMoment4SpecificityFollowUpEcho } from './moment4SpecificityFollowUp';
+import { looksLikeMoment5AccountabilityProbeAssistantPrompt } from './moment5AccountabilityProbe';
+import { looksLikeMoment5ConflictValidityClarificationPrompt } from './moment5ConflictValidity';
 import {
+  MOMENT_5_ACCOUNTABILITY_PROBE_TEXT,
   MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
-  transcriptAssistantContainsMoment5PrimaryConflictQuestion,
-} from './moment5ProbeLogic';
+  MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT,
+  MOMENT_5_RESOLUTION_FOLLOWUP_TEXT,
+} from './moment5ProbeCopy';
+import {
+  looksLikeMoment5ResolutionFollowUpPrompt,
+  looksLikeMoment5SpecificityRedirectPrompt,
+} from './moment5SpecificityRedirect';
+import { transcriptAssistantContainsMoment5PrimaryConflictQuestion } from './moment5TranscriptHelpers';
 
 function transcriptContainsScenarioCRepairQuestion(
   messages: Array<{ role: string; content?: string | null; isWelcomeBack?: boolean; isScoreCard?: boolean }>,
@@ -541,7 +554,156 @@ function transcriptHasPersonalPartProgress(
   );
 }
 
-/** Last Moment 4 personal question to replay on resume/repeat — grudge, threshold, or specificity follow-up. */
+type PersonalResumeQuestionMatch = { text: string; rank: number };
+
+function trailingQuestionClause(raw: string): string {
+  const flat = raw.replace(/\s+/g, ' ').trim();
+  const idx = flat.lastIndexOf('?');
+  if (idx < 0) return flat;
+  const before = flat.slice(0, idx + 1);
+  const breakAt = Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '));
+  return (breakAt >= 0 ? before.slice(breakAt + 2) : before).trim();
+}
+
+function normalizePersonalScenarioTail(text: string): string {
+  return text
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[.!?]+$/g, '')
+    .trim();
+}
+
+/**
+ * A last-sentence leftover such as "What did you do?" is not the personal scenario.
+ * Those prompts are short, so resume and repeat should speak the setup as well.
+ */
+export function isBarePersonalScenarioTail(text: string): boolean {
+  const t = normalizePersonalScenarioTail(text);
+  return (
+    t === 'what did you do' ||
+    t === 'and what did you do' ||
+    t === 'what happened' ||
+    t === 'what happened, and what did you do' ||
+    t === 'and what happened, and what did you do'
+  );
+}
+
+function looksLikeScenarioProbeQuestionForResumeSkip(raw: string): boolean {
+  return (
+    looksLikeScenarioARepairQuestion(raw) ||
+    looksLikeScenarioAContemptProbeQuestion(raw) ||
+    looksLikeScenarioBRepairAsJamesQuestion(raw) ||
+    looksLikeScenarioBJamesDifferentlyQuestion(raw) ||
+    looksLikeScenarioBQ1Question(raw) ||
+    isScenarioAQ1Prompt(raw) ||
+    isScenarioCQ1Prompt(raw) ||
+    isScenarioCRepairAssistantPrompt(raw) ||
+    looksLikeScenarioCRepairAsDanielQuestion(raw) ||
+    looksLikeScenarioCSophiePerspectiveQuestion(raw) ||
+    looksLikeScenarioCSophieReceiveMisparaphraseQuestion(raw) ||
+    isFullScenarioVignetteIntroAssistantLine(raw)
+  );
+}
+
+/**
+ * Canonical personal question inside assistant copy.
+ * Later probes outrank earlier ones when a bubble quotes a previous question and then asks the next.
+ */
+export function matchPersonalResumeQuestion(text: string): PersonalResumeQuestionMatch | null {
+  const raw = stripControlTokens(text ?? '').trim();
+  if (!raw) return null;
+  // The conflict ask ends with a resolution clause. That tail is not the later follow-up probe.
+  if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) {
+    return { text: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, rank: 8 };
+  }
+  const clause = trailingQuestionClause(raw);
+  const candidates = clause === raw ? [raw] : [clause, raw];
+  let best: PersonalResumeQuestionMatch | null = null;
+  for (const candidate of candidates) {
+    const matched = matchPersonalResumeQuestionBody(candidate);
+    if (matched && (best == null || matched.rank > best.rank)) best = matched;
+  }
+  return best;
+}
+
+function matchPersonalResumeQuestionBody(raw: string): PersonalResumeQuestionMatch | null {
+  if (looksLikeMoment5AccountabilityProbeAssistantPrompt(raw)) {
+    return { text: MOMENT_5_ACCOUNTABILITY_PROBE_TEXT, rank: 9 };
+  }
+  if (looksLikeMoment5ResolutionFollowUpPrompt(raw)) {
+    return { text: MOMENT_5_RESOLUTION_FOLLOWUP_TEXT, rank: 9 };
+  }
+  if (looksLikeMoment5SpecificityRedirectPrompt(raw)) {
+    return { text: raw.includes('?') ? raw : `${raw}?`, rank: 9 };
+  }
+  if (looksLikeMoment5ConflictValidityClarificationPrompt(raw)) {
+    return { text: MOMENT_5_CONFLICT_VALIDITY_CLARIFICATION_TEXT, rank: 9 };
+  }
+  if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(raw)) {
+    return { text: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, rank: 8 };
+  }
+  if (looksLikeMomentSupportConditionalProbe(raw)) {
+    return { text: MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY, rank: 7 };
+  }
+  if (looksLikeMomentSupportNoSituationHypothetical(raw)) {
+    return { text: MOMENT_SUPPORT_NO_SITUATION_HYPOTHETICAL_TEXT, rank: 6 };
+  }
+  if (looksLikeMomentSupportQuestion(raw)) {
+    return { text: MOMENT_SUPPORT_QUESTION_CARD_BODY, rank: 5 };
+  }
+  if (looksLikeMoment4ThresholdQuestion(raw)) {
+    return { text: MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY, rank: 4 };
+  }
+  if (looksLikeMoment4OrientationQuestion(raw)) {
+    return { text: MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY, rank: 3 };
+  }
+  if (looksLikeMoment4SpecificityFollowUpEcho(raw)) {
+    return { text: raw.includes('?') ? raw : `${raw}?`, rank: 2 };
+  }
+  if (looksLikeMoment4GrudgePrompt(raw)) {
+    return { text: MOMENT_4_GRUDGE_QUESTION_TEXT, rank: 1 };
+  }
+  return null;
+}
+
+export function personalResumeQuestionRank(text: string | null | undefined): number {
+  return matchPersonalResumeQuestion(text ?? '')?.rank ?? 0;
+}
+
+/** Last personal question to replay — grudge through conflict, including the saved checkpoint. */
+export function resolvePersonalPartResumeQuestionText(
+  messages: Array<{
+    role: string;
+    content?: string | null;
+    interviewMoment?: number;
+    isWelcomeBack?: boolean;
+    isScoreCard?: boolean;
+  }>,
+  fallbackLastQuestionText?: string | null,
+): string {
+  const fromTranscript = findLastMoment4RepeatableQuestionText(messages);
+  const fromCheckpoint = matchPersonalResumeQuestion(fallbackLastQuestionText ?? '');
+  const transcriptRank = personalResumeQuestionRank(fromTranscript);
+  if (fromCheckpoint && fromCheckpoint.rank > transcriptRank) {
+    // A later unrecognized question already in the transcript is ahead of an older saved card.
+    if (fromTranscript && transcriptRank === 0) return fromTranscript;
+    // A saved "How did it get resolved between you two?" must not replace the conflict question
+    // still pending in the transcript.
+    if (
+      fromTranscript === MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT &&
+      fromCheckpoint.text === MOMENT_5_RESOLUTION_FOLLOWUP_TEXT
+    ) {
+      return fromTranscript;
+    }
+    return fromCheckpoint.text;
+  }
+  if (fromTranscript) return fromTranscript;
+  if (fromCheckpoint) return fromCheckpoint.text;
+  return MOMENT_4_GRUDGE_QUESTION_TEXT;
+}
+
+/** Last personal question in the transcript — grudge, commitment, support, or conflict. */
 export function findLastMoment4RepeatableQuestionText(
   messages: Array<{
     role: string;
@@ -552,29 +714,34 @@ export function findLastMoment4RepeatableQuestionText(
   }>,
 ): string | null {
   if (!transcriptHasPersonalPartProgress(messages)) return null;
+  let personalAnchorSeen = false;
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i];
+    if (typeof m.interviewMoment === 'number' && m.interviewMoment >= 4) personalAnchorSeen = true;
+    if (m.role === 'assistant' && matchPersonalResumeQuestion(m.content ?? '')) personalAnchorSeen = true;
+  }
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m.role !== 'assistant' || m.isScoreCard || m.isWelcomeBack) continue;
     const raw = stripControlTokens(m.content ?? '').trim();
-    if (!raw) continue;
-    if (looksLikeMomentSupportConditionalProbe(raw)) {
-      return MOMENT_SUPPORT_CONDITIONAL_PROBE_CARD_BODY;
+    if (!raw || /^welcome back\b/i.test(raw)) continue;
+    const matched = matchPersonalResumeQuestion(raw);
+    if (matched) return matched.text;
+    if (!personalAnchorSeen) continue;
+    if (isNonRepeatableAssistantLineForVerbatimReplay(raw)) continue;
+    if (looksLikeNonQuestionScenarioTransitionLine(raw)) continue;
+    if (looksLikeScenarioProbeQuestionForResumeSkip(raw)) continue;
+    const spoken = stripBriefInterviewAcknowledgmentPrefixForRepeat(raw);
+    if (!spoken.includes('?')) continue;
+    if (looksLikeScenarioProbeQuestionForResumeSkip(spoken)) continue;
+    if (isNonRepeatableAssistantLineForVerbatimReplay(spoken)) continue;
+    if (isBarePersonalScenarioTail(spoken)) continue;
+    const clause = trailingQuestionClause(spoken);
+    if (isBarePersonalScenarioTail(clause)) {
+      if (spoken.length > clause.length + 12) return spoken;
+      continue;
     }
-    if (looksLikeMomentSupportQuestion(raw)) {
-      return MOMENT_SUPPORT_QUESTION_CARD_BODY;
-    }
-    if (looksLikeMoment4OrientationQuestion(raw)) {
-      return MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_CARD_BODY;
-    }
-    if (looksLikeMoment4ThresholdQuestion(raw)) {
-      return MOMENT_4_COMMITMENT_THRESHOLD_QUESTION_CARD_BODY;
-    }
-    if (looksLikeMoment4SpecificityFollowUpEcho(raw)) {
-      return raw.includes('?') ? raw : `${raw}?`;
-    }
-    if (looksLikeMoment4GrudgePrompt(raw)) {
-      return MOMENT_4_GRUDGE_QUESTION_TEXT;
-    }
+    return spoken;
   }
   if (messages.some((m) => typeof m.interviewMoment === 'number' && m.interviewMoment >= 4)) {
     if (transcriptIncludesMoment4ThresholdAssistant(messages)) {
@@ -631,9 +798,9 @@ export function findLastRepeatableInterviewQuestionText(
       !m.isScoreCard &&
       transcriptAssistantContainsMoment5PrimaryConflictQuestion(m.content ?? ''),
   );
-  if (!hasMoment5PrimaryQuestion) {
-    const moment4Question = findLastMoment4RepeatableQuestionText(messages);
-    if (moment4Question) return moment4Question;
+  if (transcriptHasPersonalPartProgress(messages) || hasMoment5PrimaryQuestion) {
+    const personalQuestion = findLastMoment4RepeatableQuestionText(messages);
+    if (personalQuestion) return personalQuestion;
   }
 
   const activeScenario = inferActiveScenarioForRepeat(messages, options?.activeScenario);

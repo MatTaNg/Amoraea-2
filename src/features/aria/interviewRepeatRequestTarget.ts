@@ -132,7 +132,7 @@ export function peelRepeatRequestAcknowledgmentPrefix(text: string): {
  * so repeat TTS re-asks only the scenario/interview question.
  */
 const REPEAT_LEADING_BRIEF_ACK_RE =
-  /^(?:sure|got it|makes sense|that makes a lot of sense|i'?m with you|well done|okay|ok|alright|fair|noted|mm|yeah|no problem|i hear you|i see what you mean|yeah,?\s+i can see that|that'?s a real read(?: on it)?|good read|great read|nice work|that makes sense|you(?:'re| are) seeing that|thanks for sharing that|thank you for sharing(?: that)?)\b(?:\s*[—–\-:,.!…]+\s*|\s+)/i;
+  /^(?:sure|got it|makes sense|that makes a lot of sense|i'?m with you|well done|okay|ok|alright|fair|noted|mm|yeah|no problem|i hear you|i see what you mean|yeah,?\s+i can see that|that'?s a real read(?: on it)?|good read|great read|nice work|good work|that makes sense|you(?:'re| are) seeing that|thanks for sharing that|thank you for sharing(?: that)?)\b(?:\s*[—–\-:,.!…]+\s*|\s+)/i;
 
 /** Client-owned already-answered ownership lead — strip before resolving active assessable question. */
 const ALREADY_ANSWERED_OWNERSHIP_PREFIX_RE =

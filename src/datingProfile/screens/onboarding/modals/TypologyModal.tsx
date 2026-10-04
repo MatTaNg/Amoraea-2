@@ -6,7 +6,6 @@ import { Button } from "@/shared/ui/Button";
 import { TypologyPickerFields, type TypologyPickerValue } from "@/shared/components/profileFields/TypologyPickerFields";
 import { OnboardingHeader } from "./components/OnboardingHeader";
 import { styles } from "./TypologyModal.styled";
-import { ONBOARDING_TYPOLOGY_DESCRIPTION } from "./onboardingStepCopy";
 
 interface TypologyModalProps {
   typology?: TypologyPickerValue;
@@ -30,9 +29,7 @@ export const TypologyModal: React.FC<TypologyModalProps> = ({
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.container}>
-          <Text style={styles.description}>
-            {ONBOARDING_TYPOLOGY_DESCRIPTION}
-          </Text>
+          <Text style={styles.description}></Text>
           <TypologyPickerFields
             variant="onboarding"
             value={typology || {}}
@@ -44,7 +41,7 @@ export const TypologyModal: React.FC<TypologyModalProps> = ({
       <SafeAreaView style={styles.buttonContainer} edges={['bottom', 'left', 'right']}>
         <View style={styles.buttonRow}>
           <Button title="Back" variant="outline" onPress={onBack} style={styles.backButton} />
-          <Button title="Next" onPress={onNext} style={styles.nextButton} />
+          <Button title="Submit" onPress={onNext} style={styles.nextButton} />
         </View>
       </SafeAreaView>
     </SafeAreaView>

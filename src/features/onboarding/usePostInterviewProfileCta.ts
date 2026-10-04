@@ -39,6 +39,7 @@ export function usePostInterviewProfileCta(userId: string, navigation: Navigatio
 
   useFocusEffect(
     useCallback(() => {
+      setProfileCtaBusy(false);
       if (!onboardingFlowOpenedRef.current || !userId) {
         return undefined;
       }
@@ -61,21 +62,16 @@ export function usePostInterviewProfileCta(userId: string, navigation: Navigatio
     const uid = auth.user?.id ?? userId;
     if (!uid) return;
 
-    if (profileReadyForMatching) {
-      if (!isEditProfileQueryCacheWarm(queryClient, uid)) {
-        setProfileCtaBusy(true);
-        try {
-          await prefetchEditProfileQueries(queryClient, uid);
-        } finally {
-          setProfileCtaBusy(false);
-        }
-      }
-      navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
-      return;
-    }
-
     setProfileCtaBusy(true);
     try {
+      if (profileReadyForMatching) {
+        if (!isEditProfileQueryCacheWarm(queryClient, uid)) {
+          await prefetchEditProfileQueries(queryClient, uid);
+        }
+        navigation.dispatch(StackActions.push('DatingProfileEdit', { userId: uid }));
+        return;
+      }
+
       const progress = await modalOnboardingService.getProgress(uid);
       const profileResult = await profilesRepo.getProfile(uid);
       const profileAssessmentsComplete = await areDatingProfileAssessmentsComplete(uid);
@@ -99,8 +95,9 @@ export function usePostInterviewProfileCta(userId: string, navigation: Navigatio
         onboardingFlowOpenedRef.current = true;
         navigateToDatingProfileOnboardingEntry(navigation, uid);
       }
-    } finally {
+    } catch (error) {
       setProfileCtaBusy(false);
+      if (__DEV__) console.warn('[PostInterviewProfileCta] open failed', error);
     }
   }, [
     userId,

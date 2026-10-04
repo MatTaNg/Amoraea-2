@@ -1,12 +1,9 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
-  Pressable,
   StyleSheet,
-  ScrollView,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
@@ -15,7 +12,12 @@ import { useAuth } from '@/shared/hooks/AuthProvider';
 import { isAmoraeaAdminConsoleEmail } from '@/constants/adminConsole';
 import { supabase } from '@data/supabase/client';
 import { PsychometricsAdminPanelButton } from '@features/psychometrics/PsychometricsAdminPanelButton';
-import { PsychometricsBackButton } from '@features/psychometrics/PsychometricsBackButton';
+import {
+  QuestionnaireOption,
+  QuestionnaireQuestion,
+  QuestionnaireStepLayout,
+  questionnaireScalePrompt,
+} from '@/shared/components/assessments/QuestionnaireStepLayout';
 import {
   ASSESSMENTS,
   ASSESSMENT_ORDER,
@@ -46,22 +48,17 @@ import {
   PSYCHOMETRICS_ACCENT,
   PSYCHOMETRICS_BG,
   PSYCHOMETRICS_FONT_BODY,
-  PSYCHOMETRICS_FONT_DISPLAY,
-  PSYCHOMETRICS_GLASS_BORDER,
 } from '@features/psychometrics/psychometricsTheme';
 import { spacing } from '@ui/theme/spacing';
 import { applyPsychometricModifierToAttempt } from '@features/psychometrics/applyPsychometricModifier';
 import { finalizeGateResultAfterPsychometrics } from '@features/onboarding/finalizeGateResultAfterPsychometrics';
+import { markReferralCompletionCongratsPending } from '@features/referrals/referralCompletionCongratsStorage';
 import { fetchMostRecentCompletedInterviewAttemptId } from '@features/psychometrics/interviewCompletionStatus';
 import {
   resolveInitialInterviewRoute,
   PSYCHOMETRICS_ENABLED,
   type InterviewStackRoute,
 } from '@features/psychometrics/resolveInitialInterviewRoute';
-import {
-  useAssessmentScrollContent,
-  useNarrowAssessmentViewport,
-} from '@utilities/assessmentMobileLayout';
 
 type Props = {
   navigation: {
@@ -101,9 +98,6 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   const [finishing, setFinishing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [cameFromAssessments, setCameFromAssessments] = useState(false);
-  const scrollContentStyle = useAssessmentScrollContent({ paddingTop: 32 });
-  const narrowViewport = useNarrowAssessmentViewport();
-
   useEffect(() => {
     if (!route.params?.openAdminPanel || !isAdminUser) return;
     setShowAdminPanel(true);
@@ -172,6 +166,10 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       if (completedAttemptId) {
         await applyPsychometricModifierToAttempt(userId, completedAttemptId);
       }
+    }
+
+    if (interviewAlreadyCompleted) {
+      await markReferralCompletionCongratsPending(userId);
     }
 
     await navigateAfterComplete({ showCongrats: true });
@@ -387,15 +385,15 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     await advanceAfterAnswer(assessmentId, newResponses, isLastQuestion, isLastAssessment);
   }
 
-  async function handleBack() {
-    if (saving || finishing) return;
+  async function handlePreviousQuestion(): Promise<boolean> {
+    if (saving || finishing) return false;
 
     if (currentQuestionIndex > 0) {
       const assessmentId = ASSESSMENT_ORDER[currentAssessmentIndex];
       const prevIndex = currentQuestionIndex - 1;
       setCurrentQuestionIndex(prevIndex);
       await persistProgress(assessmentId, prevIndex, responses);
-      return;
+      return true;
     }
 
     if (currentAssessmentIndex > 0) {
@@ -408,8 +406,20 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       setCurrentQuestionIndex(lastIndex);
       setResponses(prevResponses);
       await persistProgress(prevAssessmentId, lastIndex, prevResponses);
-      return;
+      return true;
     }
+
+    return false;
+  }
+
+  function handleExitToCongrats() {
+    if (saving || finishing || !userId) return;
+    navigation.replace('InterviewComplete', { userId });
+  }
+
+  async function handleBack() {
+    const moved = await handlePreviousQuestion();
+    if (moved) return;
 
     if (currentAssessmentIndex === 0 && currentQuestionIndex === 0) {
       if (interviewAlreadyCompleted && userId) {
@@ -454,10 +464,12 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     return (
       <SafeAreaContainer style={styles.container}>
         {openAdminPanel ? <PsychometricsAdminPanelButton onPress={openAdminPanel} /> : null}
-        <ActivityIndicator size="large" color={PSYCHOMETRICS_ACCENT} style={styles.loader} />
-        {finishing ? (
-          <Text style={styles.finishingText}>Saving your results…</Text>
-        ) : null}
+        <View style={styles.loadingBody}>
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+          {finishing ? (
+            <Text style={styles.finishingText}>Saving your results…</Text>
+          ) : null}
+        </View>
       </SafeAreaContainer>
     );
   }
@@ -495,7 +507,9 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
   if (!assessment || !question) {
     return (
       <SafeAreaContainer style={styles.container}>
-        <ActivityIndicator size="large" color={PSYCHOMETRICS_ACCENT} style={styles.loader} />
+        <View style={styles.loadingBody}>
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
+        </View>
       </SafeAreaContainer>
     );
   }
@@ -503,7 +517,6 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
     currentAssessmentIndex,
     currentQuestionIndex,
   );
-  const questionProgress = batteryProgress.current / batteryProgress.total;
 
   const scaleEntries =
     !isForcedChoice && 'scale' in assessment
@@ -527,71 +540,72 @@ export function PsychometricAssessmentScreen({ navigation, route }: Props) {
       ? assessment.preamble
       : null;
 
+  const selectedLikert =
+    typeof question.id === 'number' && typeof responses[question.id] === 'number'
+      ? (responses[question.id] as number)
+      : null;
+
   return (
     <SafeAreaContainer style={styles.container}>
       {openAdminPanel ? <PsychometricsAdminPanelButton onPress={openAdminPanel} /> : null}
-      <ScrollView contentContainerStyle={scrollContentStyle} bounces={false}>
-        <View style={styles.progressBarContainer}>
-          <View style={[styles.progressBar, { width: `${questionProgress * 100}%` }]} />
-        </View>
+      <QuestionnaireStepLayout
+        title={assessment.name}
+        current={batteryProgress.current}
+        total={batteryProgress.total}
+        onBack={
+          interviewAlreadyCompleted ? handleExitToCongrats : () => void handleBack()
+        }
+        headerBackLabel={interviewAlreadyCompleted ? 'Back to previous screen' : 'Go back'}
+        onPreviousQuestion={
+          interviewAlreadyCompleted ? () => void handlePreviousQuestion() : undefined
+        }
+        previousQuestionDisabled={
+          saving || finishing || (currentAssessmentIndex === 0 && currentQuestionIndex === 0)
+        }
+        backDisabled={saving || finishing}
+        prompt={
+          !isForcedChoice && 'scale' in assessment
+            ? questionnaireScalePrompt(assessment.scale.labels as Record<string, string>)
+            : null
+        }
+        preamble={instrumentPreamble}
+        saving={saving}
+      >
+        {isForcedChoice ? (
+          <QuestionnaireQuestion>{assessment.description}</QuestionnaireQuestion>
+        ) : question.scenario && question.response ? (
+          <>
+            <Text style={styles.scenarioText}>{question.scenario}</Text>
+            <QuestionnaireQuestion>{question.response}</QuestionnaireQuestion>
+          </>
+        ) : (
+          <QuestionnaireQuestion>{question.text ?? ''}</QuestionnaireQuestion>
+        )}
 
-        <View style={styles.questionContainer}>
-          {instrumentPreamble ? (
-            <Text style={styles.preambleText}>{instrumentPreamble}</Text>
-          ) : null}
-          {isForcedChoice ? (
-            <Text style={[styles.questionText, narrowViewport && styles.questionTextNarrow]}>
-              {assessment.description}
-            </Text>
-          ) : question.scenario && question.response ? (
-            <>
-              <Text style={styles.scenarioText}>{question.scenario}</Text>
-              <Text style={styles.responsePrompt}>{question.response}</Text>
-            </>
-          ) : (
-            <Text style={[styles.questionText, narrowViewport && styles.questionTextNarrow]}>
-              {question.text}
-            </Text>
-          )}
-        </View>
-
-        <View style={styles.optionsContainer}>
-          {isForcedChoice && shuffledNpiPair
-            ? [shuffledNpiPair.first, shuffledNpiPair.second].map((opt, displayIdx) => {
-                const displayIndex = displayIdx as 0 | 1;
-                const isSelected = selectedForcedChoice?.selectedOptionIndex === displayIndex;
-                return (
-                  <Pressable
-                    key={`${question.id}-${displayIndex}`}
-                    style={[styles.optionButton, isSelected && styles.optionButtonSelected]}
-                    onPress={() =>
-                      void handleForcedChoiceAnswer(displayIndex, opt.isEntitlement)
-                    }
-                    disabled={saving}
-                  >
-                    <Text style={styles.optionText}>{opt.text}</Text>
-                  </Pressable>
-                );
-              })
-            : scaleEntries.map(([value, label]) => (
-                <TouchableOpacity
-                  key={value}
-                  style={styles.optionButton}
-                  onPress={() => void handleAnswer(Number(value))}
+        {isForcedChoice && shuffledNpiPair
+          ? [shuffledNpiPair.first, shuffledNpiPair.second].map((opt, displayIdx) => {
+              const displayIndex = displayIdx as 0 | 1;
+              const isSelected = selectedForcedChoice?.selectedOptionIndex === displayIndex;
+              return (
+                <QuestionnaireOption
+                  key={`${question.id}-${displayIndex}`}
+                  label={opt.text}
+                  selected={isSelected}
+                  onPress={() => void handleForcedChoiceAnswer(displayIndex, opt.isEntitlement)}
                   disabled={saving}
-                >
-                  <Text style={styles.optionText}>{label}</Text>
-                </TouchableOpacity>
-              ))}
-          <PsychometricsBackButton
-            variant="inline"
-            onPress={() => void handleBack()}
-            disabled={saving || finishing}
-          />
-        </View>
-
-        {saving ? <ActivityIndicator size="small" color={PSYCHOMETRICS_ACCENT} style={styles.savingSpinner} /> : null}
-      </ScrollView>
+                />
+              );
+            })
+          : scaleEntries.map(([value, label]) => (
+              <QuestionnaireOption
+                key={value}
+                label={label}
+                selected={selectedLikert === Number(value)}
+                onPress={() => void handleAnswer(Number(value))}
+                disabled={saving}
+              />
+            ))}
+      </QuestionnaireStepLayout>
     </SafeAreaContainer>
   );
 }
@@ -601,8 +615,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: PSYCHOMETRICS_BG,
   },
-  loader: {
-    marginTop: 48,
+  loadingBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   finishingText: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,
@@ -611,43 +627,6 @@ const styles = StyleSheet.create({
     marginTop: spacing.md,
     textAlign: 'center',
   },
-  progressBarContainer: {
-    height: 4,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 2,
-    marginBottom: spacing.lg,
-    overflow: 'hidden',
-    alignSelf: 'stretch',
-  },
-  progressBar: {
-    height: '100%',
-    backgroundColor: PSYCHOMETRICS_ACCENT,
-    borderRadius: 2,
-  },
-  questionContainer: {
-    alignSelf: 'stretch',
-    marginBottom: spacing.lg,
-  },
-  preambleText: {
-    fontFamily: PSYCHOMETRICS_FONT_BODY,
-    fontSize: 14,
-    color: '#7A9ABE',
-    lineHeight: 21,
-    textAlign: 'left',
-    marginBottom: spacing.md,
-  },
-  questionText: {
-    fontFamily: PSYCHOMETRICS_FONT_DISPLAY,
-    fontSize: 22,
-    fontWeight: '500',
-    color: '#F4F8FC',
-    lineHeight: 30,
-    textAlign: 'left',
-  },
-  questionTextNarrow: {
-    fontSize: 20,
-    lineHeight: 28,
-  },
   scenarioText: {
     fontFamily: PSYCHOMETRICS_FONT_BODY,
     fontSize: 16,
@@ -655,39 +634,5 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     textAlign: 'left',
     marginBottom: 12,
-  },
-  responsePrompt: {
-    fontFamily: PSYCHOMETRICS_FONT_DISPLAY,
-    fontSize: 20,
-    fontWeight: '500',
-    color: '#F4F8FC',
-    lineHeight: 28,
-    textAlign: 'left',
-  },
-  optionsContainer: {
-    gap: 10,
-    alignSelf: 'stretch',
-  },
-  optionButton: {
-    borderWidth: 1,
-    borderColor: PSYCHOMETRICS_GLASS_BORDER,
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    alignItems: 'flex-start',
-    backgroundColor: 'rgba(255,255,255,0.04)',
-  },
-  optionButtonSelected: {
-    borderColor: PSYCHOMETRICS_ACCENT,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  optionText: {
-    fontFamily: PSYCHOMETRICS_FONT_BODY,
-    fontSize: 15,
-    color: '#E8F0F8',
-    textAlign: 'left',
-  },
-  savingSpinner: {
-    marginTop: 16,
   },
 });

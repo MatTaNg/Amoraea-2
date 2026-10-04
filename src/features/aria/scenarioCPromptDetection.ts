@@ -284,6 +284,17 @@ function scenarioCBoundaryHandoffNeedsMoment4Coercion(text: string): boolean {
   if (/\b(?:held a grudge|really hard time with|got under your skin)\b/i.test(cleaned)) {
     return false;
   }
+  /**
+   * A finished S3→M4 lead is the pre-modal line. Expanding it here speaks the grudge
+   * card, and the emotion-modal handoff speaks that card again.
+   */
+  if (
+    assistantTextLooksLikeMoment4HandoffLead(cleaned) &&
+    /[.!?]["']?\s*$/.test(cleaned) &&
+    /\b(?:three personal questions|two questions left|something more personal)\b/i.test(cleaned)
+  ) {
+    return false;
+  }
   return (
     isScenarioThreeToMoment4EmotionModalHandoff(cleaned) ||
     isScenarioCBoundaryReflectionWithoutMoment4Handoff(cleaned) ||

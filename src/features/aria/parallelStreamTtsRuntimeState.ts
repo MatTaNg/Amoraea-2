@@ -11,6 +11,8 @@ export type ParallelStreamTtsRuntimeState = {
   deferredWarmBoundarySentence: string | null;
   deferredScenarioARepairLeadSentence: string | null;
   deferredScenarioARepairShortAckSentence: string | null;
+  /** "Got it." held so an S1 close does not also say "Good work". */
+  deferredScenarioAHandoffShortAckSentence: string | null;
   deferredScenarioBJamesShortAckSentence: string | null;
   deferredScenarioBJamesDifferentlyLeadSentence: string | null;
   deferredScenarioBJamesSayToJamesLeadSentence: string | null;
@@ -44,6 +46,8 @@ export type ParallelStreamTtsRuntimeState = {
   s1RepairSatisfiedHandoffSpokenThisStream: boolean;
   pendingS2RepairSatisfiedHandoff: boolean;
   s2RepairSatisfiedHandoffSpokenThisStream: boolean;
+  /** Situation 2 reply was not an answer; replay the active question instead of Situation 3. */
+  s2PrematureAdvanceReplayQueued: boolean;
   pendingScenarioARepairAfterContemptFlush: boolean;
 };
 
@@ -59,6 +63,7 @@ export function createParallelStreamTtsRuntimeState(args: {
     deferredWarmBoundarySentence: null,
     deferredScenarioARepairLeadSentence: null,
     deferredScenarioARepairShortAckSentence: null,
+    deferredScenarioAHandoffShortAckSentence: null,
     deferredScenarioBJamesShortAckSentence: null,
     deferredScenarioBJamesDifferentlyLeadSentence: null,
     deferredScenarioBJamesSayToJamesLeadSentence: null,
@@ -87,6 +92,7 @@ export function createParallelStreamTtsRuntimeState(args: {
     s1RepairSatisfiedHandoffSpokenThisStream: false,
     pendingS2RepairSatisfiedHandoff: false,
     s2RepairSatisfiedHandoffSpokenThisStream: false,
+    s2PrematureAdvanceReplayQueued: false,
     pendingScenarioARepairAfterContemptFlush: false,
     scenarioCSophiePerspectiveProbeSpokenThisStream: false,
     scenarioBJamesRepairQuestionSpokenThisStream: false,

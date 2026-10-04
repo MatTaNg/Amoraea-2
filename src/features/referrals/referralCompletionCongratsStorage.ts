@@ -13,8 +13,19 @@ export function referralCompletionCongratsSeenKey(userId: string): string {
   return `${REFERRAL_COMPLETION_CONGRATS_SEEN_KEY}:${userId}`;
 }
 
+const pendingListeners = new Set<() => void>();
+
+/** Fires after psychometrics finalize marks the post-completion prompt pending. */
+export function subscribeReferralCompletionCongratsPending(listener: () => void): () => void {
+  pendingListeners.add(listener);
+  return () => {
+    pendingListeners.delete(listener);
+  };
+}
+
 export async function markReferralCompletionCongratsPending(userId: string): Promise<void> {
   await AsyncStorage.setItem(referralCompletionCongratsPendingKey(userId), '1');
+  pendingListeners.forEach((listener) => listener());
 }
 
 export async function clearReferralCompletionCongratsPending(userId: string): Promise<void> {

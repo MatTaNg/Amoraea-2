@@ -1,5 +1,6 @@
 import {
   isAckOnlySentenceBeforeScenarioBoundary,
+  isScenarioEndHandoffSentence,
   isUnauthorizedS1FollowUp,
   looksLikeScenarioHandoffOrVignetteBundle,
   looksLikeShortProbeFallback,
@@ -32,6 +33,22 @@ describe('interviewSpokenTextHeuristics', () => {
         'Makes sense. How do you think this situation could be repaired?',
       ),
     ).toBe(false);
+  });
+
+  it('treats the Situation 1 close as one handoff, not a second Got it', () => {
+    expect(isScenarioEndHandoffSentence("That's the end of this scenario. Here's the next situation.")).toBe(
+      true,
+    );
+    expect(
+      isScenarioEndHandoffSentence(
+        "Good work — that's the end of this scenario. Here's the next situation.",
+      ),
+    ).toBe(true);
+    expect(
+      isScenarioEndHandoffSentence('Sarah and James have been together for two years.'),
+    ).toBe(true);
+    expect(isScenarioEndHandoffSentence('Got it.')).toBe(false);
+    expect(isScenarioEndHandoffSentence('If you were Ryan, how would you repair this?')).toBe(false);
   });
 
   it('recognizes short in-scenario probes', () => {

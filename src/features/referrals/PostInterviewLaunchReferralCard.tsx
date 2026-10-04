@@ -84,7 +84,7 @@ export function PostInterviewLaunchReferralCard({
       ) : null}
       {loading ? (
         <View style={styles.referralLoading}>
-          <ActivityIndicator color="#93c5fd" />
+          <ActivityIndicator size="small" color="#5BA8E8" />
         </View>
       ) : referralStatus ? (
         <>

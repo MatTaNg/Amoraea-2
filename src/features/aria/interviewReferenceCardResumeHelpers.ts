@@ -6,6 +6,7 @@ import { stripControlTokens } from '@features/aria/interviewControlTokens';
 import {
   extractScenarioModalQuestionFromAssistantText,
   getLastSubstantiveScenarioModalQuestion,
+  isShowScenarioExcludedAssistantText,
   resolveMoment4ShowScenarioReferenceCard,
 } from '@features/aria/interviewLanguageGate';
 import {
@@ -293,6 +294,20 @@ function syntheticVignetteScenario(activeScenario: 1 | 2 | 3): ActiveScenario {
   return { label: 'Situation 3', text: SHOW_SCENARIO_3_VIGNETTE_EXACT };
 }
 
+function transcriptShowsFictionalSituationBegun(
+  messages: ReadonlyArray<{ content?: string | null }>,
+  activeScenario: 1 | 2 | 3,
+): boolean {
+  const blob = messages.map((m) => m.content ?? '').join('\n');
+  if (activeScenario === 1) {
+    return /emma and ryan/i.test(blob) || /what'?s going on between these two/i.test(blob);
+  }
+  if (activeScenario === 2) {
+    return /sarah has been|what do you think is going on here/i.test(blob);
+  }
+  return /sophie and daniel/i.test(blob);
+}
+
 /** Prefer the active scenario's vignette anchor — backward scan can pick S1 wrap during mid-S2 probes. */
 function resolveScenarioVignetteAnchorForReferenceCard(
   assistantMessages: ReadonlyArray<{ role: string; content?: string }>,
@@ -306,6 +321,9 @@ function resolveScenarioVignetteAnchorForReferenceCard(
       if (detected?.label === targetLabel) {
         return { anchorIdx: i, anchorScenario: detected };
       }
+    }
+    if (!transcriptShowsFictionalSituationBegun(assistantMessages, activeScenario)) {
+      return { anchorIdx: -1, anchorScenario: null };
     }
     return { anchorIdx: -1, anchorScenario: syntheticVignetteScenario(activeScenario) };
   }
@@ -517,6 +535,7 @@ export function syncReferenceCardStateFromAssistantMessages(
   if (personalCard) return personalCard;
   for (let i = assistantMessages.length - 1; i >= 0; i--) {
     const raw = stripControlTokens(assistantMessages[i].content ?? '').trim();
+    if (!raw || isShowScenarioExcludedAssistantText(raw)) continue;
     if (looksLikeMoment5AccountabilityProbeAssistantPrompt(raw)) {
       return {
         scenario: { label: MOMENT_4_PERSONAL_LABEL, text: MOMENT_5_ACCOUNTABILITY_PROBE_TEXT.trim() },
@@ -633,6 +652,12 @@ export function syncReferenceCardStateFromAssistantMessages(
   }
   if (prompt && isResumeOrScenarioReplayUiPrompt(prompt)) {
     prompt = getSituationOpeningQuestion(scenario);
+  }
+  if (prompt && isShowScenarioExcludedAssistantText(prompt)) {
+    prompt = getSituationOpeningQuestion(scenario);
+  }
+  if (scenario && isShowScenarioExcludedAssistantText(scenario.text)) {
+    return { scenario: null, prompt: null, phase: 'pre_scenario' };
   }
   return { scenario, prompt, phase: 'scenario_active' };
 }

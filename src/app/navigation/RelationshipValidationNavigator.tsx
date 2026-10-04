@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { Suspense, lazy, useMemo } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RouteProp } from '@react-navigation/native';
@@ -80,7 +81,7 @@ function ValidationAmoraeaScreen({ userId, navigation, route }: ValidationAmorae
     <Suspense
       fallback={
         <View style={ariaStyles.center}>
-          <ActivityIndicator size="large" color="#5BA8E8" />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
           <Text style={ariaStyles.text}>Loading interview…</Text>
         </View>
       }

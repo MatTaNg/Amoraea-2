@@ -10,9 +10,8 @@ import {
 import { SingleChoiceOptionList } from '@/shared/components/profileFields/SingleChoiceOptionList';
 import { EditProfileSubsectionTitle, EditProfileSection } from '@/screens/profile/editProfile/EditProfileUi';
 import { ep } from '@/screens/profile/editProfile/editProfileTheme';
-import { ONBOARDING_TYPOLOGY_DESCRIPTION } from '@/datingProfile/screens/onboarding/modals/onboardingStepCopy';
 
-const PLACEHOLDER = '— Skip —';
+const PLACEHOLDER = 'Skip';
 
 export function countTypologyFieldsFilled(value: TypologyPickerValue): {
   filled: number;
@@ -144,7 +143,7 @@ export function EditProfileTypologyView({
 
   return (
     <View>
-      <EditProfileSection first={first} title="Typology" description={ONBOARDING_TYPOLOGY_DESCRIPTION}>
+      <EditProfileSection first={first} title="Typology" >
       {TYPOLOGY_ONBOARDING_SECTIONS.map((section, idx) => (
         <View key={section.title} style={idx > 0 ? styles.sectionSpaced : undefined}>
           <EditProfileSubsectionTitle first={idx === 0}>{section.title}</EditProfileSubsectionTitle>

@@ -12,6 +12,7 @@ import {
   resolveScenarioModalPromptInScope,
   resolveScenarioModalDisplayParts,
   extractScenarioModalQuestionFromAssistantText,
+  showScenarioCardIsUserVisible,
   isShortAnswerOkForWhisperRatioGate,
   isSimpleYesNoInterviewMoment,
   looksLikeReadinessAffirmation,
@@ -25,6 +26,7 @@ import {
   shouldRecordInterviewResponseTiming,
 } from '../interviewLanguageGate';
 import { MOMENT_4_COMMITMENT_ORIENTATION_QUESTION_TEXT } from '../moment4ProbeLogic';
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '../moment5ProbeCopy';
 
 describe('isNamePromptInterviewMoment', () => {
   it('matches the standard opening line', () => {
@@ -559,6 +561,27 @@ describe('resolveScenarioModalDisplayParts', () => {
     });
   });
 
+  it('does not show the welcome or the are-you-ready line', () => {
+    const welcome =
+      "Welcome back, we'll pick up where we left off, we were in Scenario one and I just said What's going on between these two?";
+    const ready = "Great, I'm here. Are you ready to start with the first situation?";
+    expect(resolveScenarioModalDisplayParts(welcome, null)).toEqual({
+      transcript: '',
+      footerQuestion: null,
+    });
+    expect(resolveScenarioModalDisplayParts(ready, null)).toEqual({
+      transcript: '',
+      footerQuestion: null,
+    });
+    expect(resolveScenarioModalDisplayParts('Are you ready?', opening)).toEqual({
+      transcript: '',
+      footerQuestion: null,
+    });
+    expect(showScenarioCardIsUserVisible(welcome, opening)).toBe(false);
+    expect(showScenarioCardIsUserVisible(ready, null)).toBe(false);
+    expect(showScenarioCardIsUserVisible(vignette, opening)).toBe(true);
+  });
+
   it('strips footer question from body when prompt is provided separately', () => {
     expect(resolveScenarioModalDisplayParts(`${vignette}\n\n${opening}`, opening)).toEqual({
       transcript: vignette,
@@ -639,6 +662,11 @@ describe('isScenarioModalEligibleScenarioQuestionPrompt', () => {
     expect(
       isScenarioModalEligibleScenarioQuestionPrompt(
         "Good to meet you, Matt. The way this works is I'll first give you three situations. Are you ready?",
+      ),
+    ).toBe(false);
+    expect(
+      isScenarioModalEligibleScenarioQuestionPrompt(
+        "Great, I'm here. Are you ready to start with the first situation?",
       ),
     ).toBe(false);
   });
@@ -788,6 +816,43 @@ describe('resolveMoment4ShowScenarioReferenceCard', () => {
     ).toEqual({
       active: true,
       cardBodyText: supportProbe,
+    });
+  });
+
+  it('keeps a paraphrased stress prompt on the card instead of an earlier commitment question', () => {
+    const stress =
+      'Think of a time when someone close to you was really stressed or going through something hard. What did you do?';
+    const welcome = `Welcome back, we'll pick up where we left off, we were in the personal part of the interview and I just said ${stress}`;
+    const transcript = [
+      { role: 'assistant', content: orientationProbe },
+      { role: 'user', content: 'I stayed because I cared.' },
+      { role: 'assistant', content: `Good work. ${stress}` },
+    ];
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(transcript, { grudgeCardBody }),
+    ).toEqual({ active: true, cardBodyText: stress });
+    expect(
+      resolveMoment4ShowScenarioReferenceCard(transcript, {
+        grudgeCardBody,
+        currentSpokenContent: welcome,
+      }),
+    ).toEqual({ active: true, cardBodyText: stress });
+    expect(resolveScenarioModalDisplayParts(stress, null)).toEqual({
+      transcript: stress,
+      footerQuestion: null,
+    });
+  });
+
+  it('shows the scripted conflict question and drops the wrap-up transition', () => {
+    const spoken =
+      "Got it. Last one then we'll wrap up. Think of a time when you and someone close to you had a real conflict — something that actually got tense between you. What happened, and how did it get resolved?";
+    expect(resolveScenarioModalDisplayParts(spoken, null)).toEqual({
+      transcript: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT,
+      footerQuestion: null,
+    });
+    expect(resolveScenarioModalDisplayParts("Got it. Last one then we'll wrap up.", null)).toEqual({
+      transcript: '',
+      footerQuestion: null,
     });
   });
 });

@@ -6,13 +6,27 @@ import {
 import { normalizeInterviewTypography } from './interviewTypography';
 import { MOMENT_5_RESOLUTION_FOLLOWUP_TEXT } from '@features/aria/moment5ProbeCopy';
 
+/** Conflict-question paraphrases mention "between you" in the setup, not as the follow-up. */
+function textIsPrimaryConflictQuestionNotFollowUp(normalized: string): boolean {
+  const hasIntro =
+    /\bthink of a time\b/.test(normalized) &&
+    /\bconflict\b/.test(normalized) &&
+    /\b(?:someone (?:important|close)|important to you|close to you)\b/.test(normalized);
+  const hasAsk =
+    /\bhow did (?:it|things) get resolved\b/.test(normalized) ||
+    (/\bwhat happened\b/.test(normalized) && /\bresolved\b/.test(normalized));
+  return hasIntro && hasAsk;
+}
+
 export function looksLikeMoment5ResolutionFollowUpPrompt(text: string | null | undefined): boolean {
   const n = (text ?? '').replace(/\s+/g, ' ').trim().toLowerCase();
   if (!n) return false;
+  if (textIsPrimaryConflictQuestionNotFollowUp(n)) return false;
   if (n === MOMENT_5_RESOLUTION_FOLLOWUP_TEXT.toLowerCase()) return true;
   if (
-    /\bhow\s+did\s+it\s+get\s+resolved\b/i.test(n) &&
-    /\b(between\s+you\s+two|the\s+two\s+of\s+you|between\s+you)\b/i.test(n)
+    /\bhow\s+did\s+it\s+get\s+resolved\b[^\w]{0,8}(?:between\s+(?:you(?:\s+two)?|the\s+two\s+of\s+you)|the\s+two\s+of\s+you)\b/i.test(
+      n,
+    )
   ) {
     return true;
   }

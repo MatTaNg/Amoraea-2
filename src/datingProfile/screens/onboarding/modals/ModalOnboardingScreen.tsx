@@ -1,5 +1,5 @@
 import React, { useCallback } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import { StackActions, useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { DatingProfileStackParamList } from '@app/navigation/DatingProfileOnboardingNavigator';
 import { useAuth } from '@/shared/hooks/AuthProvider';
@@ -11,6 +11,12 @@ export const ModalOnboardingScreen: React.FC = () => {
   const { user } = useAuth();
 
   const handleComplete = () => {
+    const uid = user?.id;
+    const parent = navigation.getParent();
+    if (parent && uid) {
+      parent.dispatch(StackActions.replace('DatingProfileEdit', { userId: uid }));
+      return;
+    }
     navigation.replace('DatingProfileBuilder');
   };
 

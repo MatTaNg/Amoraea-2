@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -5,7 +6,6 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  ActivityIndicator,
   Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -122,7 +122,7 @@ export function ValidationConflictScreen({ navigation }: Props) {
   if (!pair || !shuffled || testModeLoading) {
     return (
       <View style={styles.overlay}>
-        <ActivityIndicator size="large" color="#5BA8E8" />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }
@@ -154,7 +154,7 @@ export function ValidationConflictScreen({ navigation }: Props) {
       </ScrollView>
       {saving ? (
         <View style={styles.overlay}>
-          <ActivityIndicator size="large" color="#fff" />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         </View>
       ) : null}
     </SafeAreaView>

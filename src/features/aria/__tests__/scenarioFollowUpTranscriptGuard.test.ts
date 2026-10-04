@@ -3,6 +3,8 @@ import {
   scenarioAMinimumEngagementForHandoff,
   scenarioOneFollowUpFlagsFromTranscript,
   shouldDeliverScenarioFollowUpQuestion,
+  isScenarioARepairFollowUpCompleteInTranscript,
+  shouldStillSpeakSituation2AfterIncompleteS1Engagement,
   stripPrematureScenarioABoundaryFromDraft,
   transcriptContainsScenarioAContemptProbe,
   transcriptContainsScenarioARepairQuestion,
@@ -71,6 +73,67 @@ describe('scenarioFollowUpTranscriptGuard', () => {
         shouldForceScenarioAContemptProbe: false,
         messagesToUse: msgs,
       }),
+    ).toBe(false);
+  });
+
+  it('still speaks Situation 2 when the close already started after a short repair answer', () => {
+    const msgs = [
+      contemptAssistant,
+      repairAssistant,
+      { role: 'user' as const, content: "Honey, honey, please try to understand, it's my mother." },
+    ];
+    const closingStream =
+      "Good work — that's the end of this scenario. Here's the next situation. Sarah and James have been together for two years.";
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
+    expect(
+      shouldStillSpeakSituation2AfterIncompleteS1Engagement({
+        messages: msgs,
+        fullStream: closingStream,
+        repairQuestionAsked: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldStillSpeakSituation2AfterIncompleteS1Engagement({
+        messages: msgs,
+        fullStream: closingStream,
+        repairQuestionAsked: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStillSpeakSituation2AfterIncompleteS1Engagement({
+        messages: msgs,
+        fullStream: 'What else do you notice?',
+        repairQuestionAsked: true,
+      }),
+    ).toBe(false);
+  });
+
+  it('does not speak the Ryan repair question again after a cut-off answer following the take-your-time ack', () => {
+    const msgs = [
+      contemptAssistant,
+      repairAssistant,
+      { role: 'assistant', content: 'Take your time — just say whatever comes to mind.' },
+      { role: 'user', content: "Honey, please understand, it's my moth-" },
+    ];
+    expect(isScenarioARepairFollowUpCompleteInTranscript(msgs)).toBe(true);
+    expect(
+      shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
+    ).toBe(false);
+  });
+
+  it('does not speak the Ryan repair question again after an in-character answer', () => {
+    const msgs = [
+      contemptAssistant,
+      repairAssistant,
+      {
+        role: 'assistant',
+        content: "I wasn't able to understand that — you may have gotten cut off. Can you try again?",
+      },
+      { role: 'user', content: "Honey, please understand, it's my mother." },
+    ];
+    expect(isScenarioARepairFollowUpCompleteInTranscript(msgs)).toBe(true);
+    expect(
+      shouldDeliverScenarioFollowUpQuestion(msgs, SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY),
     ).toBe(false);
   });
 
@@ -182,7 +245,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
   });
 
-  it('scenarioAMinimumEngagementForHandoff is true when Q1 already covers Emma clear-line contempt (repair retired)', () => {
+  it('scenarioAMinimumEngagementForHandoff stays false when Q1 only covers the Emma line', () => {
     const msgs = [
       {
         role: 'assistant',
@@ -198,15 +261,37 @@ describe('scenarioFollowUpTranscriptGuard', () => {
         interviewMoment: 1,
       },
     ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff is true after a long answer to the Ryan repair question', () => {
+    const msgs = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      { role: 'user', content: 'That sounds dismissive.' },
+      { role: 'assistant', content: SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY },
+      {
+        role: 'user',
+        content:
+          'Ryan, it might be a little difficult for Ryan because it sounds like this is something that he has on autopilot, kind of trained to do, always answer your family call. Changes take time and he would need to understand where Emma is coming from.',
+      },
+    ];
     expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
   });
 
-  it('scenarioAMinimumEngagementForHandoff is true after the contempt probe is answered', () => {
+  it('scenarioAMinimumEngagementForHandoff stays false after generic sit-down-and-talk advice', () => {
+    const msgs = [
+      { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
+      { role: 'user', content: 'I would suggest they sit down and talk.' },
+    ];
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
+  });
+
+  it('scenarioAMinimumEngagementForHandoff stays false after a contempt answer that does not repair', () => {
     const msgs = [
       { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY },
       { role: 'user', content: 'That sounds dismissive and contemptuous to me.' },
     ];
-    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(true);
+    expect(scenarioAMinimumEngagementForHandoff(msgs)).toBe(false);
   });
 
   it('scenarioAMinimumEngagementForHandoff is true after repair answer even when repair context finder misses', () => {
@@ -282,7 +367,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
     ).toBe(true);
   });
 
-  it('shouldAllowScenarioARepairAfterContemptAnswer is false when probe is retired', () => {
+  it('shouldAllowScenarioARepairAfterContemptAnswer is true while the Ryan repair question is active', () => {
     const msgs = [
       { role: 'user', content: 'q1' },
       { role: 'user', content: 'contempt answer' },
@@ -299,7 +384,7 @@ describe('scenarioFollowUpTranscriptGuard', () => {
         messagesToUse: msgs,
         lastDeliveredQuestionText: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('scenarioAMinimumEngagementForHandoff after stream-only contempt when answer includes repair substance', () => {

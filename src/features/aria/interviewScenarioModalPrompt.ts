@@ -1,4 +1,9 @@
-import { assessablePromptQuestionBody } from '@features/aria/interviewAssessablePromptText';
+import {
+  assessablePromptQuestionBody,
+  isShowScenarioTransitionLeadOnly,
+  personalScenarioPromptForRepeat,
+  stripShowScenarioTransitionLead,
+} from '@features/aria/interviewAssessablePromptText';
 import { isIrrelevantAnswerRetryAssistantLine } from '@features/aria/interviewAnswerRelevance';
 import { isClientOrElongatingInterviewProbeAssistant } from '@features/aria/interviewDisengagementProbes';
 import { isMisplacedScenarioMetaRedirectText } from '@features/aria/misplacedScenarioAnswerLogic';
@@ -10,6 +15,7 @@ import {
   isSimpleYesNoInterviewMoment,
 } from '@features/aria/interviewProceduralMoments';
 import { isIntroBriefingReadinessOnlySentence } from '@features/aria/interviewPreambleBriefing';
+import { isResumeWelcomeBackAssistantText } from '@utilities/interviewResumeCursor';
 import {
   isIncompleteMoment4OrientationLeadSentence,
   isIncompleteMoment4ThresholdLeadSentence,
@@ -33,6 +39,7 @@ import {
   spokenTextStartsMoment5PrimaryConflictQuestion,
   transcriptAssistantContainsMoment5PrimaryConflictQuestion,
 } from '@features/aria/probeAndScoringUtils';
+import { MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT } from '@features/aria/moment5ProbeCopy';
 import {
   coerceExactScenarioModalQuestionDisplay,
   isScenarioANonScriptedModalParaphrase,
@@ -277,6 +284,7 @@ export function getLastSubstantiveScenarioModalQuestion(
     if (turn.role !== 'assistant') continue;
     const content = (turn.content ?? '').trim();
     if (!content) continue;
+    if (isShowScenarioExcludedAssistantText(content)) continue;
     if (isInterviewPreambleBriefingMoment(content)) continue;
     if (isScenarioModalFollowUpProbe(content)) continue;
     if (isScenarioModalPureTransitionTurn(content)) continue;
@@ -335,6 +343,7 @@ export function resolveMoment4ShowScenarioReferenceCard(
 
   for (let i = assistantContents.length - 1; i >= 0; i--) {
     const content = assistantContents[i]!;
+    if (isShowScenarioExcludedAssistantText(content)) continue;
     if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(content)) {
       return { active: false };
     }
@@ -371,6 +380,10 @@ export function resolveMoment4ShowScenarioReferenceCard(
     }
     if (looksLikeMoment4GrudgePrompt(content)) {
       return { active: true, cardBodyText: grudgeCardBody };
+    }
+    const personalPrompt = personalScenarioPromptForRepeat(content);
+    if (personalPrompt) {
+      return { active: true, cardBodyText: personalPrompt };
     }
   }
   return { active: false };
@@ -470,6 +483,36 @@ export function isScenarioModalExcludedAssistantPrompt(text: string | null | und
 }
 
 /**
+ * Welcome-back, name collection, and "Are you ready?" lines are not a situation card.
+ * Show scenario must stay empty until the first scenario itself is speaking.
+ */
+export function isShowScenarioExcludedAssistantText(text: string | null | undefined): boolean {
+  const raw = (text ?? '').trim();
+  if (!raw) return false;
+  if (isResumeWelcomeBackAssistantText(raw) || isResumeReentryWelcomePrompt(raw)) return true;
+  if (isInterviewPreambleBriefingMoment(raw)) return true;
+  if (isIntroBriefingReadinessOnlySentence(raw)) return true;
+  if (isNamePromptInterviewMoment(raw)) return true;
+  if (/\bare you ready\b/i.test(raw)) return true;
+  if (/\bready to start with the first situation\b/i.test(raw)) return true;
+  return false;
+}
+
+/** True when the modal would show a real situation, not the intro or a resume greeting. */
+export function showScenarioCardIsUserVisible(
+  body: string | null | undefined,
+  prompt: string | null | undefined,
+): boolean {
+  if (isShowScenarioExcludedAssistantText(body)) return false;
+  const parts = resolveScenarioModalDisplayParts(body ?? '', prompt);
+  return (
+    parts.transcript.trim().length > 0 &&
+    !isShowScenarioExcludedAssistantText(parts.transcript) &&
+    !isShowScenarioExcludedAssistantText(parts.footerQuestion)
+  );
+}
+
+/**
  * True when the string is suitable as the scenario reference modal's "last question" line:
  * must read as an interrogative (contains `?`), must not be infra/recovery/error copy, and must
  * not be onboarding / resume / name-collection prompts unrelated to the vignette.
@@ -484,6 +527,7 @@ export function isScenarioModalEligibleScenarioQuestionPrompt(text: string | nul
   if (looksLikeMomentSupportConditionalProbe(raw)) return true;
   if (isScenarioModalFollowUpProbe(raw)) return false;
   if (isScenarioModalExcludedAssistantPrompt(raw)) return false;
+  if (isShowScenarioExcludedAssistantText(raw)) return false;
   if (isResumeReentryWelcomePrompt(raw)) return false;
   if (isNamePromptInterviewMoment(raw)) return false;
   // Opening briefing / "Are you ready?" must never become the Show scenario footer.
@@ -543,9 +587,13 @@ export function resolveScenarioModalDisplayParts(
   body: string,
   prompt: string | null | undefined
 ): ScenarioModalDisplayParts {
-  const rawBody = (body ?? '').trim();
-  if (!rawBody) {
+  const rawBody = stripShowScenarioTransitionLead(body ?? '');
+  if (!rawBody || isShowScenarioExcludedAssistantText(rawBody)) {
     return { transcript: '', footerQuestion: null };
+  }
+
+  if (transcriptAssistantContainsMoment5PrimaryConflictQuestion(rawBody)) {
+    return { transcript: MOMENT_5_ACCOUNTABILITY_QUESTION_TEXT, footerQuestion: null };
   }
 
   // Personal support prompts are the whole card. A period before the question must not
@@ -553,7 +601,8 @@ export function resolveScenarioModalDisplayParts(
   if (
     looksLikeMomentSupportQuestion(rawBody) ||
     looksLikeMomentSupportNoSituationHypothetical(rawBody) ||
-    looksLikeMomentSupportConditionalProbe(rawBody)
+    looksLikeMomentSupportConditionalProbe(rawBody) ||
+    personalScenarioPromptForRepeat(rawBody) === rawBody
   ) {
     return { transcript: rawBody, footerQuestion: null };
   }
@@ -574,6 +623,10 @@ export function resolveScenarioModalDisplayParts(
 
   if (!footerQuestion && bodyEndsWithQuestion && extractedFromBody) {
     footerQuestion = extractedFromBody;
+  }
+
+  if (footerQuestion && isShowScenarioExcludedAssistantText(footerQuestion)) {
+    footerQuestion = null;
   }
 
   if (!footerQuestion) {

@@ -159,13 +159,11 @@ export const INABILITY_RES: RegExp[] = [
   /\bi\s+don'?t\s+have\s+an\s+answer\b/i,
   /\bi\s+don'?t\s+know\s+what\s+to\s+say\b/i,
   /\bi\s+don'?t\s+know\s+how\s+to\s+answer\b/i,
-  /\bi'?m\s+not\s+sure\s+how\s+to\s+answer\b/i,
   /\bthat'?s\s+a\s+hard\s+one\b/i,
   /^\s*i'?m\s+not\s+sure\.?\s*$/i,
   /^\s*i'?m\s+not\s+quite\s+sure\.?\s*$/i,
   /^\s*i\s+don'?t\s+know\.?\s*$/i,
   /\bi\s+don'?t\s+know(?!\s+what\s+you\s+want)\b/i,
-  /\bi'?m\s+not\s+(?:quite\s+)?sure(?!\s+what\s+you'?re\s+asking)\b/i,
 ];
 
 /** Same patterns as {@link INABILITY_RES} minus the "that's a hard one" hedge (see {@link metaScores}). */

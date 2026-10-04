@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback } from 'react';
-import { ActivityIndicator, View, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { validationInstrumentsCompleted } from '@features/relationshipValidation/validationPsychometricsProgress';
 import {
@@ -41,7 +42,7 @@ export function ValidationPsychometricsHubScreen({ userId, navigation }: Props) 
 
   return (
     <View style={styles.center}>
-      <ActivityIndicator size="large" color="#5BA8E8" />
+      <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
     </View>
   );
 }

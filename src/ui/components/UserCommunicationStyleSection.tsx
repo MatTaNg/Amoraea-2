@@ -3,7 +3,7 @@
  */
 
 import React, { useEffect, useState, useRef } from 'react';
-import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet } from 'react-native';
 import { supabase } from '@data/supabase/client';
 import {
   STYLE_LABEL_TOOLTIPS,

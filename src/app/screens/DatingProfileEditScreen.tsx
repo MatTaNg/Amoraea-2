@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, {
   useCallback,
   useEffect,
@@ -7,6 +8,7 @@ import React, {
   useState,
 } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   ScrollView,
@@ -14,7 +16,6 @@ import {
   Pressable,
   Platform,
   TouchableOpacity,
-  ActivityIndicator,
   BackHandler,
 } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
@@ -1194,7 +1195,7 @@ export const DatingProfileEditScreen: React.FC<{
     >
       {profileFieldsLoading ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={ep.colors.flameMid} />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
           <Text style={styles.loadingText}>Loading your profile…</Text>
         </View>
       ) : profileLoadFailed ? (
@@ -1359,7 +1360,7 @@ export const DatingProfileEditScreen: React.FC<{
               />
               {birthLocationPlacesLoading ? (
                 <View style={styles.birthLocationSearchRow}>
-                  <ActivityIndicator size="small" color={ep.colors.flameMid} />
+                  <ActivityIndicator size="small" color="#5BA8E8" />
                   <Text style={styles.birthLocationSearchText}>Looking up places…</Text>
                 </View>
               ) : null}
@@ -1404,7 +1405,7 @@ export const DatingProfileEditScreen: React.FC<{
               <View style={[styles.input, styles.readOnlyBox]}>
                 {locationLoading ? (
                   <View style={styles.locInner}>
-                    <ActivityIndicator size="small" color={ep.colors.flameMid} />
+                    <ActivityIndicator size="small" color="#5BA8E8" />
                     <Text style={styles.readOnlyText}>Finding your location…</Text>
                   </View>
                 ) : (

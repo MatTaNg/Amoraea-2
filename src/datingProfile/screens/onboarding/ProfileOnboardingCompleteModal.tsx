@@ -36,9 +36,8 @@ export function ProfileOnboardingCompleteModal({ onContinue, continuing = false 
             <View style={styles.cardAccent} pointerEvents="none" />
             <Text style={styles.overline}>Profile complete</Text>
             <Text style={styles.title}>Your profile is complete</Text>
-            <Text style={styles.subtitle}>Your dating profile is set up.</Text>
             <Text style={styles.body}>
-              Review or refine anything on the next screen — you can update photos, preferences,
+              Review or refine anything on the next screen, you can update photos, preferences,
               and life domains anytime.
             </Text>
           </View>

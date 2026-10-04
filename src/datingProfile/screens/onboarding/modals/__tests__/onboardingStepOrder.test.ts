@@ -34,11 +34,15 @@ describe('onboardingStepOrder', () => {
     expect(lifeDomainsIdx).toBeGreaterThan(matchPrefsIdx);
   });
 
-  it('places profile prompts before profile complete', () => {
+  it('places profile prompts immediately after life domain priorities', () => {
+    const lifeDomainsIdx = ONBOARDING_STEPS_ORDER.indexOf('lifeDomains');
     const promptsIdx = ONBOARDING_STEPS_ORDER.indexOf('profilePrompts');
-    const completeIdx = ONBOARDING_STEPS_ORDER.indexOf('profileComplete');
-    expect(promptsIdx).toBeGreaterThan(-1);
-    expect(completeIdx).toBe(promptsIdx + 1);
+    expect(promptsIdx).toBe(lifeDomainsIdx + 1);
+  });
+
+  it('shows the optional-remainder note immediately before Relationships / Intimacy / Sex', () => {
+    expect(getNextOnboardingStep('profilePrompts')).toBe('lifeDomainOptionalIntro');
+    expect(getNextOnboardingStep('lifeDomainOptionalIntro')).toBe('lifeDomainOptional__intimacy');
   });
 
   it('advances from sexual focus to recent dating', () => {

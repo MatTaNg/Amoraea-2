@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { ActivityIndicator, View, Text, StyleSheet, Platform } from 'react-native';
 import {
   ASSESSMENT_ORDER,
   ASSESSMENTS,
@@ -251,7 +251,7 @@ export function PsychometricAnswersSection({
   }, [userId]);
 
   if (loading) {
-    return <ActivityIndicator color="#5BA8E8" style={{ marginVertical: 12 }} />;
+    return <ActivityIndicator size="small" color="#5BA8E8" style={{ marginVertical: 12 }} />;
   }
 
   if (error) {

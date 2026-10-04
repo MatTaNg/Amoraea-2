@@ -37,7 +37,6 @@ export const LongestRelationshipModal: React.FC<LongestRelationshipModalProps> =
           <SingleChoiceOptionList
             options={LONGEST_ROMANTIC_RELATIONSHIP_OPTIONS}
             value={value}
-            deferSelectUntilPaint
             onSelect={(v) => {
               onValueChange(v);
               onNext();

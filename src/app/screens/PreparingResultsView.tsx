@@ -1,21 +1,21 @@
 import React from 'react';
 import { View, Text, Platform, StyleSheet } from 'react-native';
 import { SafeAreaContainer } from '@ui/components/SafeAreaContainer';
-import { FlameOrb } from '@app/screens/FlameOrb';
+import { AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import { INTRO_FLAME_ORB_SIZE } from '@app/screens/flameOrbLogo';
 
 type Props = {
   subtitle?: string;
 };
 
-/** Full-screen flame + "Preparing your results" — no transcript or scoring UI. */
+/** Full-screen spinner + "Preparing your results" — no transcript or scoring UI. */
 export function PreparingResultsView({
   subtitle = 'Please keep this page open until this finishes, closing it may interrupt saving your results. This can take a few minutes.',
 }: Props) {
   return (
     <SafeAreaContainer style={styles.safeArea}>
       <View style={styles.container}>
-        <FlameOrb state="idle" size={INTRO_FLAME_ORB_SIZE} minimalGlow />
+        <AmoraeaLoadingSpinner size={INTRO_FLAME_ORB_SIZE} />
         <Text style={styles.title}>Interview complete</Text>
         <Text style={styles.preparing}>Preparing your results</Text>
         <Text style={styles.subtitle}>{subtitle}</Text>

@@ -105,7 +105,7 @@ export function WelcomeModal({
           label: 'Part 2 — Self Assessments',
           time: psychTimeLabel,
           description:
-            'Short questionnaires grounded in validated relationship science. There are no right or wrong answers — just answer honestly.',
+            'Short questionnaires grounded in validated relationship science, exploring how you relate with yourself.',
         },
       ]
     : [
@@ -173,8 +173,7 @@ export function WelcomeModal({
 
           <Text style={[styles.title, narrowViewport && styles.titleNarrow]}>Welcome to Amoraea</Text>
           <Text style={styles.subtitle}>
-            Before you can be matched, we need to get to know you. These assessments help us understand
-            how you show up in relationships and build a profile that reflects who you really are.
+            Amoraea requires all members of its community to pass a a two part assessment to make sure all members are committed to showing up fully, authentically and unapologetically.
           </Text>
 
           {parts.map((part) => (

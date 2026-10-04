@@ -32,12 +32,7 @@ export const SingleChoiceOptionList: React.FC<{
   options?: ChoiceOption[] | null;
   value: string;
   onSelect: (v: string) => void;
-  /**
-   * When true, defers `onSelect` until after the next paint so the selected row can
-   * highlight before parents auto-advance and unmount this list.
-   */
-  deferSelectUntilPaint?: boolean;
-}> = ({ options, value, onSelect, deferSelectUntilPaint = false }) => {
+}> = ({ options, value, onSelect }) => {
   const [hoveredValue, setHoveredValue] = useState<string | null>(null);
   const [pendingValue, setPendingValue] = useState<string | null>(null);
   const onSelectRef = useRef(onSelect);
@@ -52,12 +47,6 @@ export const SingleChoiceOptionList: React.FC<{
   const displayedValue = pendingValue ?? value;
 
   const emitSelect = (next: string) => {
-    if (deferSelectUntilPaint) {
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => onSelectRef.current(next));
-      });
-      return;
-    }
     onSelectRef.current(next);
   };
 

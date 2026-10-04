@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   View,
   Text,
@@ -7,7 +8,6 @@ import {
   StyleSheet,
   ScrollView,
   TextInput,
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Alert,
@@ -372,8 +372,8 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                     { value: '1 to 3 years', label: '1 to 3 years' },
                     { value: 'More than 3 years', label: 'More than 3 years' },
                     {
-                      value: "I'm not sure I've been looking seriously",
-                      label: "I'm not sure I've been looking seriously",
+                      value: "I have not been looking seriously",
+                      label: "I have not been looking seriously",
                     },
                   ] as const
                 ).map((option) => (
@@ -449,14 +449,12 @@ export function MarketResearchModal({ visible, userId, onComplete }: Props) {
                 </Text>
                 {(
                   [
-                    { value: '0', label: '$0' },
-                    { value: '1 - 100', label: '$1 – $100' },
-                    { value: '101 - 500', label: '$101 – $500' },
-                    { value: '501 - 1,000', label: '$501 – $1,000' },
-                    { value: '1,001 - 3,000', label: '$1,001 – $3,000' },
-                    { value: '3,001 - 5,000', label: '$3,001 – $5,000' },
-                    { value: '5,001 - 10,000', label: '$5,001 – $10,000' },
-                    { value: '10,000+', label: '$10,000+' },
+                    { value: '0', label: '0' },
+                    { value: '$1-$500', label: '$1-$500' },
+                    { value: '$501-$1,000', label: '$501-$1,000' },
+                    { value: '$1,000-$3,000', label: '$1,000-$3,000' },
+                    { value: '$3,000 - $10,000', label: '$3,000 - $10,000' },
+                    { value: '$10,000+', label: '$10,000+' },
                   ] as const
                 ).map((option) => (
                   <TouchableOpacity

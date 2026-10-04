@@ -1002,6 +1002,13 @@ describe('probeAndScoringUtils', () => {
     expect(transcriptAssistantContainsMoment5PrimaryConflictQuestion(paraphrase)).toBe(true);
   });
 
+  it('maps the you-and-someone-close conflict paraphrase to the scripted conflict question', () => {
+    const paraphrase =
+      "That makes a lot of sense. Last one, and then we'll wrap up. Think of a time when you and someone close to you had a real conflict — something that actually got tense between you. What happened, and how did it get resolved?";
+    expect(transcriptAssistantContainsMoment5PrimaryConflictQuestion(paraphrase)).toBe(true);
+    expect(spokenTextStartsMoment5PrimaryConflictQuestion(paraphrase)).toBe(true);
+  });
+
   it('spokenTextStartsMoment5PrimaryConflictQuestion matches first streaming sentence only', () => {
     expect(
       spokenTextStartsMoment5PrimaryConflictQuestion(

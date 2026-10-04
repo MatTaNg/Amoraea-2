@@ -1,3 +1,4 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -7,7 +8,6 @@ import {
   TouchableOpacity,
   Linking,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { TypologyRepository } from '@data/repositories/TypologyRepository';
@@ -348,7 +348,7 @@ export const TypologyDetailScreen: React.FC<{ navigation: any; route: any }> = (
       <View style={styles.flexFill}>
         {isLoading ? (
           <View style={styles.pageLoading}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
             <Text style={styles.loadingText}>Loading…</Text>
           </View>
         ) : (
@@ -374,7 +374,7 @@ export const TypologyDetailScreen: React.FC<{ navigation: any; route: any }> = (
             accessibilityRole="progressbar"
             accessibilityLabel="Saving typology"
           >
-            <ActivityIndicator size="large" color="#FFFFFF" />
+            <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
             <Text style={styles.savingOverlayHint}>Saving…</Text>
           </View>
         )}

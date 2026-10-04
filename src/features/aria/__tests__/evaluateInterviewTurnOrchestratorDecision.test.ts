@@ -141,6 +141,33 @@ describe('evaluateInterviewTurnOrchestratorDecision', () => {
     expect(getCanonicalProbeText('s1_repair')).toBe(SCENARIO_A_REPAIR_QUESTION_AFTER_CONTEMPT_COPY);
   });
 
+  it('asks the Scenario 1 repair question after generic sit-down-and-talk advice', () => {
+    const contemptAnswer = 'I would suggest they sit down and talk.';
+    const decision = evaluateInterviewTurnOrchestratorDecision({
+      snapshot: baseSnapshot({
+        currentInterviewMoment: 1,
+        currentScenario: 1,
+        lastAssistantContent: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        lastQuestionText: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY,
+        userText: contemptAnswer,
+      }),
+      messages: [
+        { role: 'assistant', content: SCENARIO_A_CONTEMPT_PROBE_DELIVERED_COPY, scenarioNumber: 1 },
+        { role: 'user', content: contemptAnswer, scenarioNumber: 1 },
+      ],
+      constructFlags: {
+        ...baseConstructFlags(),
+        allowScenarioARepairAfterContemptAnswer: true,
+      },
+      metaCommentClassification: null,
+    });
+    expect(decision.action).toEqual({
+      kind: 'speak_canonical',
+      probeId: 's1_repair',
+      withBriefAck: true,
+    });
+  });
+
   it('does not skip Scenario 1 repair when the question was never spoken', () => {
     const contemptAnswer = 'Probably very frustrating for her.';
     const decision = evaluateInterviewTurnOrchestratorDecision({

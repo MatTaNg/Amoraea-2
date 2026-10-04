@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, Pressable, ActivityIndicator, StyleSheet, Platform } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { showSimpleAlert } from '@utilities/alerts/confirmDialog';
@@ -87,7 +87,7 @@ export function ValidationFlowOptInCard({ userId, returnRoute }: Props) {
         accessibilityLabel="Start compatibility comparison"
       >
         {busy ? (
-          <ActivityIndicator color="#fff" size="small" />
+          <ActivityIndicator size="small" color="#fff" />
         ) : (
           <Text style={styles.buttonLabel}>Start compatibility comparison</Text>
         )}

@@ -1,5 +1,6 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { DatingProfileStackParamList } from '@app/navigation/DatingProfileOnboardingNavigator';
@@ -54,7 +55,7 @@ export function ProfileSetupTransitionScreen() {
   if (checkingResume) {
     return (
       <View style={styles.loading}>
-        <ActivityIndicator size="large" color={theme.colors.primary} />
+        <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
       </View>
     );
   }

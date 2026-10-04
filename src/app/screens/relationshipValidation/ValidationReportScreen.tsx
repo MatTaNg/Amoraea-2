@@ -1,12 +1,13 @@
+import { AMORAEA_PAGE_LOADING_SIZE, AmoraeaLoadingSpinner } from '@app/screens/AmoraeaLoadingSpinner';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
   TextInput,
-  ActivityIndicator,
   Image,
   Platform,
   TouchableOpacity,
@@ -347,7 +348,7 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
         accessibilityLabel="Back to application review"
       >
         {exitingToStandardApp ? (
-          <ActivityIndicator color="#5BA8E8" size="small" />
+          <ActivityIndicator size="small" color="#5BA8E8" />
         ) : (
           <Text style={styles.backToPostInterviewLinkText}>← Back to application review</Text>
         )}
@@ -506,7 +507,7 @@ export function ValidationReportScreen({ userId, navigation }: Props) {
       <SafeAreaContainer style={[styles.safeBg, styles.safeRelative]}>
         {logOutButton}
         <View style={styles.loading}>
-          <ActivityIndicator size="large" color="#5BA8E8" />
+          <AmoraeaLoadingSpinner size={AMORAEA_PAGE_LOADING_SIZE} />
         </View>
       </SafeAreaContainer>
     );

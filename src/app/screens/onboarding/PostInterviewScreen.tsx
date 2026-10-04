@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   StyleSheet,
   Text,
@@ -8,7 +9,6 @@ import {
   Platform,
   Animated,
   Easing,
-  ActivityIndicator,
 } from 'react-native';
 import { PostInterviewScrollLayout } from '@app/screens/onboarding/PostInterviewScrollLayout';
 import { Ionicons } from '@expo/vector-icons';
@@ -513,7 +513,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
 
           {!launchContactPrefsLoaded ? (
             <View style={styles.launchPrefsPlaceholder} accessibilityLabel="Loading">
-              <ActivityIndicator color={ACCENT} />
+              <ActivityIndicator size="small" color="#5BA8E8" />
             </View>
           ) : submitted ? (
             <View style={styles.confirmBox}>
@@ -577,7 +577,7 @@ export const PostInterviewScreen: React.FC<{ navigation: any; route: { params: {
               ]}
             >
               {retakeBusy ? (
-                <ActivityIndicator color="#93c5fd" />
+                <ActivityIndicator size="small" color="#93c5fd" />
               ) : (
                 <Text style={styles.retakeButtonLabel}>Retake test</Text>
               )}

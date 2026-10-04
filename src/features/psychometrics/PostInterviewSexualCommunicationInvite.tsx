@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, Pressable, StyleSheet, Platform, ActivityIndicator } from 'react-native';
+import { ActivityIndicator, View, Text, Pressable, StyleSheet, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import {
@@ -64,7 +64,7 @@ export function PostInterviewSexualCommunicationInvite({ userId, onStart, onStat
   if (loading) {
     return (
       <View style={styles.loadingWrap}>
-        <ActivityIndicator color={ACCENT} />
+        <ActivityIndicator size="small" color="#5BA8E8" />
       </View>
     );
   }
