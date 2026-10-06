@@ -234,18 +234,6 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     Boolean(email.trim()) &&
     (needsEmailConfirmation || resendSent);
 
-  const switchLoginMode = (mode: LoginMode) => {
-    if (mode === loginMode) return;
-    setLoginMode(mode);
-    setError(null);
-    setResendError(null);
-    setResendSent(false);
-    setVerifyError(null);
-    setNeedsOtp(false);
-    setNeedsEmailConfirmation(false);
-    setPhoneE164(null);
-  };
-
   const onEmailEnterAction = () => {
     if (!password) {
       passwordInputRef.current?.focus();
@@ -294,29 +282,6 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             </View>
 
             <Text style={[authStyles.tagline, styles.taglineTight]}>Enter to continue your journey.</Text>
-
-            {TEMP_EMAIL_LOGIN_ON_MAIN_SCREEN ? (
-              <View style={styles.modeRow}>
-                <Pressable
-                  testID="login-mode-email"
-                  onPress={() => switchLoginMode('email')}
-                  style={[styles.modeChip, loginMode === 'email' && styles.modeChipActive]}
-                >
-                  <Text style={[styles.modeChipText, loginMode === 'email' && styles.modeChipTextActive]}>
-                    Email
-                  </Text>
-                </Pressable>
-                <Pressable
-                  testID="login-mode-phone"
-                  onPress={() => switchLoginMode('phone')}
-                  style={[styles.modeChip, loginMode === 'phone' && styles.modeChipActive]}
-                >
-                  <Text style={[styles.modeChipText, loginMode === 'phone' && styles.modeChipTextActive]}>
-                    Phone
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null}
 
             {loginMode === 'email' && !needsOtp ? (
               <>
@@ -480,17 +445,12 @@ export const LoginScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               </Pressable>
             ) : null}
 
-            {loginMode === 'phone' ? (
+            {loginMode === 'phone' && !TEMP_EMAIL_LOGIN_ON_MAIN_SCREEN ? (
               <Text style={styles.tempHint}>
                 Need to attach a phone to an existing email account?{' '}
                 <Text style={authStyles.link} onPress={() => navigation.navigate('LinkPhone')}>
                   Link phone
                 </Text>
-              </Text>
-            ) : TEMP_EMAIL_LOGIN_ON_MAIN_SCREEN ? (
-              <Text style={styles.tempHint}>
-                Phone sign-in is available once SMS verification is enabled. You can link a phone later from
-                account settings.
               </Text>
             ) : null}
 

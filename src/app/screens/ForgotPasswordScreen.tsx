@@ -14,6 +14,8 @@ import {
   useAuth,
 } from '@features/authentication/hooks/useAuth';
 import { getAuthSmsSendErrorMessage } from '@features/authentication/authPhoneErrors';
+import { isValidRegisterEmail } from '@features/authentication/registerFormValidation';
+import { TEMP_EMAIL_AUTH_WHILE_TWILIO_PENDING } from '@features/authentication/tempEmailAuthWhileTwilioPending';
 import {
   isValidAuthPhoneInput,
   normalizeAuthPhoneE164,
@@ -31,6 +33,8 @@ export const ForgotPasswordScreen: React.FC<{ navigation: { navigate: (route: st
   navigation,
 }) => {
   const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [emailSent, setEmailSent] = useState(false);
   const [phoneE164, setPhoneE164] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -43,7 +47,25 @@ export const ForgotPasswordScreen: React.FC<{ navigation: { navigate: (route: st
   const [resendError, setResendError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const lastSubmitMsRef = useRef(0);
-  const { sendPhonePasswordResetOtp, resetPasswordWithPhoneOtp } = useAuth();
+  const { sendPhonePasswordResetOtp, resetPasswordWithPhoneOtp, resetPasswordForEmail } = useAuth();
+
+  const handleSendEmailReset = async () => {
+    if (loading) return;
+    if (!isValidRegisterEmail(email)) {
+      setError('Please enter a valid email address.');
+      return;
+    }
+    setError(null);
+    setLoading(true);
+    try {
+      await resetPasswordForEmail(email.trim());
+      setEmailSent(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
@@ -164,7 +186,53 @@ export const ForgotPasswordScreen: React.FC<{ navigation: { navigate: (route: st
               </View>
             </View>
 
-            {done ? (
+            {TEMP_EMAIL_AUTH_WHILE_TWILIO_PENDING ? (
+              emailSent ? (
+                <>
+                  <Text style={authStyles.sentScreenTitle}>Check your email</Text>
+                  <Text style={[authStyles.sentScreenBody, styles.sentBodySpacing]}>
+                    We sent a link to {email.trim()}. Open it to choose a new password, then sign in with your email.
+                  </Text>
+                  <Pressable
+                    onPress={() => navigation.navigate('Login')}
+                    style={[authStyles.primaryButton, styles.button]}
+                  >
+                    <Text style={authStyles.primaryButtonText}>Back to sign in</Text>
+                  </Pressable>
+                </>
+              ) : (
+                <>
+                  <Text style={[authStyles.tagline, styles.taglineTight]}>
+                    Enter your email and we&apos;ll send you a link to reset your password.
+                  </Text>
+                  <TextInput
+                    testID="forgot-password-email-input"
+                    placeholder="Email"
+                    placeholderTextColor="#5B6B80"
+                    value={email}
+                    onChangeText={setEmail}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoComplete="email"
+                    autoCorrect={false}
+                    returnKeyType="go"
+                    style={authStyles.input}
+                    onSubmitEditing={() => void handleSendEmailReset()}
+                  />
+                  {error ? <Text style={authStyles.errorText}>{error}</Text> : null}
+                  <Pressable
+                    testID="forgot-password-submit-button"
+                    onPress={() => void handleSendEmailReset()}
+                    disabled={loading}
+                    style={[authStyles.primaryButton, styles.button]}
+                  >
+                    <Text style={authStyles.primaryButtonText}>
+                      {loading ? '...' : 'Send reset link'}
+                    </Text>
+                  </Pressable>
+                </>
+              )
+            ) : done ? (
               <>
                 <Text style={authStyles.sentScreenTitle}>Password updated</Text>
                 <Text style={[authStyles.sentScreenBody, styles.sentBodySpacing]}>
@@ -255,7 +323,7 @@ export const ForgotPasswordScreen: React.FC<{ navigation: { navigate: (route: st
               </>
             )}
 
-            {!done ? (
+            {!done && !emailSent ? (
               <Text style={authStyles.footerText}>
                 <Text style={authStyles.link} onPress={() => navigation.navigate('Login')}>
                   ← Back to sign in
